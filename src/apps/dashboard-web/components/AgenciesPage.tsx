@@ -2,6 +2,16 @@ import type React from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiClient } from "../lib/api";
 
+type NamedAgent = {
+	identity: string;
+	role: string | null;
+	provider: string | null;
+	live: boolean | null;
+	last_heartbeat_at: string | null;
+	skills: unknown;
+	in_flight: number | string | null;
+};
+
 type AgencyRow = {
 	agency_id: string;
 	display_name: string | null;
@@ -24,6 +34,13 @@ type AgencyRow = {
 	sequence_gap_count: number | string;
 	route_providers: string[];
 	severities: string[];
+	// roster + liaison metadata (agency-grouped roster view)
+	is_liaison: boolean;
+	named_agents: NamedAgent[];
+	liaison_models: string[];
+	liaison_route_model: string | null;
+	liaison_live: boolean;
+	agency_live: boolean;
 };
 
 type AgencyClaim = {
@@ -61,14 +78,6 @@ type ClaimEvent = {
 	payload: Record<string, unknown>;
 };
 
-const STATUS_COLORS: Record<string, string> = {
-	active: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",
-	throttled: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300",
-	paused: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300",
-	dormant: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
-	offline: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300",
-};
-
 function asArray<T>(value: unknown): T[] {
 	return Array.isArray(value) ? (value as T[]) : [];
 }
@@ -79,8 +88,20 @@ function asNumber(value: string | number | null | undefined): number {
 	return 0;
 }
 
+function skillCount(skills: unknown): number {
+	if (Array.isArray(skills)) return skills.length;
+	if (skills && typeof skills === "object") return Object.keys(skills).length;
+	return 0;
+}
+
+function skillLabels(skills: unknown): string[] {
+	if (Array.isArray(skills)) return skills.map((s) => String(s));
+	if (skills && typeof skills === "object") return Object.keys(skills);
+	return [];
+}
+
 function ageLabel(date: string | null): string {
-	if (!date) return "none";
+	if (!date) return "never";
 	const seconds = Math.max(0, Math.floor((Date.now() - new Date(date).getTime()) / 1000));
 	if (seconds < 60) return `${seconds}s`;
 	if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
@@ -88,32 +109,35 @@ function ageLabel(date: string | null): string {
 	return `${Math.floor(seconds / 86400)}d`;
 }
 
-function CapacityBars({ windows }: { windows: unknown }) {
-	const items = asArray<Record<string, unknown>>(windows).slice(0, 4);
-	if (items.length === 0) {
-		return <div className="text-xs text-gray-500">No capacity windows</div>;
-	}
+// Heartbeat-derived presence. Three states so a down liaison with live workers
+// is visible rather than hidden behind a green/red binary.
+type Presence = "live" | "stale" | "dead";
+
+function PresenceDot({ presence, title }: { presence: Presence; title?: string }) {
+	const color =
+		presence === "live"
+			? "bg-green-500"
+			: presence === "stale"
+				? "bg-amber-500"
+				: "bg-gray-400";
 	return (
-		<div className="space-y-2">
-			{items.map((window, index) => {
-				const limit = asNumber(window.limit as string | number | null) || 1;
-				const used = asNumber((window.used ?? window.consumed) as string | number | null);
-				const label = String(window.name ?? window.window ?? `window ${index + 1}`);
-				const pct = Math.min(Math.max((used / limit) * 100, 0), 100);
-				return (
-					<div key={`${label}-${JSON.stringify(window)}`}>
-						<div className="mb-1 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
-							<span className="truncate">{label}</span>
-							<span className="tabular-nums">{used}/{limit}</span>
-						</div>
-						<div className="h-1.5 overflow-hidden rounded bg-gray-200 dark:bg-gray-700">
-							<div className="h-full bg-sky-500" style={{ width: `${pct}%` }} />
-						</div>
-					</div>
-				);
-			})}
-		</div>
+		<span
+			title={title}
+			className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${color}`}
+		/>
 	);
+}
+
+function memberPresence(a: NamedAgent): Presence {
+	return a.live === true ? "live" : "dead";
+}
+
+function agencyDisplayName(agency: AgencyRow): string {
+	if (agency.display_name && agency.display_name.trim().length > 0) {
+		return agency.display_name;
+	}
+	// strip the trailing ".a" liaison suffix for the human-facing agency name
+	return agency.agency_id.replace(/\.a$/, "");
 }
 
 const AgenciesPage: React.FC = () => {
@@ -122,6 +146,8 @@ const AgenciesPage: React.FC = () => {
 	const [error, setError] = useState<string | null>(null);
 	const [filters, setFilters] = useState({ proposal: "", agency: "", route: "", severity: "" });
 	const [expanded, setExpanded] = useState<string | null>(null);
+	const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
+	const [showInactive, setShowInactive] = useState(false);
 	const [actionError, setActionError] = useState<string | null>(null);
 
 	const fetchData = useCallback(async () => {
@@ -135,6 +161,8 @@ const AgenciesPage: React.FC = () => {
 				claim_timeline: asArray<ClaimEvent>(row.claim_timeline),
 				route_providers: asArray<string>(row.route_providers),
 				severities: asArray<string>(row.severities),
+				named_agents: asArray<NamedAgent>(row.named_agents),
+				liaison_models: asArray<string>(row.liaison_models),
 			}) as AgencyRow));
 		} catch (err) {
 			console.error("Failed to fetch agencies:", err);
@@ -152,16 +180,22 @@ const AgenciesPage: React.FC = () => {
 
 	const filterOptions = useMemo(() => {
 		const routes = new Set<string>();
-		const severities = new Set<string>();
 		for (const agency of agencies) {
 			for (const route of agency.route_providers) routes.add(route);
-			for (const severity of agency.severities) severities.add(severity);
 		}
-		return {
-			routes: [...routes].sort(),
-			severities: [...severities].sort(),
-		};
+		return { routes: [...routes].sort() };
 	}, [agencies]);
+
+	// Only agency-parents (liaisons) are cards. Order live agencies first.
+	const liaisonAgencies = useMemo(() => {
+		return agencies
+			.filter((a) => a.is_liaison)
+			.filter((a) => showInactive || a.agency_live || a.named_agents.length > 0)
+			.sort((a, b) => {
+				if (a.agency_live !== b.agency_live) return a.agency_live ? -1 : 1;
+				return agencyDisplayName(a).localeCompare(agencyDisplayName(b));
+			});
+	}, [agencies, showInactive]);
 
 	const sendAction = async (agencyId: string, action: AgencyAction, claimId?: string | number) => {
 		try {
@@ -194,21 +228,15 @@ const AgenciesPage: React.FC = () => {
 	}
 
 	return (
-		<div className="mx-auto max-w-7xl px-4 py-6">
+		<div className="mx-auto max-w-3xl px-4 py-6">
 			<div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
 				<div>
 					<h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">Agencies</h1>
 					<div className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-						{agencies.length} visible agencies
+						{liaisonAgencies.length} {showInactive ? "" : "live "}agencies · liveness from heartbeat
 					</div>
 				</div>
 				<div className="grid grid-cols-2 gap-2 lg:flex lg:items-center">
-					<input
-						placeholder="Proposal"
-						value={filters.proposal}
-						onChange={(e) => setFilters((f) => ({ ...f, proposal: e.target.value }))}
-						className="rounded border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900"
-					/>
 					<input
 						placeholder="Agency"
 						value={filters.agency}
@@ -223,58 +251,142 @@ const AgenciesPage: React.FC = () => {
 						<option value="">All routes</option>
 						{filterOptions.routes.map((route) => <option key={route} value={route}>{route}</option>)}
 					</select>
-					<select
-						value={filters.severity}
-						onChange={(e) => setFilters((f) => ({ ...f, severity: e.target.value }))}
-						className="rounded border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900"
-					>
-						<option value="">All severities</option>
-						{filterOptions.severities.map((severity) => <option key={severity} value={severity}>{severity}</option>)}
-					</select>
+					<label className="col-span-2 flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300 lg:col-span-1">
+						<input
+							type="checkbox"
+							checked={showInactive}
+							onChange={(e) => setShowInactive(e.target.checked)}
+						/>
+						show inactive
+					</label>
 				</div>
 			</div>
 
 			{actionError && <div className="mb-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{actionError}</div>}
 
-			<div className="grid gap-4 xl:grid-cols-2">
-				{agencies.map((agency) => {
-					const status = agency.status?.toLowerCase() || "dormant";
-					const oldestAge = ageLabel(agency.oldest_open_assistance_at);
+			<div className="space-y-4">
+				{liaisonAgencies.length === 0 && (
+					<div className="rounded-lg border border-gray-200 bg-white p-6 text-center text-sm text-gray-500 dark:border-gray-800 dark:bg-gray-900">
+						No live agencies. Toggle “show inactive” to see dormant ones.
+					</div>
+				)}
+				{liaisonAgencies.map((agency) => {
 					const isExpanded = expanded === agency.agency_id;
+					const liaisonPresence: Presence = agency.liaison_live
+						? "live"
+						: agency.agency_live
+							? "stale"
+							: "dead";
+					const liveMembers = agency.named_agents.filter((a) => a.live === true).length;
+					const totalInFlight = agency.named_agents.reduce(
+						(sum, a) => sum + asNumber(a.in_flight),
+						0,
+					);
 					return (
 						<section key={agency.agency_id} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+							{/* Agency header — the liaison and its heartbeat presence = agency liveness */}
 							<div className="flex items-start justify-between gap-3">
 								<div className="min-w-0">
 									<div className="flex items-center gap-2">
+										<PresenceDot presence={liaisonPresence} title={`liaison ${liaisonPresence}`} />
 										<h2 className="truncate text-lg font-semibold text-gray-900 dark:text-gray-100">
-											{agency.display_name || agency.agency_id}
+											{agencyDisplayName(agency)}
 										</h2>
-										<span className={`rounded px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[status] ?? STATUS_COLORS.dormant}`}>
-											{status}
+										<span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+											{agency.provider ?? "unknown"}
 										</span>
 									</div>
 									<div className="mt-1 truncate text-sm text-gray-500 dark:text-gray-400">
-										{agency.agency_id} · {agency.provider ?? "unknown"} · {agency.host_id ?? "no host"}
+										liaison {agency.agency_id} · {agency.host_id ?? "no host"} ·{" "}
+										{agency.liaison_live
+											? `heartbeat ${ageLabel(agency.last_heartbeat_at)} ago`
+											: agency.agency_live
+												? `liaison down (${ageLabel(agency.last_heartbeat_at)}), workers live`
+												: `offline (${ageLabel(agency.last_heartbeat_at)})`}
 									</div>
 								</div>
 								<button
 									type="button"
 									onClick={() => setExpanded(isExpanded ? null : agency.agency_id)}
-									className="rounded border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700"
+									className="shrink-0 rounded border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700"
 								>
 									{isExpanded ? "Close" : "Details"}
 								</button>
 							</div>
 
-							<div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+							<div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+								<Metric label="named agents" value={agency.named_agents.length} />
+								<Metric label="live now" value={liveMembers} />
+								<Metric label="in flight" value={totalInFlight} />
 								<Metric label="free slots" value={asNumber(agency.free_claim_slots)} />
-								<Metric label="in flight" value={asNumber(agency.in_flight_claims)} />
-								<Metric label="assistance" value={asNumber(agency.open_assistance)} />
-								<Metric label="oldest" value={oldestAge} />
 							</div>
 
+							{/* Named agents roster */}
 							<div className="mt-4">
-								<CapacityBars windows={agency.capacity_windows} />
+								<h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+									Named agents
+								</h3>
+								{agency.named_agents.length === 0 ? (
+									<div className="text-sm text-gray-500">No permanent named agents assigned</div>
+								) : (
+									<div className="divide-y divide-gray-100 dark:divide-gray-800">
+										{agency.named_agents.map((member) => {
+											const agentKey = `${agency.agency_id}::${member.identity}`;
+											const open = expandedAgent === agentKey;
+											return (
+												<div key={agentKey} className="py-2">
+													<button
+														type="button"
+														onClick={() => setExpandedAgent(open ? null : agentKey)}
+														className="flex w-full items-center gap-2 text-left"
+													>
+														<PresenceDot presence={memberPresence(member)} />
+														<span className="font-medium text-gray-900 dark:text-gray-100">
+															{member.identity}
+														</span>
+														<span className="text-xs text-gray-500 dark:text-gray-400">
+															{member.role ?? "agent"}
+														</span>
+														<span className="ml-auto flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
+															{asNumber(member.in_flight) > 0 && (
+																<span className="rounded bg-sky-100 px-1.5 py-0.5 font-medium text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
+																	{asNumber(member.in_flight)} in flight
+																</span>
+															)}
+															<span>{member.live ? "live" : ageLabel(member.last_heartbeat_at)}</span>
+															<span className="text-gray-400">{skillCount(member.skills)} skills</span>
+														</span>
+													</button>
+													{open && (
+														<div className="mt-2 pl-4 text-sm">
+															<div className="text-gray-500 dark:text-gray-400">
+																provider: {member.provider ?? "—"} · last heartbeat:{" "}
+																{member.last_heartbeat_at
+																	? `${ageLabel(member.last_heartbeat_at)} ago`
+																	: "never"}{" "}
+																· workload: {asNumber(member.in_flight)} in flight
+															</div>
+															<div className="mt-1">
+																<span className="text-gray-500 dark:text-gray-400">capabilities: </span>
+																{skillLabels(member.skills).length === 0 ? (
+																	<span className="text-gray-400">none recorded</span>
+																) : (
+																	<span className="flex flex-wrap gap-1 pt-1">
+																		{skillLabels(member.skills).map((s) => (
+																			<span key={s} className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+																				{s}
+																			</span>
+																		))}
+																	</span>
+																)}
+															</div>
+														</div>
+													)}
+												</div>
+											);
+										})}
+									</div>
+								)}
 							</div>
 
 							<div className="mt-4 flex flex-wrap gap-2">
@@ -286,6 +398,30 @@ const AgenciesPage: React.FC = () => {
 
 							{isExpanded && (
 								<div className="mt-5 space-y-5 border-t border-gray-200 pt-4 dark:border-gray-800">
+									{/* Liaison capabilities + models */}
+									<div>
+										<h3 className="mb-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
+											Liaison · {agency.provider ?? "unknown"} models &amp; capabilities
+										</h3>
+										<div className="text-sm text-gray-600 dark:text-gray-300">
+											<div>
+												route model:{" "}
+												<span className="font-medium">{agency.liaison_route_model ?? "—"}</span>
+											</div>
+											<div className="mt-1">supported models:</div>
+											{agency.liaison_models.length === 0 ? (
+												<div className="text-gray-400">none recorded on this liaison</div>
+											) : (
+												<div className="mt-1 flex flex-wrap gap-1">
+													{agency.liaison_models.map((m) => (
+														<span key={m} className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+															{m}
+														</span>
+													))}
+												</div>
+											)}
+										</div>
+									</div>
 									<div className="grid grid-cols-3 gap-3 text-sm">
 										<Metric label="rejects" value={asNumber(agency.recent_rejects)} />
 										<Metric label="unacked old" value={asNumber(agency.unacked_old)} />
@@ -381,7 +517,7 @@ function AssistanceList({ requests }: { requests: AssistanceRequest[] }) {
 function Timeline({ events }: { events: ClaimEvent[] }) {
 	return (
 		<div>
-			<h3 className="mb-2 text-sm font-semibold text-gray-900 dark:text-gray-100">Claim timeline</h3>
+			<h3 className="mb-2 text-sm font-semibold text-gray-900 dark:text-gray-100">Work history (last 24h)</h3>
 			{events.length === 0 ? (
 				<div className="text-sm text-gray-500">No progress_note or claim_status events in the last 24h</div>
 			) : (

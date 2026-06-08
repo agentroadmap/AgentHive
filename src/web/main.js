@@ -176182,13 +176182,6 @@ var ActivityFeed_default = ActivityFeed;
 // src/apps/dashboard-web/components/AgenciesPage.tsx
 var import_react5 = __toESM(require_react(), 1);
 var jsx_dev_runtime4 = __toESM(require_jsx_dev_runtime(), 1);
-var STATUS_COLORS = {
-  active: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",
-  throttled: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300",
-  paused: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300",
-  dormant: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
-  offline: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300"
-};
 function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
@@ -176199,9 +176192,23 @@ function asNumber(value) {
     return Number(value) || 0;
   return 0;
 }
+function skillCount(skills) {
+  if (Array.isArray(skills))
+    return skills.length;
+  if (skills && typeof skills === "object")
+    return Object.keys(skills).length;
+  return 0;
+}
+function skillLabels(skills) {
+  if (Array.isArray(skills))
+    return skills.map((s) => String(s));
+  if (skills && typeof skills === "object")
+    return Object.keys(skills);
+  return [];
+}
 function ageLabel(date) {
   if (!date)
-    return "none";
+    return "never";
   const seconds = Math.max(0, Math.floor((Date.now() - new Date(date).getTime()) / 1000));
   if (seconds < 60)
     return `${seconds}s`;
@@ -176211,51 +176218,21 @@ function ageLabel(date) {
     return `${Math.floor(seconds / 3600)}h`;
   return `${Math.floor(seconds / 86400)}d`;
 }
-function CapacityBars({ windows }) {
-  const items = asArray(windows).slice(0, 4);
-  if (items.length === 0) {
-    return /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
-      className: "text-xs text-gray-500",
-      children: "No capacity windows"
-    }, undefined, false, undefined, this);
-  }
-  return /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
-    className: "space-y-2",
-    children: items.map((window2, index) => {
-      const limit = asNumber(window2.limit) || 1;
-      const used = asNumber(window2.used ?? window2.consumed);
-      const label = String(window2.name ?? window2.window ?? `window ${index + 1}`);
-      const pct = Math.min(Math.max(used / limit * 100, 0), 100);
-      return /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
-        children: [
-          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
-            className: "mb-1 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400",
-            children: [
-              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
-                className: "truncate",
-                children: label
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
-                className: "tabular-nums",
-                children: [
-                  used,
-                  "/",
-                  limit
-                ]
-              }, undefined, true, undefined, this)
-            ]
-          }, undefined, true, undefined, this),
-          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
-            className: "h-1.5 overflow-hidden rounded bg-gray-200 dark:bg-gray-700",
-            children: /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
-              className: "h-full bg-sky-500",
-              style: { width: `${pct}%` }
-            }, undefined, false, undefined, this)
-          }, undefined, false, undefined, this)
-        ]
-      }, `${label}-${JSON.stringify(window2)}`, true, undefined, this);
-    })
+function PresenceDot({ presence, title }) {
+  const color = presence === "live" ? "bg-green-500" : presence === "stale" ? "bg-amber-500" : "bg-gray-400";
+  return /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+    title,
+    className: `inline-block h-2.5 w-2.5 shrink-0 rounded-full ${color}`
   }, undefined, false, undefined, this);
+}
+function memberPresence(a) {
+  return a.live === true ? "live" : "dead";
+}
+function agencyDisplayName(agency) {
+  if (agency.display_name && agency.display_name.trim().length > 0) {
+    return agency.display_name;
+  }
+  return agency.agency_id.replace(/\.a$/, "");
 }
 var AgenciesPage = () => {
   const [agencies, setAgencies] = import_react5.useState([]);
@@ -176263,6 +176240,8 @@ var AgenciesPage = () => {
   const [error, setError] = import_react5.useState(null);
   const [filters, setFilters] = import_react5.useState({ proposal: "", agency: "", route: "", severity: "" });
   const [expanded, setExpanded] = import_react5.useState(null);
+  const [expandedAgent, setExpandedAgent] = import_react5.useState(null);
+  const [showInactive, setShowInactive] = import_react5.useState(false);
   const [actionError, setActionError] = import_react5.useState(null);
   const fetchData = import_react5.useCallback(async () => {
     try {
@@ -176274,7 +176253,9 @@ var AgenciesPage = () => {
         assistance: asArray(row.assistance),
         claim_timeline: asArray(row.claim_timeline),
         route_providers: asArray(row.route_providers),
-        severities: asArray(row.severities)
+        severities: asArray(row.severities),
+        named_agents: asArray(row.named_agents),
+        liaison_models: asArray(row.liaison_models)
       })));
     } catch (err) {
       console.error("Failed to fetch agencies:", err);
@@ -176290,18 +176271,19 @@ var AgenciesPage = () => {
   }, [fetchData]);
   const filterOptions = import_react5.useMemo(() => {
     const routes = new Set;
-    const severities = new Set;
     for (const agency of agencies) {
       for (const route of agency.route_providers)
         routes.add(route);
-      for (const severity of agency.severities)
-        severities.add(severity);
     }
-    return {
-      routes: [...routes].sort(),
-      severities: [...severities].sort()
-    };
+    return { routes: [...routes].sort() };
   }, [agencies]);
+  const liaisonAgencies = import_react5.useMemo(() => {
+    return agencies.filter((a) => a.is_liaison).filter((a) => showInactive || a.agency_live || a.named_agents.length > 0).sort((a, b) => {
+      if (a.agency_live !== b.agency_live)
+        return a.agency_live ? -1 : 1;
+      return agencyDisplayName(a).localeCompare(agencyDisplayName(b));
+    });
+  }, [agencies, showInactive]);
   const sendAction = async (agencyId, action, claimId) => {
     try {
       setActionError(null);
@@ -176337,7 +176319,7 @@ var AgenciesPage = () => {
     }, undefined, true, undefined, this);
   }
   return /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
-    className: "mx-auto max-w-7xl px-4 py-6",
+    className: "mx-auto max-w-3xl px-4 py-6",
     children: [
       /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
         className: "mb-5 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between",
@@ -176351,8 +176333,10 @@ var AgenciesPage = () => {
               /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
                 className: "mt-1 text-sm text-gray-500 dark:text-gray-400",
                 children: [
-                  agencies.length,
-                  " visible agencies"
+                  liaisonAgencies.length,
+                  " ",
+                  showInactive ? "" : "live ",
+                  "agencies · liveness from heartbeat"
                 ]
               }, undefined, true, undefined, this)
             ]
@@ -176360,12 +176344,6 @@ var AgenciesPage = () => {
           /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
             className: "grid grid-cols-2 gap-2 lg:flex lg:items-center",
             children: [
-              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("input", {
-                placeholder: "Proposal",
-                value: filters.proposal,
-                onChange: (e) => setFilters((f) => ({ ...f, proposal: e.target.value })),
-                className: "rounded border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900"
-              }, undefined, false, undefined, this),
               /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("input", {
                 placeholder: "Agency",
                 value: filters.agency,
@@ -176387,19 +176365,15 @@ var AgenciesPage = () => {
                   }, route, false, undefined, this))
                 ]
               }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("select", {
-                value: filters.severity,
-                onChange: (e) => setFilters((f) => ({ ...f, severity: e.target.value })),
-                className: "rounded border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900",
+              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("label", {
+                className: "col-span-2 flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300 lg:col-span-1",
                 children: [
-                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("option", {
-                    value: "",
-                    children: "All severities"
+                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("input", {
+                    type: "checkbox",
+                    checked: showInactive,
+                    onChange: (e) => setShowInactive(e.target.checked)
                   }, undefined, false, undefined, this),
-                  filterOptions.severities.map((severity) => /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("option", {
-                    value: severity,
-                    children: severity
-                  }, severity, false, undefined, this))
+                  "show inactive"
                 ]
               }, undefined, true, undefined, this)
             ]
@@ -176411,138 +176385,288 @@ var AgenciesPage = () => {
         children: actionError
       }, undefined, false, undefined, this),
       /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
-        className: "grid gap-4 xl:grid-cols-2",
-        children: agencies.map((agency) => {
-          const status = agency.status?.toLowerCase() || "dormant";
-          const oldestAge = ageLabel(agency.oldest_open_assistance_at);
-          const isExpanded = expanded === agency.agency_id;
-          return /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("section", {
-            className: "rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900",
-            children: [
-              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
-                className: "flex items-start justify-between gap-3",
-                children: [
-                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
-                    className: "min-w-0",
-                    children: [
-                      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
-                        className: "flex items-center gap-2",
-                        children: [
-                          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("h2", {
-                            className: "truncate text-lg font-semibold text-gray-900 dark:text-gray-100",
-                            children: agency.display_name || agency.agency_id
-                          }, undefined, false, undefined, this),
-                          /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
-                            className: `rounded px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[status] ?? STATUS_COLORS.dormant}`,
-                            children: status
-                          }, undefined, false, undefined, this)
-                        ]
-                      }, undefined, true, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
-                        className: "mt-1 truncate text-sm text-gray-500 dark:text-gray-400",
-                        children: [
-                          agency.agency_id,
-                          " · ",
-                          agency.provider ?? "unknown",
-                          " · ",
-                          agency.host_id ?? "no host"
-                        ]
-                      }, undefined, true, undefined, this)
-                    ]
-                  }, undefined, true, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("button", {
-                    type: "button",
-                    onClick: () => setExpanded(isExpanded ? null : agency.agency_id),
-                    className: "rounded border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700",
-                    children: isExpanded ? "Close" : "Details"
-                  }, undefined, false, undefined, this)
-                ]
-              }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
-                className: "mt-4 grid grid-cols-2 gap-3 md:grid-cols-4",
-                children: [
-                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Metric, {
-                    label: "free slots",
-                    value: asNumber(agency.free_claim_slots)
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Metric, {
-                    label: "in flight",
-                    value: asNumber(agency.in_flight_claims)
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Metric, {
-                    label: "assistance",
-                    value: asNumber(agency.open_assistance)
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Metric, {
-                    label: "oldest",
-                    value: oldestAge
-                  }, undefined, false, undefined, this)
-                ]
-              }, undefined, true, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
-                className: "mt-4",
-                children: /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(CapacityBars, {
-                  windows: agency.capacity_windows
-                }, undefined, false, undefined, this)
-              }, undefined, false, undefined, this),
-              /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
-                className: "mt-4 flex flex-wrap gap-2",
-                children: [
-                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(ActionButton, {
-                    onClick: () => sendAction(agency.agency_id, "liaison_pause"),
-                    children: "pause"
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(ActionButton, {
-                    onClick: () => sendAction(agency.agency_id, "liaison_resume"),
-                    children: "resume"
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(ActionButton, {
-                    onClick: () => sendAction(agency.agency_id, "liaison_drain"),
-                    children: "drain"
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(ActionButton, {
-                    danger: true,
-                    onClick: () => sendAction(agency.agency_id, "agency_retire"),
-                    children: "retire"
-                  }, undefined, false, undefined, this)
-                ]
-              }, undefined, true, undefined, this),
-              isExpanded && /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
-                className: "mt-5 space-y-5 border-t border-gray-200 pt-4 dark:border-gray-800",
-                children: [
-                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
-                    className: "grid grid-cols-3 gap-3 text-sm",
-                    children: [
-                      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Metric, {
-                        label: "rejects",
-                        value: asNumber(agency.recent_rejects)
-                      }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Metric, {
-                        label: "unacked old",
-                        value: asNumber(agency.unacked_old)
-                      }, undefined, false, undefined, this),
-                      /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Metric, {
-                        label: "sequence gaps",
-                        value: asNumber(agency.sequence_gap_count)
-                      }, undefined, false, undefined, this)
-                    ]
-                  }, undefined, true, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(ClaimList, {
-                    claims: agency.active_claims,
-                    onRevoke: (claimId) => sendAction(agency.agency_id, "claim_revoke", claimId)
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(AssistanceList, {
-                    requests: agency.assistance
-                  }, undefined, false, undefined, this),
-                  /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Timeline, {
-                    events: agency.claim_timeline
-                  }, undefined, false, undefined, this)
-                ]
-              }, undefined, true, undefined, this)
-            ]
-          }, agency.agency_id, true, undefined, this);
-        })
-      }, undefined, false, undefined, this)
+        className: "space-y-4",
+        children: [
+          liaisonAgencies.length === 0 && /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+            className: "rounded-lg border border-gray-200 bg-white p-6 text-center text-sm text-gray-500 dark:border-gray-800 dark:bg-gray-900",
+            children: "No live agencies. Toggle “show inactive” to see dormant ones."
+          }, undefined, false, undefined, this),
+          liaisonAgencies.map((agency) => {
+            const isExpanded = expanded === agency.agency_id;
+            const liaisonPresence = agency.liaison_live ? "live" : agency.agency_live ? "stale" : "dead";
+            const liveMembers = agency.named_agents.filter((a) => a.live === true).length;
+            const totalInFlight = agency.named_agents.reduce((sum, a) => sum + asNumber(a.in_flight), 0);
+            return /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("section", {
+              className: "rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900",
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                  className: "flex items-start justify-between gap-3",
+                  children: [
+                    /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                      className: "min-w-0",
+                      children: [
+                        /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                          className: "flex items-center gap-2",
+                          children: [
+                            /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(PresenceDot, {
+                              presence: liaisonPresence,
+                              title: `liaison ${liaisonPresence}`
+                            }, undefined, false, undefined, this),
+                            /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("h2", {
+                              className: "truncate text-lg font-semibold text-gray-900 dark:text-gray-100",
+                              children: agencyDisplayName(agency)
+                            }, undefined, false, undefined, this),
+                            /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+                              className: "rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300",
+                              children: agency.provider ?? "unknown"
+                            }, undefined, false, undefined, this)
+                          ]
+                        }, undefined, true, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                          className: "mt-1 truncate text-sm text-gray-500 dark:text-gray-400",
+                          children: [
+                            "liaison ",
+                            agency.agency_id,
+                            " · ",
+                            agency.host_id ?? "no host",
+                            " ·",
+                            " ",
+                            agency.liaison_live ? `heartbeat ${ageLabel(agency.last_heartbeat_at)} ago` : agency.agency_live ? `liaison down (${ageLabel(agency.last_heartbeat_at)}), workers live` : `offline (${ageLabel(agency.last_heartbeat_at)})`
+                          ]
+                        }, undefined, true, undefined, this)
+                      ]
+                    }, undefined, true, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("button", {
+                      type: "button",
+                      onClick: () => setExpanded(isExpanded ? null : agency.agency_id),
+                      className: "shrink-0 rounded border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700",
+                      children: isExpanded ? "Close" : "Details"
+                    }, undefined, false, undefined, this)
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                  className: "mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4",
+                  children: [
+                    /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Metric, {
+                      label: "named agents",
+                      value: agency.named_agents.length
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Metric, {
+                      label: "live now",
+                      value: liveMembers
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Metric, {
+                      label: "in flight",
+                      value: totalInFlight
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Metric, {
+                      label: "free slots",
+                      value: asNumber(agency.free_claim_slots)
+                    }, undefined, false, undefined, this)
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                  className: "mt-4",
+                  children: [
+                    /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("h3", {
+                      className: "mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400",
+                      children: "Named agents"
+                    }, undefined, false, undefined, this),
+                    agency.named_agents.length === 0 ? /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                      className: "text-sm text-gray-500",
+                      children: "No permanent named agents assigned"
+                    }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                      className: "divide-y divide-gray-100 dark:divide-gray-800",
+                      children: agency.named_agents.map((member) => {
+                        const agentKey = `${agency.agency_id}::${member.identity}`;
+                        const open = expandedAgent === agentKey;
+                        return /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                          className: "py-2",
+                          children: [
+                            /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("button", {
+                              type: "button",
+                              onClick: () => setExpandedAgent(open ? null : agentKey),
+                              className: "flex w-full items-center gap-2 text-left",
+                              children: [
+                                /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(PresenceDot, {
+                                  presence: memberPresence(member)
+                                }, undefined, false, undefined, this),
+                                /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+                                  className: "font-medium text-gray-900 dark:text-gray-100",
+                                  children: member.identity
+                                }, undefined, false, undefined, this),
+                                /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+                                  className: "text-xs text-gray-500 dark:text-gray-400",
+                                  children: member.role ?? "agent"
+                                }, undefined, false, undefined, this),
+                                /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+                                  className: "ml-auto flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400",
+                                  children: [
+                                    asNumber(member.in_flight) > 0 && /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+                                      className: "rounded bg-sky-100 px-1.5 py-0.5 font-medium text-sky-700 dark:bg-sky-900/40 dark:text-sky-300",
+                                      children: [
+                                        asNumber(member.in_flight),
+                                        " in flight"
+                                      ]
+                                    }, undefined, true, undefined, this),
+                                    /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+                                      children: member.live ? "live" : ageLabel(member.last_heartbeat_at)
+                                    }, undefined, false, undefined, this),
+                                    /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+                                      className: "text-gray-400",
+                                      children: [
+                                        skillCount(member.skills),
+                                        " skills"
+                                      ]
+                                    }, undefined, true, undefined, this)
+                                  ]
+                                }, undefined, true, undefined, this)
+                              ]
+                            }, undefined, true, undefined, this),
+                            open && /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                              className: "mt-2 pl-4 text-sm",
+                              children: [
+                                /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                                  className: "text-gray-500 dark:text-gray-400",
+                                  children: [
+                                    "provider: ",
+                                    member.provider ?? "—",
+                                    " · last heartbeat:",
+                                    " ",
+                                    member.last_heartbeat_at ? `${ageLabel(member.last_heartbeat_at)} ago` : "never",
+                                    " ",
+                                    "· workload: ",
+                                    asNumber(member.in_flight),
+                                    " in flight"
+                                  ]
+                                }, undefined, true, undefined, this),
+                                /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                                  className: "mt-1",
+                                  children: [
+                                    /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+                                      className: "text-gray-500 dark:text-gray-400",
+                                      children: "capabilities: "
+                                    }, undefined, false, undefined, this),
+                                    skillLabels(member.skills).length === 0 ? /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+                                      className: "text-gray-400",
+                                      children: "none recorded"
+                                    }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+                                      className: "flex flex-wrap gap-1 pt-1",
+                                      children: skillLabels(member.skills).map((s) => /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+                                        className: "rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300",
+                                        children: s
+                                      }, s, false, undefined, this))
+                                    }, undefined, false, undefined, this)
+                                  ]
+                                }, undefined, true, undefined, this)
+                              ]
+                            }, undefined, true, undefined, this)
+                          ]
+                        }, agentKey, true, undefined, this);
+                      })
+                    }, undefined, false, undefined, this)
+                  ]
+                }, undefined, true, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                  className: "mt-4 flex flex-wrap gap-2",
+                  children: [
+                    /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(ActionButton, {
+                      onClick: () => sendAction(agency.agency_id, "liaison_pause"),
+                      children: "pause"
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(ActionButton, {
+                      onClick: () => sendAction(agency.agency_id, "liaison_resume"),
+                      children: "resume"
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(ActionButton, {
+                      onClick: () => sendAction(agency.agency_id, "liaison_drain"),
+                      children: "drain"
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(ActionButton, {
+                      danger: true,
+                      onClick: () => sendAction(agency.agency_id, "agency_retire"),
+                      children: "retire"
+                    }, undefined, false, undefined, this)
+                  ]
+                }, undefined, true, undefined, this),
+                isExpanded && /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                  className: "mt-5 space-y-5 border-t border-gray-200 pt-4 dark:border-gray-800",
+                  children: [
+                    /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                      children: [
+                        /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("h3", {
+                          className: "mb-2 text-sm font-semibold text-gray-900 dark:text-gray-100",
+                          children: [
+                            "Liaison · ",
+                            agency.provider ?? "unknown",
+                            " models & capabilities"
+                          ]
+                        }, undefined, true, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                          className: "text-sm text-gray-600 dark:text-gray-300",
+                          children: [
+                            /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                              children: [
+                                "route model:",
+                                " ",
+                                /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+                                  className: "font-medium",
+                                  children: agency.liaison_route_model ?? "—"
+                                }, undefined, false, undefined, this)
+                              ]
+                            }, undefined, true, undefined, this),
+                            /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                              className: "mt-1",
+                              children: "supported models:"
+                            }, undefined, false, undefined, this),
+                            agency.liaison_models.length === 0 ? /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                              className: "text-gray-400",
+                              children: "none recorded on this liaison"
+                            }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                              className: "mt-1 flex flex-wrap gap-1",
+                              children: agency.liaison_models.map((m) => /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("span", {
+                                className: "rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300",
+                                children: m
+                              }, m, false, undefined, this))
+                            }, undefined, false, undefined, this)
+                          ]
+                        }, undefined, true, undefined, this)
+                      ]
+                    }, undefined, true, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
+                      className: "grid grid-cols-3 gap-3 text-sm",
+                      children: [
+                        /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Metric, {
+                          label: "rejects",
+                          value: asNumber(agency.recent_rejects)
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Metric, {
+                          label: "unacked old",
+                          value: asNumber(agency.unacked_old)
+                        }, undefined, false, undefined, this),
+                        /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Metric, {
+                          label: "sequence gaps",
+                          value: asNumber(agency.sequence_gap_count)
+                        }, undefined, false, undefined, this)
+                      ]
+                    }, undefined, true, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(ClaimList, {
+                      claims: agency.active_claims,
+                      onRevoke: (claimId) => sendAction(agency.agency_id, "claim_revoke", claimId)
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(AssistanceList, {
+                      requests: agency.assistance
+                    }, undefined, false, undefined, this),
+                    /* @__PURE__ */ jsx_dev_runtime4.jsxDEV(Timeline, {
+                      events: agency.claim_timeline
+                    }, undefined, false, undefined, this)
+                  ]
+                }, undefined, true, undefined, this)
+              ]
+            }, agency.agency_id, true, undefined, this);
+          })
+        ]
+      }, undefined, true, undefined, this)
     ]
   }, undefined, true, undefined, this);
 };
@@ -176669,7 +176793,7 @@ function Timeline({ events: events2 }) {
     children: [
       /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("h3", {
         className: "mb-2 text-sm font-semibold text-gray-900 dark:text-gray-100",
-        children: "Claim timeline"
+        children: "Work history (last 24h)"
       }, undefined, false, undefined, this),
       events2.length === 0 ? /* @__PURE__ */ jsx_dev_runtime4.jsxDEV("div", {
         className: "text-sm text-gray-500",
@@ -181848,7 +181972,7 @@ var ControlPage_default = ControlPage;
 // src/apps/dashboard-web/components/DispatchPage.tsx
 var import_react20 = __toESM(require_react(), 1);
 var jsx_dev_runtime20 = __toESM(require_jsx_dev_runtime(), 1);
-var STATUS_COLORS2 = {
+var STATUS_COLORS = {
   assigned: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
   active: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
   blocked: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
@@ -182160,7 +182284,7 @@ var DispatchPage = () => {
                         /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("td", {
                           className: "px-4 py-2",
                           children: /* @__PURE__ */ jsx_dev_runtime20.jsxDEV("span", {
-                            className: `inline-block px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS2[d.dispatch_status] ?? "bg-gray-100 text-gray-800"}`,
+                            className: `inline-block px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[d.dispatch_status] ?? "bg-gray-100 text-gray-800"}`,
                             children: d.dispatch_status
                           }, undefined, false, undefined, this)
                         }, undefined, false, undefined, this),
@@ -185750,7 +185874,7 @@ function vbnet(Prism) {
   });
 }
 
-// node_modules/hastscript/node_modules/property-information/lib/util/schema.js
+// node_modules/refractor/node_modules/property-information/lib/util/schema.js
 class Schema {
   constructor(property, normal, space) {
     this.property = property;
@@ -185764,7 +185888,7 @@ Schema.prototype.property = {};
 Schema.prototype.normal = {};
 Schema.prototype.space = null;
 
-// node_modules/hastscript/node_modules/property-information/lib/util/merge.js
+// node_modules/refractor/node_modules/property-information/lib/util/merge.js
 function merge(definitions, space) {
   const property = {};
   const normal = {};
@@ -185776,12 +185900,12 @@ function merge(definitions, space) {
   return new Schema(property, normal, space);
 }
 
-// node_modules/hastscript/node_modules/property-information/lib/normalize.js
+// node_modules/refractor/node_modules/property-information/lib/normalize.js
 function normalize(value) {
   return value.toLowerCase();
 }
 
-// node_modules/hastscript/node_modules/property-information/lib/util/info.js
+// node_modules/refractor/node_modules/property-information/lib/util/info.js
 class Info {
   constructor(property, attribute) {
     this.property = property;
@@ -185799,7 +185923,7 @@ Info.prototype.commaOrSpaceSeparated = false;
 Info.prototype.mustUseProperty = false;
 Info.prototype.defined = false;
 
-// node_modules/hastscript/node_modules/property-information/lib/util/types.js
+// node_modules/refractor/node_modules/property-information/lib/util/types.js
 var exports_types = {};
 __export(exports_types, {
   spaceSeparated: () => spaceSeparated,
@@ -185822,7 +185946,7 @@ function increment() {
   return 2 ** ++powers;
 }
 
-// node_modules/hastscript/node_modules/property-information/lib/util/defined-info.js
+// node_modules/refractor/node_modules/property-information/lib/util/defined-info.js
 var checks = Object.keys(exports_types);
 
 class DefinedInfo extends Info {
@@ -185845,7 +185969,7 @@ function mark(values, key, value) {
   }
 }
 
-// node_modules/hastscript/node_modules/property-information/lib/util/create.js
+// node_modules/refractor/node_modules/property-information/lib/util/create.js
 var own2 = {}.hasOwnProperty;
 function create(definition) {
   const property = {};
@@ -185866,7 +185990,7 @@ function create(definition) {
   return new Schema(property, normal, definition.space);
 }
 
-// node_modules/hastscript/node_modules/property-information/lib/xlink.js
+// node_modules/refractor/node_modules/property-information/lib/xlink.js
 var xlink = create({
   space: "xlink",
   transform(_, prop) {
@@ -185883,7 +186007,7 @@ var xlink = create({
   }
 });
 
-// node_modules/hastscript/node_modules/property-information/lib/xml.js
+// node_modules/refractor/node_modules/property-information/lib/xml.js
 var xml = create({
   space: "xml",
   transform(_, prop) {
@@ -185892,17 +186016,17 @@ var xml = create({
   properties: { xmlLang: null, xmlBase: null, xmlSpace: null }
 });
 
-// node_modules/hastscript/node_modules/property-information/lib/util/case-sensitive-transform.js
+// node_modules/refractor/node_modules/property-information/lib/util/case-sensitive-transform.js
 function caseSensitiveTransform(attributes, attribute) {
   return attribute in attributes ? attributes[attribute] : attribute;
 }
 
-// node_modules/hastscript/node_modules/property-information/lib/util/case-insensitive-transform.js
+// node_modules/refractor/node_modules/property-information/lib/util/case-insensitive-transform.js
 function caseInsensitiveTransform(attributes, property) {
   return caseSensitiveTransform(attributes, property.toLowerCase());
 }
 
-// node_modules/hastscript/node_modules/property-information/lib/xmlns.js
+// node_modules/refractor/node_modules/property-information/lib/xmlns.js
 var xmlns = create({
   space: "xmlns",
   attributes: { xmlnsxlink: "xmlns:xlink" },
@@ -185910,7 +186034,7 @@ var xmlns = create({
   properties: { xmlns: null, xmlnsXLink: null }
 });
 
-// node_modules/hastscript/node_modules/property-information/lib/aria.js
+// node_modules/refractor/node_modules/property-information/lib/aria.js
 var aria = create({
   transform(_, prop) {
     return prop === "role" ? prop : "aria-" + prop.slice(4).toLowerCase();
@@ -185968,7 +186092,7 @@ var aria = create({
   }
 });
 
-// node_modules/hastscript/node_modules/property-information/lib/html.js
+// node_modules/refractor/node_modules/property-information/lib/html.js
 var html = create({
   space: "html",
   attributes: {
@@ -186275,7 +186399,7 @@ var html = create({
   }
 });
 
-// node_modules/hastscript/node_modules/property-information/lib/svg.js
+// node_modules/refractor/node_modules/property-information/lib/svg.js
 var svg = create({
   space: "svg",
   attributes: {
@@ -186833,7 +186957,7 @@ var svg = create({
   }
 });
 
-// node_modules/hastscript/node_modules/property-information/lib/find.js
+// node_modules/refractor/node_modules/property-information/lib/find.js
 var valid = /^data[-\w.:]+$/i;
 var dash = /-[a-z]/g;
 var cap = /[A-Z]/g;
@@ -186868,11 +186992,11 @@ function kebab($0) {
 function camelcase($0) {
   return $0.charAt(1).toUpperCase();
 }
-// node_modules/hastscript/node_modules/property-information/index.js
+// node_modules/refractor/node_modules/property-information/index.js
 var html2 = merge([xml, xlink, xmlns, aria, html], "html");
 var svg2 = merge([xml, xlink, xmlns, aria, svg], "svg");
 
-// node_modules/hast-util-parse-selector/lib/index.js
+// node_modules/refractor/node_modules/hast-util-parse-selector/lib/index.js
 var search = /[#.]/g;
 function parseSelector(selector, defaultTagName) {
   const value = selector || "";
@@ -186944,7 +187068,7 @@ function stringify2(values, options) {
   return input.join((settings.padRight ? " " : "") + "," + (settings.padLeft === false ? "" : " ")).trim();
 }
 
-// node_modules/hastscript/lib/core.js
+// node_modules/refractor/node_modules/hastscript/lib/core.js
 var buttonTypes = new Set(["menu", "submit", "reset", "button"]);
 var own3 = {}.hasOwnProperty;
 function core(schema, defaultTagName, caseSensitive) {
@@ -187085,7 +187209,7 @@ function createAdjustMap(values) {
   return result;
 }
 
-// node_modules/hastscript/lib/html.js
+// node_modules/refractor/node_modules/hastscript/lib/html.js
 var h = core(html2, "div");
 // node_modules/character-entities-legacy/index.js
 var characterEntitiesLegacy = [

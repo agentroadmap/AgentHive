@@ -4796,6 +4796,86 @@ export class RoadmapServer {
 				}
 			}
 
+			// Agency roster + liaison metadata, keyed by agency_id (the liaison
+			// identity). An "agency" is a roadmap.agency row that is registered as
+			// an agency-parent in the workforce registry (agent_type='agency').
+			// Its named agents are registry rows whose agency_id self-FK points at
+			// that parent and that carry an agency_style (the permanent named
+			// roster — this excludes the hundreds of ephemeral per-task session
+			// identities, which have agency_style NULL). Member presence comes from
+			// each agent's own heartbeat row in roadmap.agency under the
+			// <style>.<identity>.a convention; workload is its in-flight dispatch
+			// count. None of this touches the shared v_agency_dashboard view.
+			const roster = new Map<
+				string,
+				{
+					is_liaison: boolean;
+					named_agents: unknown[];
+					liaison_models: string[];
+					liaison_route_model: string | null;
+				}
+			>();
+			if (agencyIds.length > 0) {
+				const rosterRows = await query<{
+					agency_id: string;
+					named_agents: unknown[] | null;
+					supported_models: string[] | null;
+					route_model: string | null;
+				}>(
+					`WITH members AS (
+					   SELECT parent.agent_identity AS agency_id,
+					          jsonb_agg(jsonb_build_object(
+					            'identity', m.agent_identity,
+					            'role', m.role,
+					            'provider', m.agency_style,
+					            'live', (ma.last_heartbeat_at > now() - interval '60 seconds'),
+					            'last_heartbeat_at', ma.last_heartbeat_at,
+					            'skills', m.skills,
+					            'in_flight', COALESCE(wl.in_flight, 0)
+					          ) ORDER BY (ma.last_heartbeat_at > now() - interval '60 seconds') DESC NULLS LAST,
+					                     m.agent_identity) AS named_agents
+					     FROM roadmap_workforce.agent_registry m
+					     JOIN roadmap_workforce.agent_registry parent
+					       ON parent.id = m.agency_id AND parent.agent_type = 'agency'
+					     LEFT JOIN roadmap.agency ma
+					       ON ma.agency_id = m.agency_style || '.' || m.agent_identity || '.a'
+					     LEFT JOIN LATERAL (
+					       SELECT count(*) AS in_flight
+					         FROM roadmap_workforce.squad_dispatch sd
+					        WHERE sd.worker_identity IN (m.agent_identity,
+					                                     m.agency_style || '.' || m.agent_identity || '.a')
+					          AND (lower(COALESCE(sd.offer_status, '')) IN ('claimed', 'active')
+					            OR lower(COALESCE(sd.dispatch_status, '')) IN ('assigned', 'active', 'blocked'))
+					     ) wl ON true
+					    WHERE m.agency_style IS NOT NULL
+					      AND m.status = 'active'
+					      AND m.agent_type <> 'agency'
+					    GROUP BY parent.agent_identity
+					 )
+					 SELECT a.agency_id,
+					        mem.named_agents,
+					        r.supported_models,
+					        mr.model_name AS route_model
+					   FROM roadmap.agency a
+					   JOIN roadmap_workforce.agent_registry r
+					     ON r.agent_identity = a.agency_id AND r.agent_type = 'agency'
+					   LEFT JOIN roadmap.model_routes mr ON mr.id = r.current_route_id
+					   LEFT JOIN members mem ON mem.agency_id = a.agency_id
+					  WHERE a.agency_id = ANY($1::text[])`,
+					[agencyIds],
+				);
+				for (const row of rosterRows.rows) {
+					roster.set(String(row.agency_id), {
+						is_liaison: true,
+						named_agents: Array.isArray(row.named_agents) ? row.named_agents : [],
+						liaison_models: Array.isArray(row.supported_models)
+							? row.supported_models
+							: [],
+						liaison_route_model: row.route_model ?? null,
+					});
+				}
+			}
+
 			const normalizedAgencies = filteredRows.map((row) => {
 				const protocolHealth =
 					typeof row.protocol_health === "object" && row.protocol_health !== null
@@ -4805,6 +4885,18 @@ export class RoadmapServer {
 					? row.recent_messages
 					: [];
 				const agencyId = String(row.agency_id);
+				const rosterEntry = roster.get(agencyId);
+				const namedAgents = rosterEntry?.named_agents ?? [];
+				// Liveness is heartbeat-derived, NOT the stale status column. An
+				// agency counts as live if its liaison heartbeat is fresh OR any of
+				// its named agents is live (a liaison can be down while its workers
+				// keep heartbeating — surface that rather than hide it).
+				const liaisonLive =
+					row.last_heartbeat_at != null &&
+					Date.now() - new Date(String(row.last_heartbeat_at)).getTime() < 60_000;
+				const anyMemberLive = namedAgents.some(
+					(a) => (a as Record<string, unknown>)?.live === true,
+				);
 				return {
 					...row,
 					assistance: row.assistance_requests ?? [],
@@ -4819,6 +4911,12 @@ export class RoadmapServer {
 					recent_refusals: protocolHealth.recent_rejects ?? 0,
 					sequence_gap_count: protocolHealth.sequence_gaps ?? 0,
 					last_ping_rtt: protocolHealth.last_ping_rtt ?? null,
+					is_liaison: rosterEntry?.is_liaison ?? false,
+					named_agents: namedAgents,
+					liaison_models: rosterEntry?.liaison_models ?? [],
+					liaison_route_model: rosterEntry?.liaison_route_model ?? null,
+					liaison_live: liaisonLive,
+					agency_live: liaisonLive || anyMemberLive,
 				};
 			});
 
