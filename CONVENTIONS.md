@@ -796,6 +796,12 @@ AgentHive is multi-agent. Git discipline is part of system safety.
 - Use a branch name that identifies the agent and topic, for example `xiaomi/schema-rollout` or `codex/workflow-defaults`.
 - Do not work inside another agent's worktree unless explicitly coordinating.
 
+### Branch and cubic lifecycle (mandatory)
+
+- **Submit before a cubic/worktree is reused.** Before a cubic (ephemeral agent execution environment) or its worktree is recycled for the next task, its work MUST be *submitted* — committed **and** pushed. Never leave uncommitted or unpushed work behind when handing a cubic/worktree on. If you inherit a dirty worktree, do not discard it: commit it to a `salvage/<topic>-<date>` branch and push, then start clean (this is what stops the recurring "abandoned WIP collides on shared `main`" incidents).
+- **Merge before a proposal is Complete.** A proposal may not be advanced to **Complete** until its feature branch is merged to `main`. "Done coding" is not "Complete"; the merge is the gate.
+- **Delete the branch right after merge.** Once merged, delete the feature branch on local **and** every remote (`git branch -d <feat>` + `git push origin --delete <feat>` + `git push gitlab --delete <feat>`). Do not let merged branches linger. Exception: `salvage/*` preservation branches are kept until their owner recovers them.
+
 ### Commits
 
 - Commit coherent units of work early.
