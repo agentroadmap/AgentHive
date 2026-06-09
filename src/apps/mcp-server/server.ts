@@ -2728,6 +2728,12 @@ export async function createMcpServer(
 		},
 	});
 
+	// P513: Tenant health check and infrastructure validation
+	const { registerOpsHealthCheckTool } = await import(
+		"./tools/ops/ops-health-check.ts"
+	);
+	registerOpsHealthCheckTool(server);
+
 	// P1129: Agency lifecycle tools — agency_start / agency_status
 	const { AgencyOpsHandler } = await import("./tools/ops/agency-ops.ts");
 	const agencyOps = new AgencyOpsHandler();
