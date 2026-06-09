@@ -1,0 +1,127 @@
+ruleset: identity
+description: User and database identity literals that leak provider-specific configuration
+rules:
+  - id: identity.pguser-fallback-xiaomi
+    description: Fallback pattern "?? \"xiaomi\"" on PGUSER indicating hardcoded DB user
+    severity: critical
+    confidence: high
+    proposal: P448
+    tags:
+      - identity
+      - database
+      - provider-leak
+    regex: "PGUSER\\s*\\?\\?\\s*[\"']xiaomi[\"']"
+    fix_suggestion: |
+      Use environment variable resolution without hardcoded fallbacks:
+
+      ```typescript
+      const dbUser = process.env.PGUSER;
+      if (!dbUser) throw new Error('PGUSER required');
+      ```
+
+      Never hardcode provider-specific user as fallback.
+    examples_match:
+      - 'const user = process.env.PGUSER ?? "xiaomi";'
+    examples_no_match:
+      - 'const user = getDbUser();'
+
+  - id: identity.bare-xiaomi-literal
+    description: Bare "xiaomi" string outside legitimate contexts
+    severity: high
+    confidence: medium
+    proposal: P448
+    tags:
+      - identity
+      - provider-leak
+    pattern: '"xiaomi"'
+    file_glob_exclude:
+      - '**/*.test.ts'
+      - 'tests/**'
+    fix_suggestion: |
+      Replace with dynamic resolution from env or registry.
+    examples_match:
+      - 'const user = "xiaomi";'
+    examples_no_match:
+      - 'const user = process.env.PGUSER;'
+
+  - id: identity.pgdatabase-fallback-agenthive
+    description: Hardcoded "agenthive" database fallback
+    severity: high
+    confidence: high
+    proposal: P448
+    tags:
+      - identity
+      - database
+    regex: "PGDATABASE\\s*\\?\\?\\s*[\"']agenthive[\"']"
+    fix_suggestion: |
+      Database name must be from environment, not hardcoded.
+    examples_match:
+      - 'const db = process.env.PGDATABASE ?? "agenthive";'
+    examples_no_match:
+      - 'const db = process.env.PGDATABASE;'
+
+  - id: identity.psql-shell-user
+    description: Shell commands with hardcoded psql user
+    severity: high
+    confidence: high
+    proposal: P448
+    tags:
+      - identity
+      - shell
+      - database
+    regex: 'psql\s+-U\s+[a-z_][a-z0-9_]*(?!\})'
+    fix_suggestion: |
+      Use environment variables for psql authentication.
+
+      ```bash
+      psql -U "${PGUSER}" -d "${PGDATABASE}"
+      ```
+    examples_match:
+      - 'psql -U xiaomi -d agenthive'
+    examples_no_match:
+      - 'psql -U "${PGUSER}"'
+
+  - id: identity.systemd-user-hardcode
+    description: Hardcoded User= in systemd service files
+    severity: high
+    confidence: high
+    proposal: P448
+    tags:
+      - identity
+      - systemd
+      - deployment
+    file_glob:
+      - '**/*.service'
+      - '**/*.timer'
+    regex: 'User=[a-z_][a-z0-9_]*(?!%)'
+    fix_suggestion: |
+      Use systemd variable substitution or external env files.
+
+      ```ini
+      [Service]
+      User=%i
+      EnvironmentFile=/etc/agenthive/env
+      ```
+    examples_match:
+      - 'User=xiaomi'
+    examples_no_match:
+      - 'User=%i'
+
+  - id: identity.shell-pgpassword-set
+    description: Shell scripts with PGPASSWORD credentials
+    severity: critical
+    confidence: high
+    proposal: P448
+    tags:
+      - identity
+      - credentials
+      - shell
+    file_glob:
+      - '**/*.sh'
+    regex: "PGPASSWORD=(?![\"']?\\$)(?:[\"'][^\"']*[\"']|[^\\s\"'$]+)"
+    fix_suggestion: |
+      Never hardcode passwords in shell. Use .pgpass or vault.
+    examples_match:
+      - 'PGPASSWORD="secret" psql -c "..."'
+    examples_no_match:
+      - 'export PGPASSWORDFILE="$HOME/.pgpass"'

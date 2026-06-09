@@ -1,0 +1,74 @@
+ruleset: agencies
+description: Hardcoded agency and agent names that block dynamic trust resolution
+rules:
+  - id: agencies.hermes-agency-xiaomi
+    description: Hardcoded "hermes/agency-xiaomi" or similar agency references
+    severity: high
+    confidence: high
+    proposal: P447
+    tags:
+      - agencies
+      - trust-resolver
+      - identity
+    pattern: 'hermes/agency-xiaomi'
+    fix_suggestion: |
+      Agency names must be resolved dynamically from trust registry.
+
+      Use resolveTrustIdentity() instead of hardcoding.
+    examples_match:
+      - 'const agency = "hermes/agency-xiaomi";'
+    examples_no_match:
+      - 'const agency = await resolveTrustIdentity("hermes");'
+
+  - id: agencies.hardcoded-agent-name
+    description: Hardcoded specific agent name
+    severity: high
+    confidence: high
+    proposal: P447
+    tags:
+      - agencies
+      - agent-names
+      - trust-resolver
+    regex: "(hermes-andy|claude-bob|copilot-one|xiaomi-one|skeptic-alpha)"
+    fix_suggestion: |
+      Use trust resolver for dynamic agent assignment.
+    examples_match:
+      - 'const agent = "hermes-andy";'
+    examples_no_match:
+      - 'const agent = await resolveAgent("coding");'
+
+  - id: agencies.hardcoded-worker-id
+    description: Hardcoded worker-* or node-* identifiers
+    severity: medium
+    confidence: medium
+    proposal: P447
+    tags:
+      - agencies
+      - worker-pool
+    regex: "[\"']worker-[0-9]"
+    fix_suggestion: |
+      Worker IDs should be assigned dynamically from pool.
+    examples_match:
+      - 'const worker = "worker-3";'
+    examples_no_match:
+      - 'const worker = await assignWorker(taskType);'
+
+  - id: agencies.discord-id-hardcode
+    description: Hardcoded Discord channel or user ID
+    severity: low
+    confidence: medium
+    proposal: P447
+    tags:
+      - agencies
+      - discord
+      - config
+    regex: "[0-9]{18,}"
+    file_glob_exclude:
+      - '**/*.test.ts'
+      - 'tests/**'
+    fix_suggestion: |
+      Discord IDs should be in configuration, not hardcoded.
+    examples_match:
+      - 'const channel = "123456789012345678";'
+    examples_no_match:
+      - 'const channel = process.env.DISCORD_CHANNEL_ID;'

@@ -1,0 +1,184 @@
+ruleset: workflow-states
+description: Hardcoded workflow state and maturity literals that create SMDL drift
+rules:
+  - id: workflow-states.bare-rfc-stage
+    description: Bare RFC workflow state literal ('DRAFT', 'REVIEW', 'DEVELOP', 'MERGE', 'COMPLETE') outside canonical module
+    severity: high
+    confidence: high
+    proposal: P451
+    tags: [workflow, state, smdl-drift]
+    file_glob_exclude:
+      - 'src/core/workflow/state-names.ts'
+      - 'src/core/workflow/stage-registry.ts'
+      - 'database/ddl/**'
+      - 'database/dml/**'
+      - 'database/smdl/**'
+      - 'database/migrations/**'
+      - '**/*.test.ts'
+      - '**/*.spec.ts'
+      - 'tests/**'
+      - 'docs/**'
+    regex: "['\"](DRAFT|REVIEW|DEVELOP|MERGE|COMPLETE)['\"]"
+    fix_suggestion: |
+      RFC workflow states must be imported from the canonical state-names module (P453),
+      not hardcoded as literals.
+
+      ```typescript
+      // DO NOT hardcoded:
+      // if (proposal.stage === 'DRAFT') { ... }
+      // const nextStage = 'REVIEW';
+
+      // Instead: use the state accessor (P453)
+      import { States } from 'src/core/workflow/state-names';
+
+      if (proposal.stage === States.rfc.draft) { ... }
+      const nextStage = States.rfc.review;
+
+      // Or check membership:
+      if (States.isValidRfcStage(proposal.stage)) { ... }
+      ```
+
+      The canonical module is the single source of truth for state names and transitions.
+      This prevents SMDL drift when workflow definitions change and ensures all code sees
+      the same state names.
+
+      Per P453, the module will provide:
+      - Constants: `States.rfc.draft`, `States.rfc.review`, etc.
+      - Validators: `isValidRfcStage(stage)`, `isTerminal(stage)`
+      - Helpers: `nextStage(current, template)` for workflow navigation
+
+      If src/core/workflow/state-names.ts does not yet exist, add a TODO(P453) comment.
+    examples_match:
+      - "if (proposal.stage === 'DRAFT') { }"
+      - "const stage = 'REVIEW';"
+      - "return ['DRAFT', 'DEVELOP', 'COMPLETE'];"
+    examples_no_match:
+      - "import { States } from 'src/core/workflow/state-names'; if (proposal.stage === States.rfc.draft) { }"
+      - "if (States.isValidRfcStage(proposal.stage)) { }"
+
+  - id: workflow-states.bare-hotfix-stage
+    description: Bare hotfix/legacy workflow state literal — must come from stage registry, not hardcoded (P779)
+    severity: high
+    confidence: high
+    proposal: P779
+    tags: [workflow, state, hotfix, smdl-drift]
+    file_glob_exclude:
+      - 'src/core/workflow/state-names.ts'
+      - 'src/core/workflow/stage-registry.ts'
+      - 'database/ddl/**'
+      - 'database/dml/**'
+      - 'database/smdl/**'
+      - 'database/migrations/**'
+      - '**/*.test.ts'
+      - '**/*.spec.ts'
+      - 'tests/**'
+      - 'docs/**'
+    regex: "['\"](TRIAGE|FIX|DEPLOYED|WONT_FIX|NON_ISSUE|ESCALATE|REJECTED|DISCARDED|REPLACED)['\"]"
+    fix_suggestion: |
+      Hotfix workflow states must use the canonical state-names module (P453):
+
+      ```typescript
+      // DO NOT hardcode:
+      // if (issue.stage === 'TRIAGE') { ... }
+
+      // Instead:
+      import { States } from 'src/core/workflow/state-names';
+
+      if (issue.stage === States.hotfix.triage) { ... }
+      const nextStage = States.hotfix.fix;
+      ```
+
+      Hotfix workflow has different states and semantics than RFC. Using the accessor
+      ensures code is type-safe and validated against the SMDL definition.
+    examples_match:
+      - "if (issue.stage === 'TRIAGE') { }"
+      - "const stage = 'DEPLOYED';"
+    examples_no_match:
+      - "import { States } from 'src/core/workflow/state-names'; if (issue.stage === States.hotfix.triage) { }"
+
+  - id: workflow-states.bare-maturity
+    description: Bare maturity literal ('new', 'active', 'mature', 'obsolete')
+    severity: high
+    confidence: medium
+    proposal: P451
+    tags: [workflow, maturity, smdl-drift]
+    file_glob_exclude:
+      - 'src/core/workflow/state-names.ts'
+      - 'database/ddl/**'
+      - 'database/dml/**'
+      - '**/*.test.ts'
+      - '**/*.spec.ts'
+      - 'tests/**'
+      - 'docs/**'
+    pattern: "maturity = 'active'"
+    fix_suggestion: |
+      Maturity levels must be imported from the canonical state-names module (P453):
+
+      ```typescript
+      // DO NOT hardcode:
+      // proposal.maturity = 'active';
+      // if (proposal.maturity === 'mature') { ... }
+
+      // Instead:
+      import { Maturity } from 'src/core/workflow/state-names';
+
+      proposal.maturity = Maturity.ACTIVE;
+      if (proposal.maturity === Maturity.MATURE) { ... }
+      ```
+
+      Maturity is orthogonal to workflow stage. Using the accessor prevents invalid
+      state combinations and ensures consistency across MCP tools and storage adapters.
+    examples_match:
+      - "proposal.maturity = 'active';"
+    examples_no_match:
+      - "proposal.maturity = Maturity.ACTIVE;"
+
+  - id: workflow-states.legacy-issue-status
+    description: Legacy issue status literals ('PROPOSAL', 'PENDING', 'BLOCKED') from before proposal model v2
+    severity: medium
+    confidence: high
+    proposal: P306
+    tags: [workflow, legacy, smdl-drift, deprecated]
+    file_glob_exclude:
+      - 'database/ddl/**'
+      - 'database/migrations/**'
+      - '**/*.test.ts'
+      - 'tests/**'
+      - 'docs/**'
+    regex: "['\"](PROPOSAL|PENDING|BLOCKED)['\"]"
+    fix_suggestion: |
+      These status values are legacy and replaced by the v2 proposal model (P306).
+
+      **Mapping:**
+      - `PROPOSAL` → new state `DRAFT` (or `Review` if already evaluated)
+      - `PENDING` → new state `DEVELOP` (under active development)
+      - `BLOCKED` → use `is_blocked_by` foreign key in `proposal_dependency` table
+
+      See CONVENTIONS.md §2 for the canonical workflow states. If you encounter legacy
+      status values in the codebase, update to the new model:
+
+      ```typescript
+      // Legacy code to replace:
+      // if (proposal.status === 'PROPOSAL') { ... }
+      // if (proposal.status === 'PENDING') { ... }
+
+      // New code:
+      import { States } from 'src/core/workflow/state-names';
+
+      if (proposal.stage === States.rfc.draft) { ... }
+      if (proposal.stage === States.rfc.develop) { ... }
+
+      // For blocked proposals, check dependencies:
+      const blockers = await proposal.getDependencies();
+      const isBlocked = blockers.some(b => !b.is_satisfied);
+      ```
+
+      P306 and P306-cleanup handle the full data migration. Any remaining legacy literals
+      should be cleaned up to prevent confusion.
+    examples_match:
+      - "if (proposal.status === 'PROPOSAL') { }"
+      - "const status = 'PENDING';"
+      - "return 'BLOCKED';"
+    examples_no_match:
+      - "if (proposal.stage === States.rfc.draft) { }"
+      - "const blockers = await proposal.getDependencies();"

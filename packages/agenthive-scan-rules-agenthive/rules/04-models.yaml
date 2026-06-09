@@ -1,0 +1,96 @@
+ruleset: models
+description: Hardcoded model names that bypass model routing and multi-provider support
+rules:
+  - id: models.cli-builders-default-model
+    description: Hardcoded fallback model in defaultModel function
+    severity: critical
+    confidence: high
+    proposal: P450
+    tags:
+      - models
+      - routing
+      - multi-provider
+    pattern: 'defaultModel()'
+    fix_suggestion: |
+      Use resolveModelRoute() instead of defaultModel().
+    examples_match:
+      - 'const model = defaultModel();'
+    examples_no_match:
+      - 'const model = resolveModelRoute("default");'
+
+  - id: models.hardcoded-anthropic
+    description: Hardcoded Claude model name
+    severity: high
+    confidence: high
+    proposal: P450
+    tags:
+      - models
+      - anthropic
+      - routing
+    regex: "[\"']claude-(sonnet|opus|haiku)-[0-9]"
+    file_glob_exclude:
+      - '**/*.test.ts'
+      - 'tests/**'
+      - 'database/dml/**'
+    fix_suggestion: |
+      Model names must be resolved through routing system.
+    examples_match:
+      - 'const model = "claude-sonnet-4-6";'
+    examples_no_match:
+      - 'const model = resolveModelRoute("claude");'
+
+  - id: models.hardcoded-openai
+    description: Hardcoded OpenAI GPT model name
+    severity: high
+    confidence: high
+    proposal: P450
+    tags:
+      - models
+      - openai
+      - routing
+    regex: "[\"']gpt-[0-9a-z-]"
+    file_glob_exclude:
+      - '**/*.test.ts'
+      - 'tests/**'
+    fix_suggestion: |
+      Use model routing instead of hardcoding.
+    examples_match:
+      - 'const model = "gpt-4-turbo";'
+    examples_no_match:
+      - 'const model = resolveModelRoute("gpt");'
+
+  - id: models.hardcoded-xiaomi
+    description: Hardcoded Xiaomi/MIMO model name
+    severity: high
+    confidence: high
+    proposal: P450
+    tags:
+      - models
+      - xiaomi
+      - routing
+    pattern: 'xiaomi/mimo-'
+    fix_suggestion: |
+      Use model routing for Xiaomi MIMO models.
+    examples_match:
+      - 'const model = "xiaomi/mimo-7b";'
+    examples_no_match:
+      - 'const model = resolveModelRoute("mimo");'
+
+  - id: models.bare-model-string-in-spawn
+    description: Bare model string in agent spawn
+    severity: medium
+    confidence: medium
+    proposal: P450
+    tags:
+      - models
+      - spawning
+    regex: "model:\\s*[\"'][a-z-]+[\"']"
+    file_glob_exclude:
+      - '**/*.test.ts'
+      - 'tests/**'
+    fix_suggestion: |
+      Use resolveModelRoute() for dynamic model selection.
+    examples_match:
+      - 'spawn("agent", { model: "claude-sonnet" })'
+    examples_no_match:
+      - 'spawn("agent", { model: resolveModelRoute(...) })'

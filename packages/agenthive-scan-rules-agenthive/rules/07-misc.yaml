@@ -1,0 +1,84 @@
+ruleset: misc
+description: Code debt and governance violations
+rules:
+  - id: misc.unqualified-roadmap-table
+    description: Unqualified reference to proposal, lease, or roadmap table
+    severity: high
+    confidence: high
+    proposal: P436
+    tags:
+      - database
+      - schema-qualification
+      - multi-project
+    regex: "FROM\\s+proposal|JOIN\\s+proposal|UPDATE\\s+proposal"
+    file_glob:
+      - '**/*.ts'
+      - '**/*.sql'
+    fix_suggestion: |
+      All roadmap tables must be schema-qualified with roadmap. prefix.
+    examples_match:
+      - 'SELECT * FROM proposal WHERE id = $1'
+    examples_no_match:
+      - 'SELECT * FROM roadmap.proposal WHERE id = $1'
+
+  - id: misc.console-log-in-handler
+    description: console.log or console.debug in MCP handler functions
+    severity: high
+    confidence: high
+    proposal: P451
+    tags:
+      - logging
+      - mcp
+      - observability
+    pattern: 'console.log'
+    file_glob:
+      - 'src/mcp/**'
+      - 'src/handlers/**'
+    fix_suggestion: |
+      Use structured logging instead of console.log.
+
+      Use logger.info() instead.
+    examples_match:
+      - 'handler.on("message", () => { console.log("got message"); });'
+    examples_no_match:
+      - 'logger.info("message_received", { ... });'
+
+  - id: misc.todo-without-proposal
+    description: 'TODO comments without proposal reference like TODO(Pxxx)'
+    severity: medium
+    confidence: medium
+    proposal: P451
+    tags:
+      - governance
+      - tracking
+    regex: "//\\s*TODO(?!\\(P[0-9]{3})"
+    file_glob_exclude:
+      - '**/*.test.ts'
+      - 'tests/**'
+      - 'docs/**'
+    fix_suggestion: |
+      All TODOs must reference a proposal ID for tracking.
+
+      Format: // TODO(Pxxx): description
+    examples_match:
+      - '// TODO: implement authentication'
+    examples_no_match:
+      - '// TODO(P448): implement authentication'
+
+  - id: misc.fixme-marker
+    description: FIXME or BUG comment (legacy markers)
+    severity: low
+    confidence: high
+    proposal: P451
+    tags:
+      - governance
+      - legacy
+    regex: "//\\s*(FIXME|BUG):"
+    file_glob_exclude:
+      - 'docs/**'
+    fix_suggestion: |
+      Use TODO(Pxxx) instead of legacy markers.
+    examples_match:
+      - '// FIXME: this is broken'
+    examples_no_match:
+      - '// TODO(P448): fix broken behavior'

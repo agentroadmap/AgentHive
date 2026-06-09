@@ -1,0 +1,102 @@
+# Hardcoding Scanner Rule Schema
+# This is the canonical schema for all rule definition files.
+
+# Every rule file MUST contain:
+# - ruleset: string identifying the rule category
+# - description: human readable description of the ruleset
+# - rules: array of Rule objects
+
+# Rule object schema:
+#
+# Required fields:
+#   id: string
+#     Kebab-case unique identifier. Format: [a-z0-9-]+
+#     Example: "agenthive-project-root", "mcp-url-hardcoded"
+#
+#   description: string
+#     One-line human description of what the rule catches
+#     Example: "Hardcoded /data/code/AgentHive project root"
+#
+#   severity: string (enum: critical | high | medium | low)
+#     Impact level if this finding goes unaddressed
+#     - critical: system failure, security breach, operational disaster
+#     - high: blocking multi-tenant/multi-project operation
+#     - medium: performance/maintainability degradation
+#     - low: code quality/consistency issue
+#
+#   confidence: string (enum: high | medium | low)
+#     Likelihood this is a true positive (not a false positive)
+#     - high: very unlikely to match legitimate code
+#     - medium: occasionally matches valid code (review all matches)
+#     - low: frequent false positives (use carefully, pair with allowlist)
+#
+#   proposal: string
+#     MCP proposal ID tracking the remediation. Format: P###
+#     Example: "P448", "P449"
+#
+#   fix_suggestion: string
+#     Multi-line text explaining how to fix this issue
+#     Include function names, module paths, and patterns
+#     Example: |
+#       Replace with `getProjectRoot()` from `src/shared/runtime/paths.ts`.
+#       If paths.ts does not yet exist, mark with `// TODO(P448): use getProjectRoot()`.
+#
+#   examples_match: array of strings
+#     Code snippets that MUST match the rule pattern
+#     Used for self-test validation on load
+#     Required: at least one example
+#
+#   examples_no_match: array of strings
+#     Code snippets that MUST NOT match the rule pattern
+#     Cover common false-positive cases (env fallbacks, comments, etc.)
+#     Required: at least one example
+#
+# One of (pattern | regex | ast_query) is required:
+#   pattern: string
+#     Literal substring to match (case-sensitive)
+#     Example: '"/data/code/AgentHive"'
+#
+#   regex: string
+#     PCRE-compatible regular expression
+#     Example: '/data/code/[a-zA-Z]+'
+#
+#   ast_query: string
+#     (Future) AST query for language-aware matching
+#     Not yet supported; reserved for future expansion
+#
+# Optional fields:
+#   file_glob: array of strings
+#     Glob patterns for files this rule applies to
+#     Example: ["src/**/*.ts", "scripts/**/*.sh"]
+#     If omitted, rule applies to all files
+#
+#   file_glob_exclude: array of strings
+#     Glob patterns to exclude from scanning
+#     Whitelist exceptions within file_glob scope
+#     Example: ["**/*.test.ts", "src/shared/runtime/paths.ts"]
+#
+#   tags: array of strings
+#     Categorization for filtering with --rule-tag
+#     Example: ["paths", "multi-tenant", "critical"]
+
+# Example rule (00-example.yaml must contain a valid working example):
+example:
+  ruleset: example
+  description: Example rules for validating scanner framework
+  rules:
+    - id: example-hardcoded-path
+      description: Catches hardcoded /tmp paths
+      severity: medium
+      confidence: high
+      proposal: P448
+      pattern: '"/tmp'
+      fix_suggestion: |
+        Replace hardcoded /tmp paths with getTempDir() from src/shared/runtime/paths.ts.
+      examples_match:
+        - 'const TEMP = "/tmp/app";'
+        - 'fs.writeFileSync("/tmp/log.txt", "...");'
+      examples_no_match:
+        - 'const TEMP = process.env.TMPDIR ?? "/tmp";'
+        - '// Never use /tmp in production'
+        - 'const msg = "Be careful with /tmp"'
+      tags: ["paths", "example"]
