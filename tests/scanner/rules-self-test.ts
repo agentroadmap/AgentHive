@@ -20,7 +20,7 @@ test("rule loader - validates rule structure", async () => {
 
   for (const rule of rules) {
     assert.ok(rule.id, `Rule must have id`);
-    assert.match(rule.id, /^[a-z0-9-]+$/, `Rule id must be kebab-case: ${rule.id}`);
+    assert.match(rule.id, /^[a-z0-9][a-z0-9.-]*$/, `Rule id must be kebab-case or category.rule-name: ${rule.id}`);
     assert.ok(rule.description, `Rule ${rule.id} must have description`);
     assert.ok(
       ["critical", "high", "medium", "low"].includes(rule.severity),
