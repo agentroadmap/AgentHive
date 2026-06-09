@@ -40,7 +40,7 @@ import {
 	isModelInCooldown,
 	setProviderCooldown,
 } from "./provider-cooldown.ts";
-import { HotfixStates, RfcStates } from "../workflow/state-names.ts";
+import { HotfixStates, RfcStates, isTerminal } from "../workflow/state-names.ts";
 import { isWithinCapacity } from "./resolvers/capacity-guard.ts";
 import { sanitizeExtraEnv } from "./spawn-env-sanitizer.ts";
 import {
@@ -1314,11 +1314,10 @@ export function renderClosingHint(input: {
 	stage: string;
 	proposalId: number | string;
 }): string {
-	// Terminal check using canonical state names from state-names.ts.
-	// RfcStates accessors get values from the loaded registry; this function
-	// may be called before registry load completes, so we check against the
-	// canonical string values that define terminal stages.
-	const terminal = input.stage === "COMPLETE" || input.stage === "DEPLOYED";
+	// P706: Terminal check using isTerminal() from registry (works for both RFC and Hotfix)
+	// Assumes RFC workflow; this is conservative since most proposals use RFC.
+	const isRfcTemplate = true;
+	const terminal = isTerminal("Standard RFC", input.stage);
 	const hint = terminal
 		? ""
 		: `\n\n## Completion\nWhen you finish, emit \`mcp_agent action="spawn_summary_emit"\` with outcome=success|partial|failure|timeout|escalated and a one-paragraph summary. DO NOT call \`set_maturity\` — only the gate-evaluator advances maturity, after parsing your stdout verdict (gate roles) or after the orchestrator's reconciler reads your spawn_summary (non-gate roles). Proposal id: ${input.proposalId}.`;

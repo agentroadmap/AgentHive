@@ -10,15 +10,14 @@
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+// P706: Unified state vocabulary — hotfix states (TRIAGE, FIX, DEPLOYED) consolidated
+// into RFC vocabulary (DRAFT, REVIEW, DEVELOP, MERGE, COMPLETE)
 export type ProposalPhase =
   | "DRAFT"
   | "REVIEW"
   | "DEVELOP"
   | "MERGE"
-  | "COMPLETE"
-  | "TRIAGE"
-  | "FIX"
-  | "DEPLOYED";
+  | "COMPLETE";
 
 export interface PhaseModelMapping {
   phase: ProposalPhase;
@@ -78,24 +77,8 @@ export const PHASE_MODEL_TABLE: PhaseModelMapping[] = [
     agentCli: "claude",
     rationale: "Terminal state: minimal work needed",
   },
-  {
-    phase: "TRIAGE",
-    model: "claude-sonnet-4-6",
-    agentCli: "claude",
-    rationale: "Hotfix triage needs reliable but fast response",
-  },
-  {
-    phase: "FIX",
-    model: "claude-sonnet-4-6",
-    agentCli: "claude",
-    rationale: "Hotfix implementation: sonnet for coding tasks",
-  },
-  {
-    phase: "DEPLOYED",
-    model: "claude-haiku-4-5",
-    agentCli: "claude",
-    rationale: "Post-deploy: lightweight verification only",
-  },
+  // P706: TRIAGE, FIX, DEPLOYED phases removed — hotfix workflows now use
+  // DRAFT→DEVELOP→COMPLETE pathway with same routing table
 ];
 
 // ─── Phase routing ────────────────────────────────────────────────────────────

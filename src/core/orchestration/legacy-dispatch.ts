@@ -92,15 +92,13 @@ const SHUTDOWN_DRAIN_MS = Number(
 );
 
 // State → cubic phase mapping
+// P706: Unified state vocabulary — TRIAGE/FIX/DEPLOYED consolidated to DRAFT/DEVELOP/COMPLETE
 const STATE_TO_PHASE: Record<string, string> = {
 	DRAFT: "design",
-	TRIAGE: "design",
 	REVIEW: "design",
-	FIX: "build",
 	DEVELOP: "build",
 	MERGE: "test",
 	COMPLETE: "ship",
-	DEPLOYED: "ship",
 };
 
 const ENABLE_POLLING = process.env.AGENTHIVE_ORCHESTRATOR_POLL === "1";
@@ -154,11 +152,12 @@ function builtinFallbackForState(state: string): RoleProfile[] {
 				source: "builtin-fallback" as const,
 			},
 		],
-		TRIAGE: [
+		// P706: TRIAGE consolidated to DRAFT
+		DRAFT: [
 			{
 				id: null,
-				role: "triage-agent",
-				requiredCapabilities: ["triage"],
+				role: "architect",
+				requiredCapabilities: ["design"],
 				allowedRouteProviders: null,
 				forbiddenRouteProviders: null,
 				promptTemplate: null,
@@ -188,18 +187,7 @@ function builtinFallbackForState(state: string): RoleProfile[] {
 				source: "builtin-fallback" as const,
 			},
 		],
-		FIX: [
-			{
-				id: null,
-				role: "fix-agent",
-				requiredCapabilities: ["code"],
-				allowedRouteProviders: null,
-				forbiddenRouteProviders: null,
-				promptTemplate: null,
-				priority: 10,
-				source: "builtin-fallback" as const,
-			},
-		],
+		// P706: FIX consolidated to DEVELOP
 		DEVELOP: [
 			{
 				id: null,
@@ -246,14 +234,7 @@ function builtinFallbackForState(state: string): RoleProfile[] {
 				source: "builtin-fallback" as const,
 			},
 		],
-		DEPLOYED: [
-			{
-				id: null,
-				role: "system-monitor",
-				requiredCapabilities: ["ops", "devops"],
-				allowedRouteProviders: null,
-				forbiddenRouteProviders: null,
-				promptTemplate: null,
+		// P706: DEPLOYED consolidated to COMPLETE
 				priority: 10,
 				source: "builtin-fallback" as const,
 			},
@@ -264,20 +245,18 @@ function builtinFallbackForState(state: string): RoleProfile[] {
 }
 
 // Legacy fallback — used when capability matching returns too few agents
+// P706: Consolidated TRIAGE→DRAFT, FIX→DEVELOP, DEPLOYED→COMPLETE
 const AGENT_DISPATCH: Record<string, string[]> = {
 	DRAFT: ["architect", "researcher"],
-	TRIAGE: ["triage-agent", "system-monitor"],
 	REVIEW: [
 		"reviewer",
 		"skeptic-alpha",
 		"skeptic-beta",
 		"architecture-reviewer",
 	],
-	FIX: ["fix-agent", "developer"],
 	DEVELOP: ["developer", "skeptic-beta", "token-tracker"],
 	MERGE: ["merge-agent", "git-specialist", "messaging-tester"],
 	COMPLETE: ["documenter", "pillar-researcher"],
-	DEPLOYED: ["system-monitor", "token-tracker"],
 };
 
 // Agent prompts
@@ -594,16 +573,16 @@ function inferGateForState(
 		}
 	}
 
-	// Hotfix is a 3-stage workflow: TRIAGE → FIX → DEPLOYED.
+	// P706: Hotfix now uses unified vocabulary: DRAFT → DEVELOP → COMPLETE.
 	// REVIEW and MERGE are skipped — the design is "fix it fast, prove it works."
-	// D1 reviews the mature TRIAGE (defect reproduced, fix scope agreed).
-	// D3 reviews the mature FIX (patch lands, regression test passes).
+	// D1 reviews the mature DRAFT (defect reproduced, fix scope agreed).
+	// D3 reviews the mature DEVELOP (patch lands, regression test passes).
 	if (t === "hotfix") {
 		switch (s) {
-			case "TRIAGE":
-				return { gate: "D1", toStage: "FIX" as any };
-			case "FIX":
-				return { gate: "D3", toStage: "DEPLOYED" as any };
+			case "DRAFT":
+				return { gate: "D1", toStage: "DEVELOP" };
+			case "DEVELOP":
+				return { gate: "D3", toStage: "COMPLETE" };
 			default:
 				return null;
 		}

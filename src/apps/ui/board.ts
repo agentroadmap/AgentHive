@@ -88,50 +88,34 @@ type AgencyBoardRow = {
 	silence_seconds: number | string | null;
 };
 
-const RFC_STATUSES = [
-	"DRAFT",
-	"REVIEW",
-	"DEVELOP",
-	"MERGE",
-	"COMPLETE",
-	"BLOCKED",
-];
-const HOTFIX_STATUSES = [
-	"TRIAGE",
-	"FIX",
-	"DEPLOYED",
-	"ESCALATE",
-	"WONT_FIX",
-	"NON_ISSUE",
-];
+// P706: RFC_STATUSES and HOTFIX_STATUSES arrays removed. Stages are now
+// loaded dynamically from the StateNamesRegistry (SMDL definitions in DB).
 const HOTFIX_PROPOSAL_TYPES = new Set(["hotfix"]);
-const WORKFLOW_VIEWS: WorkflowViewDefinition[] = [
-	{
-		key: "rfc",
-		label: "RFC",
-		stages: RFC_STATUSES.map((name) => ({ name })),
-	},
-	{
-		key: "hotfix",
-		label: "Hotfix",
-		stages: HOTFIX_STATUSES.map((name) => ({ name })),
-	},
-	{
-		key: "obsolete",
-		label: "Obsolete",
-		stages: [],
-	},
-];
-const WORKFLOW_BY_KEY = new Map(
-	WORKFLOW_VIEWS.map((workflow) => [workflow.key, workflow]),
-);
 
+/**
+ * P706: Load RFC workflow stages dynamically from SMDL definition.
+ * Falls back to canonical unified stages if DB unavailable.
+ */
 function getRfcStatusesCanonical(): string[] {
-	return [...RFC_STATUSES];
+	try {
+		const { getView } = require("../../src/core/workflow/state-names.ts");
+		return getView("Standard RFC").stages.map((s: { name: string }) => s.name);
+	} catch {
+		return ["DRAFT", "REVIEW", "DEVELOP", "MERGE", "COMPLETE"];
+	}
 }
 
+/**
+ * P706: Load Hotfix workflow stages dynamically from SMDL definition.
+ * Falls back to canonical unified stages if DB unavailable.
+ */
 function getHotfixStatusesCanonical(): string[] {
-	return [...HOTFIX_STATUSES];
+	try {
+		const { getView } = require("../../src/core/workflow/state-names.ts");
+		return getView("Hotfix").stages.map((s: { name: string }) => s.name);
+	} catch {
+		return ["DRAFT", "DEVELOP", "COMPLETE"];
+	}
 }
 
 function statusForView(status: string, _workflowKey: WorkflowViewKey): string {
