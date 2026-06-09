@@ -559,8 +559,22 @@ function buildCopilotArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
 	return { argv, env: {} };
 }
 
+function buildAntigravityArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
+	const argv = [
+		route.cliPath ?? "agy",
+		"-p",
+		req.task,
+		"--model",
+		route.modelName,
+		"--dangerously-skip-permissions",
+		"--add-dir",
+		req.worktree,
+	];
+	return { argv, env: {} };
+}
+
 /** Dispatch to the correct builder based on route.agentCli (DB is source of truth). */
-function buildArgsBySpec(req: SpawnRequest, route: ModelRoute): CommandSpec {
+export function buildArgsBySpec(req: SpawnRequest, route: ModelRoute): CommandSpec {
 	// agent_cli from DB determines which CLI to use
 	switch (route.agentCli) {
 		case "codex":
@@ -573,6 +587,8 @@ function buildArgsBySpec(req: SpawnRequest, route: ModelRoute): CommandSpec {
 			return buildGeminiArgs(req, route);
 		case "hermes":
 			return buildHermesArgs(req, route);
+		case "agy":
+			return buildAntigravityArgs(req, route);
 		default:
 			// llm or any other openai-compatible CLI
 			return buildOpenAICompatArgs(req, route);
@@ -591,6 +607,17 @@ export function assertResolvedRouteMetadata(
 	if (!route.routeProvider || !route.apiSpec || !route.baseUrl) {
 		throw new Error(
 			`[P235] Refusing to run "${provider}" route "${route.modelName}" with incomplete DB route metadata.`,
+		);
+	}
+	if (!route.agentCli) {
+		throw new Error(
+			`[P235] Refusing to run "${provider}" route "${route.modelName}" with missing agent_cli.`,
+		);
+	}
+	const knownClis = ["claude", "codex", "hermes", "gemini", "copilot", "agy"];
+	if (!knownClis.includes(route.agentCli)) {
+		throw new Error(
+			`[P235] Refusing to run "${provider}" route "${route.modelName}" with unknown agent_cli "${route.agentCli}".`,
 		);
 	}
 }

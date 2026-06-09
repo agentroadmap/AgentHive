@@ -26,6 +26,8 @@ export function defaultBrandFor(provider: string): string {
 			return "Hermes";
 		case "gemini":
 			return "Gemini";
+		case "antigravity":
+			return "Antigravity";
 		default:
 			return provider;
 	}
@@ -83,3 +85,24 @@ export function buildGeminiArgs(prompt: string): string[] {
 export function buildOpenAICompatArgs(prompt: string): string[] {
 	return [prompt];
 }
+
+/**
+ * Build argv for Antigravity liaison invocation — P2408.
+ * Minimal prompt + model + dangerously-skip-permissions + add-dir.
+ */
+export function buildAntigravityArgs(
+	prompt: string,
+	model: string,
+	addDir: string,
+): string[] {
+	return [
+		"-p",
+		prompt,
+		"--model",
+		model,
+		"--dangerously-skip-permissions",
+		"--add-dir",
+		addDir,
+	];
+}
+

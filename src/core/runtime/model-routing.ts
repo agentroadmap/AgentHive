@@ -176,6 +176,8 @@ export function buildModelFlag(
       return ["--model", modelOverride];
     case "copilot":
       return ["--model", modelOverride];
+    case "agy":
+      return ["--model", modelOverride];
     default:
       return ["--model", modelOverride];
   }
