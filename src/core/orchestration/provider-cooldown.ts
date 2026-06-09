@@ -26,13 +26,38 @@ const CREDIT_PATTERNS = [
 	/budget.?exceeded/i,
 ];
 
-export type ProviderSignal = "rate_limit" | "credit_exhausted";
+// P2408: an unauthenticated worker CLI (e.g. `agy` with no OAuth token) prints a
+// login prompt and exits 0 having done NO work. Left unclassified, the dispatch
+// handler treats exit-0 as a delivery — a silent offer-sink that fakes
+// "delivered" rows and starves healthy agencies. These patterns let us detect
+// the auth failure, mark the run failed, and cool the provider down long enough
+// that the floor stops re-draining offers into a broken worker.
+const AUTH_REQUIRED_PATTERNS = [
+	/authentication required/i,
+	/please (?:visit|log ?in|sign ?in)/i,
+	/visit the url to log ?in/i,
+	/you are not logged ?in/i,
+	/not authenticated/i,
+	/login required/i,
+	/please run\s+\S+\s+login/i,
+	/run `?\S+ login`?/i,
+];
+
+export type ProviderSignal = "rate_limit" | "credit_exhausted" | "auth_required";
 
 /**
  * Classify stderr/stdout text into a provider signal type.
  * Returns null when no known error pattern is detected.
+ *
+ * Order matters: auth_required is checked first because an unauthenticated CLI
+ * often also emits incidental "usage"/"limit" wording that would otherwise be
+ * misread as a transient credit signal (2-min backoff) rather than the
+ * persistent config fault it is (30-min backoff).
  */
 export function classifyProviderSignal(text: string): ProviderSignal | null {
+	for (const pat of AUTH_REQUIRED_PATTERNS) {
+		if (pat.test(text)) return "auth_required";
+	}
 	for (const pat of RATE_LIMIT_PATTERNS) {
 		if (pat.test(text)) return "rate_limit";
 	}
@@ -56,14 +81,31 @@ export async function isProviderInCooldown(provider: string): Promise<boolean> {
 }
 
 /**
- * Set cooldown on a provider. rate_limit: 2min backoff, credit_exhausted: 30min.
+ * Set cooldown on a provider.
+ *   rate_limit:       2 min backoff (transient)
+ *   credit_exhausted: 30 min backoff
+ *   auth_required:    30 min backoff (persistent config fault — long enough that
+ *                     the floor stops re-draining offers into a broken worker;
+ *                     it clears on the next successful run via recordProviderSuccess)
  */
+const COOLDOWN_MINUTES: Record<ProviderSignal, number> = {
+	rate_limit: 2,
+	credit_exhausted: 30,
+	auth_required: 30,
+};
+
+const HEALTH_STATUS: Record<ProviderSignal, string> = {
+	rate_limit: "rate_limited",
+	credit_exhausted: "credit_exhausted",
+	auth_required: "auth_required",
+};
+
 export async function setProviderCooldown(
 	provider: string,
 	errorType: ProviderSignal,
 	errorMsg: string,
 ): Promise<void> {
-	const cooldownMinutes = errorType === "rate_limit" ? 2 : 30;
+	const cooldownMinutes = COOLDOWN_MINUTES[errorType];
 	await query(
 		`INSERT INTO roadmap.provider_health
        (provider_name, status, last_error_at, last_error_msg, error_count, cooldown_until, updated_at)
@@ -75,11 +117,7 @@ export async function setProviderCooldown(
        error_count = roadmap.provider_health.error_count + 1,
        cooldown_until = now() + interval '${cooldownMinutes} minutes',
        updated_at = now()`,
-		[
-			provider,
-			errorType === "rate_limit" ? "rate_limited" : "credit_exhausted",
-			errorMsg.slice(0, 500),
-		],
+		[provider, HEALTH_STATUS[errorType], errorMsg.slice(0, 500)],
 	);
 }
 

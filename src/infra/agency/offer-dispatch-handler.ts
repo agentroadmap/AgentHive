@@ -34,6 +34,7 @@ import {
 	classifyProviderSignal,
 	setProviderCooldown,
 	recordProviderSuccess,
+	type ProviderSignal,
 } from "../../core/orchestration/provider-cooldown.ts";
 import { ObservabilityWriter } from "../../core/observability/observability-writer.ts";
 import {
@@ -457,6 +458,24 @@ async function runSpawn(args: {
 
 		const enrichedTask = persona ? `${persona}\n\n${baseTask}` : baseTask;
 
+		// P2335: ensure cubic worktree exists before spawn
+		if ((payload as any).cubic_id && worktree && worktree.startsWith("/data/code/worktree/")) {
+			try {
+				const { existsSync } = await import("node:fs");
+				if (!existsSync(worktree)) {
+					const { exec: cpExec } = await import("node:child_process");
+					const { promisify } = await import("node:util");
+					const execAsync = promisify(cpExec);
+					const branchName = worktree.split("/").pop() || `auto-${Date.now()}`;
+					// Assumes /data/code/AgentHive is the base repo
+					await execAsync(`git worktree add ${worktree} -b ${branchName}`, { cwd: `/data/code/AgentHive` });
+					logger.log(`[OfferDispatchHandler] provisioned project-scoped worktree ${worktree} for cubic=${(payload as any).cubic_id}`);
+				}
+			} catch (err: any) {
+				logger.warn(`[OfferDispatchHandler] failed to provision worktree ${worktree}: ${err?.message}`);
+			}
+		}
+
 		result = await spawn({
 			worktree,
 			task: enrichedTask,
@@ -496,10 +515,32 @@ async function runSpawn(args: {
 		// ignore — guard is best-effort
 	}
 
+	// P908-B: combined stderr+stdout so we catch errors wherever they land.
+	const fullOutput = [result?.stderr, result?.stdout].filter(Boolean).join("\n");
+
+	// Exit-0 alone is NOT proof of work. A worker CLI with no auth (e.g. `agy`
+	// missing its OAuth token) prints a login prompt and exits 0 having produced
+	// nothing; an exit-0 run with completely empty output likewise did no work.
+	// P2408: treat these "degenerate" exit-0 runs as failures, otherwise the
+	// floor records fake `delivered` rows and starves healthy agencies (the
+	// antigravity offer-sink). A real delivery = exit 0 AND not degenerate.
+	const exitOk = spawnError === null && result?.exitCode === 0;
+	let degenerateReason: "auth_required" | "empty_output" | null = null;
+	if (exitOk) {
+		if (classifyProviderSignal(fullOutput) === "auth_required") {
+			degenerateReason = "auth_required";
+		} else if (fullOutput.trim().length === 0) {
+			degenerateReason = "empty_output";
+		}
+	}
+	const succeeded = exitOk && degenerateReason === null;
+
 	// P1018: Record token usage and cost from the spawn result.
 	// This extracts provider-specific usage data, calculates cost, and
 	// writes to agent_budget_ledger + agent_runs.tokens_in/out.
 	// Non-fatal: failures here don't block offer completion.
+	// (Must come AFTER `succeeded` is computed — the wave-4 merge placed it
+	// before the declaration, a TDZ ReferenceError on every tracked run.)
 	if (result?.agentRunId) {
 		void recordSpawnUsage({
 			agentRunId: result.agentRunId,
@@ -522,15 +563,16 @@ async function runSpawn(args: {
 			);
 		});
 	}
-
-	const succeeded =
-		spawnError === null && (result?.exitCode === 0 || result?.exitCode === null);
 	const status: "delivered" | "failed" = succeeded ? "delivered" : "failed";
 	const provider = payload.route_hint ?? null;
 
+	if (degenerateReason) {
+		logger.warn(
+			`[OfferDispatchHandler] ${agencyId}: offer=${payload.offer_id} exited 0 but is DEGENERATE (${degenerateReason}) — recording FAILED, not delivered (route_hint=${payload.route_hint ?? "none"})`,
+		);
+	}
+
 	// P908-B: classify provider error signal and update provider_health.
-	// Use the combined stderr+stdout text so we catch errors wherever they land.
-	const fullOutput = [result?.stderr, result?.stdout].filter(Boolean).join("\n");
 	let providerSignal: string | null = null;
 	if (!succeeded && provider) {
 		try {
@@ -538,7 +580,7 @@ async function runSpawn(args: {
 			if (providerSignal) {
 				await setProviderCooldown(
 					provider,
-					providerSignal as "rate_limit" | "credit_exhausted",
+					providerSignal as ProviderSignal,
 					fullOutput,
 				);
 			}
