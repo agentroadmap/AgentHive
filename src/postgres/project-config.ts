@@ -6,7 +6,7 @@
  * project registry (roadmap.project) and per-project code isolation.
  */
 
-import { createTenantPool } from './pool-registry.ts';
+import { getProjectDb } from './pool-registry.ts';
 
 // Error classes for project configuration
 export class ProjectNotFound extends Error {
@@ -54,7 +54,7 @@ export async function getProjectRepoConfig(
   projectSlug: string,
 ): Promise<ProjectRepoConfig> {
   try {
-    const pool = createTenantPool('agenthive');
+    const pool = await getProjectDb('agenthive');
     const result = await pool.query(
       `SELECT
         slug,
