@@ -292,6 +292,29 @@ function resolvePoolConfig(config?: AgentHivePoolConfig): ResolvedPoolConfig {
 		databaseUrlConfig.database ??
 		StructuralKeys.PGDATABASE.defaultValue ??
 		"agenthive";
+
+	// Live-DB guard: refuse to connect the node:test runner to the live "agenthive"
+	// database. Integration/e2e/control tests write real rows (proposals, agencies,
+	// registry, control-feed events) with no teardown and there is no reaper — a full
+	// `npm test` run against live agenthive pollutes the control plane and false-wakes
+	// the cold-wake liaison. Opt out explicitly with AGENTHIVE_ALLOW_LIVE_DB=1 for the
+	// handful of tests that legitimately need the live DB.
+	const inNodeTestRunner =
+		process.env.NODE_TEST_CONTEXT != null ||
+		process.execArgv.some((a) => a === "--test" || a.startsWith("--test")) ||
+		process.argv.some((a) => a === "--test");
+	if (
+		inNodeTestRunner &&
+		database === "agenthive" &&
+		process.env.AGENTHIVE_ALLOW_LIVE_DB !== "1"
+	) {
+		throw new Error(
+			'[pool] Refusing to connect the test runner to the LIVE database "agenthive". ' +
+				"Tests must run against an isolated database (set PGDATABASE to a test DB), or " +
+				"set AGENTHIVE_ALLOW_LIVE_DB=1 to explicitly override this guard.",
+		);
+	}
+
 	const user = config?.user ?? process.env.PGUSER ?? databaseUrlConfig.user;
 
 	const configuredPassword =
