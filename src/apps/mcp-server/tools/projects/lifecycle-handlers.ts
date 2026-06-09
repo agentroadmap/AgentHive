@@ -158,24 +158,41 @@ async function projectCreateLegacy(args: {
 	try {
 		// Validate slug
 		if (!args.slug) {
-			return errorResult("projectCreateLegacy requires 'slug'", new Error("Missing slug"));
+			return jsonResult({
+				ok: false,
+				error: "missing_slug",
+				message: "projectCreateLegacy requires 'slug'",
+			});
 		}
 
 		const slugValidationError = validateSlug(args.slug);
 		if (slugValidationError) {
-			return errorResult("Invalid slug", new Error(slugValidationError));
+			return jsonResult({
+				ok: false,
+				error: "invalid_slug",
+				slug: args.slug,
+				message: slugValidationError,
+			});
 		}
 
 		const slug = args.slug.trim().toLowerCase();
 
 		// Validate name
 		if (!args.name || typeof args.name !== "string") {
-			return errorResult("projectCreateLegacy requires 'name'", new Error("Missing or invalid name"));
+			return jsonResult({
+				ok: false,
+				error: "missing_name",
+				message: "projectCreateLegacy requires 'name'",
+			});
 		}
 
 		const name = args.name.trim();
 		if (!name.length) {
-			return errorResult("projectCreate requires non-empty name", new Error("name is empty"));
+			return jsonResult({
+				ok: false,
+				error: "empty_name",
+				message: "projectCreate requires non-empty name",
+			});
 		}
 
 		// Compute worktree_root
@@ -218,9 +235,9 @@ async function projectCreateLegacy(args: {
 
 					// Insert repair queue row (within same transaction)
 					await query(
-						`INSERT INTO roadmap.project_repair_queue (project_id, reason, queued_at)
-						 VALUES ($1, $2, NOW())`,
-						[projectId, `worktree_root does not exist: ${worktreeRoot}`]
+						`INSERT INTO roadmap.project_repair_queue (project_id, phase, failure_reason, status)
+						 VALUES ($1, $2, $3, $4)`,
+						[projectId, 'bootstrap', `worktree_root does not exist: ${worktreeRoot}`, 'queued']
 					);
 				}
 
