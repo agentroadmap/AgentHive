@@ -1,0 +1,115 @@
+ruleset: endpoints
+description: Hardcoded service endpoint URLs that block dynamic host/port configuration
+rules:
+  - id: endpoints.mcp-url
+    description: Hardcoded MCP URL (http://127.0.0.1:6421)
+    severity: critical
+    confidence: high
+    proposal: P449
+    tags:
+      - endpoints
+      - mcp
+      - multi-host
+    regex: "http://(127\\.0\\.0\\.1|localhost):6421"
+    file_glob_exclude:
+      - '**/*.test.ts'
+      - 'tests/**'
+    fix_suggestion: |
+      MCP endpoint must be resolved at runtime:
+
+      ```typescript
+      const mcpUrl = getMcpUrl();
+      ```
+
+      Use environment variable MCP_URL.
+    examples_match:
+      - 'const mcpUrl = "http://127.0.0.1:6421";'
+    examples_no_match:
+      - 'const mcpUrl = getMcpUrl();'
+
+  - id: endpoints.daemon-url
+    description: Hardcoded daemon/executor service URL
+    severity: critical
+    confidence: high
+    proposal: P449
+    tags:
+      - endpoints
+      - daemon
+      - service-discovery
+    regex: "http://(127\\.0\\.0\\.1|localhost):(5000|8000|8080)"
+    fix_suggestion: |
+      Daemon endpoints must be discovered dynamically.
+    examples_match:
+      - 'const daemon = "http://127.0.0.1:5000";'
+    examples_no_match:
+      - 'const daemon = getDaemonUrl();'
+
+  - id: endpoints.ws-url
+    description: Hardcoded WebSocket endpoint URL
+    severity: high
+    confidence: high
+    proposal: P449
+    tags:
+      - endpoints
+      - websocket
+      - realtime
+    regex: "ws://(127\\.0\\.0\\.1|localhost):[0-9]{4}"
+    fix_suggestion: |
+      WebSocket endpoints must be resolved at runtime.
+    examples_match:
+      - 'const wsUrl = "ws://127.0.0.1:6421";'
+    examples_no_match:
+      - 'const wsUrl = getWebSocketUrl();'
+
+  - id: endpoints.pg-host
+    description: Hardcoded PostgreSQL host
+    severity: high
+    confidence: medium
+    proposal: P449
+    tags:
+      - endpoints
+      - database
+    regex: "PGHOST=[\"']?(127\\.0\\.0\\.1|localhost)[\"']?"
+    fix_suggestion: |
+      PostgreSQL host must be configured via environment.
+    examples_match:
+      - 'PGHOST=127.0.0.1'
+    examples_no_match:
+      - 'PGHOST=${PGHOST}'
+
+  - id: endpoints.discord-api-url
+    description: Hardcoded Discord API endpoint
+    severity: medium
+    confidence: high
+    proposal: P449
+    tags:
+      - endpoints
+      - external-api
+    pattern: 'https://discord.com/api'
+    fix_suggestion: |
+      Use official Discord client libraries instead.
+    examples_match:
+      - 'const url = "https://discord.com/api/v10";'
+    examples_no_match:
+      - 'const client = new DiscordClient();'
+
+  - id: endpoints.bare-port-numbers
+    description: Bare port numbers without protocol context
+    severity: medium
+    confidence: low
+    proposal: P449
+    tags:
+      - endpoints
+      - port
+    regex: "=\\s*[0-9]{4,5}(?![a-z0-9$])"
+    file_glob_exclude:
+      - '**/*.test.ts'
+      - 'docs/**'
+    fix_suggestion: |
+      Port numbers should be part of configurable URLs.
+
+      Use environment variables instead.
+    examples_match:
+      - 'const port = 5000;'
+    examples_no_match:
+      - 'const port = process.env.PORT || 3000;'

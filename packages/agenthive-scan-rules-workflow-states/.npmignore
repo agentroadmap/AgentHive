@@ -1,0 +1,5 @@
+*.test.ts
+*.test.js
+tsconfig.json
+tests/
+.DS_Store

@@ -1,0 +1,210 @@
+ruleset: paths
+description: Hardcoded filesystem paths that block multi-tenant and cross-host deployment
+rules:
+  - id: paths.agenthive-project-root
+    description: Hardcoded "/data/code/AgentHive" literal outside src/shared/runtime/paths.ts and deployment templates
+    severity: critical
+    confidence: high
+    proposal: P448
+    tags: [paths, multi-tenant, relocation]
+    pattern: '"/data/code/AgentHive"'
+    file_glob_exclude: ['src/shared/runtime/paths.ts', '*.deployment.ts', '*.deployment.js', 'docs/**']
+    fix_suggestion: |
+      Replace the literal with a call to the runtime path resolver:
+
+      ```typescript
+      import { getProjectRoot } from 'src/shared/runtime/paths';
+      const projectRoot = getProjectRoot(); // env-aware, fallback to registered path
+      ```
+
+      The canonical module `src/shared/runtime/paths.ts` provides environment-aware resolution
+      with fallbacks. On host/provider switch, only paths.ts needs update.
+
+      If the module does not yet exist, add `// TODO(P448): use getProjectRoot()` comment.
+    examples_match:
+      - '  const projectRoot = "/data/code/AgentHive";'
+      - 'const AGENTHIVE_HOME = "/data/code/AgentHive";'
+      - 'const path = `${"/data/code/AgentHive"}/src/core`'
+    examples_no_match:
+      - 'const projectRoot = getProjectRoot(); // from src/shared/runtime/paths'
+      - 'const projectRoot = process.env.AGENTHIVE_HOME ?? getProjectRoot();'
+      - '// See /data/code/AgentHive/CONVENTIONS.md for details'
+
+  - id: paths.agenthive-worktree-root
+    description: Hardcoded "/data/code/worktree" path blocking agent worktree relocation
+    severity: critical
+    confidence: high
+    proposal: P448
+    tags: [paths, multi-agent, worktree]
+    pattern: '"/data/code/worktree'
+    file_glob_exclude: ['src/shared/runtime/paths.ts', '*.deployment.ts', 'docs/**']
+    fix_suggestion: |
+      Replace with the worktree root resolver:
+
+      ```typescript
+      import { getWorktreeRoot } from 'src/shared/runtime/paths';
+      const worktreeRoot = getWorktreeRoot(); // resolves CWD-relative sibling
+      ```
+
+      Worktrees are resolved relative to the current working directory, not as absolute paths.
+      This allows parallel agent execution in isolated directories.
+    examples_match:
+      - 'const worktreeDir = "/data/code/worktree";'
+      - 'const path = "/data/code/worktree/p123";'
+    examples_no_match:
+      - 'const worktreeRoot = getWorktreeRoot();'
+      - 'const worktreePath = path.resolve(cwd, "worktree", agentName);'
+
+  - id: paths.legacy-worktree-prefix
+    description: Legacy hyphenated worktree paths ("/data/code/worktree-*") from before P427 normalization
+    severity: high
+    confidence: high
+    proposal: P427
+    tags: [legacy, paths, worktree]
+    pattern: '"/data/code/worktree-'
+    fix_suggestion: |
+      This is a legacy path format. Update to use getWorktreeRoot():
+
+      ```typescript
+      import { getWorktreeRoot } from 'src/shared/runtime/paths';
+      const worktreePath = path.join(getWorktreeRoot(), agentName);
+      ```
+
+      P427 normalizes all worktrees to `/data/code/worktree/<name>` (no hyphen before name).
+    examples_match:
+      - 'const path = "/data/code/worktree-p123-develop";'
+      - 'const dir = "/data/code/worktree-legacy";'
+    examples_no_match:
+      - 'const path = "/data/code/worktree/p123-develop";'
+      - 'const msg = "check /data/code/worktree-related";'
+
+  - id: paths.gitconfig-root
+    description: Hardcoded ".git" config path preventing multi-repo setups
+    severity: high
+    confidence: high
+    proposal: P448
+    tags: [git, paths]
+    pattern: '/data/code/AgentHive/.git'
+    fix_suggestion: |
+      Use git environment variables or programmatic config access:
+
+      ```typescript
+      const gitDir = await execSync('git rev-parse --git-dir', { cwd: projectRoot });
+      ```
+
+      This works across clones, worktrees, and submodules automatically.
+    examples_match:
+      - 'process.env.GIT_DIR = "/data/code/AgentHive/.git";'
+      - 'const gitConfig = "/data/code/AgentHive/.git/config";'
+    examples_no_match:
+      - 'const gitDir = await execSync("git rev-parse --git-dir");'
+
+  - id: paths.home-xiaomi
+    description: Hardcoded "/home/xiaomi" path leaking provider-specific home directory
+    severity: critical
+    confidence: high
+    proposal: P448
+    tags: [identity, paths, provider-leak]
+    pattern: '"/home/xiaomi'
+    file_glob_exclude: ['docs/**', '**/*.test.ts', 'tests/**']
+    fix_suggestion: |
+      Resolve the user home directory dynamically:
+
+      ```typescript
+      import { getOsUser } from 'src/shared/runtime/paths';
+      const userHome = await execSync(`eval echo ~${getOsUser()}`, { shell: '/bin/bash' });
+      ```
+
+      Or use environment variables:
+      ```typescript
+      const userHome = process.env.HOME ?? process.env.USERPROFILE;
+      ```
+
+      This allows the system to work with any OS user account.
+    examples_match:
+      - 'const xiaomiHermes = "/home/xiaomi/.local/bin/hermes";'
+      - 'const hermesConfig = "/home/xiaomi/.hermes";'
+    examples_no_match:
+      - 'const userHome = process.env.HOME;'
+      - 'const userHome = os.homedir();'
+
+  - id: paths.absolute-home-hardcode
+    description: Any hardcoded absolute home path (/home/<word>) without environment fallback
+    severity: high
+    confidence: medium
+    proposal: P448
+    tags: [paths, identity, portability]
+    regex: '"/home/[a-zA-Z_][a-zA-Z0-9_-]*'
+    file_glob_exclude: ['docs/**', '**/*.test.ts', '**/*.spec.ts', 'tests/**']
+    fix_suggestion: |
+      Replace with dynamic home directory resolution:
+
+      ```typescript
+      import os from 'os';
+      const userHome = process.env.HOME ?? os.homedir();
+      ```
+
+      Or for a specific user:
+      ```typescript
+      const userHome = process.env.HOME ?? `/home/${process.env.USER}`;
+      ```
+
+      Never assume a home path; always fall back to environment variables.
+    examples_match:
+      - 'const configDir = "/home/alice/.config";'
+      - 'await fs.copyFile("/home/dev/local.env", targetDir);'
+    examples_no_match:
+      - 'const configDir = process.env.HOME + "/.config";'
+      - 'const homeDir = os.homedir(); const configDir = path.join(homeDir, ".config");'
+
+  - id: paths.docs-tmp-write
+    description: Write target paths in docs/tmp/ indicating misplaced session scratch
+    severity: high
+    confidence: high
+    proposal: P452
+    tags: [folder-discipline, scratch, cleanup]
+    regex: '"docs/tmp/|docs/tmp\\\\"|''docs/tmp/'
+    fix_suggestion: |
+      Session scratch output should go to `tmp/<session-id>/`, not `docs/tmp/`.
+      The `docs/` folder is tracked; `tmp/` is gitignored and auto-reaped.
+
+      ```typescript
+      import path from 'path';
+      const sessionDir = path.join(process.cwd(), 'tmp', SESSION_ID);
+      const reportPath = path.join(sessionDir, 'report.txt');
+      ```
+
+      See CONVENTIONS.md §4a: never write to `docs/tmp/`.
+    examples_match:
+      - 'const outPath = "docs/tmp/analysis-output.json";'
+      - 'fs.writeFileSync("docs/tmp/dump.sql", data);'
+    examples_no_match:
+      - 'const sessionDir = path.join(process.cwd(), "tmp", process.env.SESSION_ID);'
+
+  - id: paths.docs-ship-write
+    description: Write targets in docs/ship/* folders (deprecated, use MCP discussions instead)
+    severity: medium
+    confidence: high
+    proposal: P452
+    tags: [folder-discipline, deprecated]
+    pattern: 'docs/ship'
+    fix_suggestion: |
+      Ship verifications and handoff notes should be recorded in MCP, not as markdown files.
+
+      Use the MCP proposal interface:
+      ```typescript
+      await mcp.prop_update(proposalId, {
+        discussion: {
+          context_prefix: 'ship-verification:',
+          message: 'Tested on staging: ...'
+        }
+      });
+      ```
+
+      See CONVENTIONS.md §4a: never write to `docs/ship/`, `docs/ships/`, `docs/shipping/`, or `docs/ship-reports/`.
+    examples_match:
+      - 'const reportFile = "docs/ship-reports/2026-04-24.md";'
+      - 'writeFile("docs/shipping/handoff.md", summary);'
+    examples_no_match:
+      - 'mcpClient.add_discussion(proposalId, { context_prefix: "ship-verification:" });'
+      - 'const shipName = "starship"; // not a path'

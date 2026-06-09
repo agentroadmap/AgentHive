@@ -1,0 +1,35 @@
+{
+  "name": "@agenthive/scan-rules-workflow-states",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Hardcoding scanner rule pack for workflow state detection (RFC states, hotfix/maturity markers, legacy patterns)",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test tests/**/*.test.ts"
+  },
+  "peerDependencies": {
+    "@agenthive/scan-core": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "keywords": [
+    "scan",
+    "hardcoding",
+    "workflow-states",
+    "rfc",
+    "maturity"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/agenthive/scan"
+  }
+}
