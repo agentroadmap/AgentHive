@@ -298,6 +298,8 @@ describe("ALL_CAPS_TOKENS — exported constant (AC-6)", () => {
 		for (const token of ["qa", "ai", "ml", "sre", "ux", "ui", "api"]) {
 			expect(ALL_CAPS_TOKENS).toContain(token);
 		}
+	});
+});
 describe("pascalCaseHost — P932 host normalisation", () => {
 	it("bare lowercase → capitalised", () => {
 		expect(pascalCaseHost("bot")).toBe("Bot");
