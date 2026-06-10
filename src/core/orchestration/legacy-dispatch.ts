@@ -1821,6 +1821,124 @@ async function claimImplicitGateReady(
 	return rows;
 }
 
+/**
+ * P1292 AC-8: Gate completion listener.
+ *
+ * Routes gate offer_completed notifications to maturity advance or hold.
+ * Triggered by orchestrator.ts:onNotification when offer_completed is fired.
+ *
+ * Logic:
+ * 1. Look up the dispatch row by id and extract metadata
+ * 2. If metadata.gate_role is not set, skip (not a gate dispatch)
+ * 3. Look up proposal state and compare against metadata.gate_to_stage
+ * 4. If states match (normalized): set maturity='new', release lease with 'gate_review_complete'
+ * 5. If states diverge: release lease with 'gate_hold' (proposal already diverged during execution)
+ */
+export async function handleGateCompletion(dispatchId: number): Promise<void> {
+	try {
+		// Look up the dispatch row + its metadata
+		const { rows: dispatchRows } = await query<{
+			proposal_id: number;
+			lease_id: number | null;
+			metadata: Record<string, unknown>;
+		}>(
+			`SELECT proposal_id, lease_id, metadata
+			   FROM roadmap_workforce.squad_dispatch
+			  WHERE id = $1`,
+			[dispatchId],
+		);
+
+		if (dispatchRows.length === 0) {
+			logger.warn(
+				`handleGateCompletion: dispatch ${dispatchId} not found`,
+			);
+			return;
+		}
+
+		const dispatch = dispatchRows[0];
+		const { proposal_id: proposalId, lease_id: leaseId, metadata } = dispatch;
+
+		// Check if this is a gate dispatch (AC-8 step 2)
+		const gateRole = metadata?.gate_role as string | undefined;
+		if (!gateRole) {
+			// Not a gate dispatch — skip
+			return;
+		}
+
+		const gateToStage = metadata?.gate_to_stage as string | undefined;
+		if (!gateToStage) {
+			logger.warn(
+				`handleGateCompletion: dispatch ${dispatchId} has gate_role but missing gate_to_stage`,
+			);
+			// Fallback: release lease without advancing maturity
+			if (leaseId) {
+				await releaseDispatchLease(dispatchId, "gate_incomplete");
+			}
+			return;
+		}
+
+		// Look up current proposal state
+		const { rows: propRows } = await query<{
+			status: string | null;
+			maturity: string | null;
+		}>(
+			`SELECT status, maturity
+			   FROM roadmap_proposal.proposal
+			  WHERE id = $1`,
+			[proposalId],
+		);
+
+		if (propRows.length === 0) {
+			logger.warn(
+				`handleGateCompletion: proposal ${proposalId} not found`,
+			);
+			// Proposal disappeared — release lease
+			if (leaseId) {
+				await releaseDispatchLease(dispatchId, "proposal_missing");
+			}
+			return;
+		}
+
+		const proposal = propRows[0];
+		const currentStatus = proposal.status?.trim().toUpperCase() ?? "";
+		const normalizedGateToStage = gateToStage.trim().toUpperCase();
+
+		// AC-8 step 4: Compare current state against gate_to_stage
+		if (currentStatus === normalizedGateToStage) {
+			// State matches — gate completed successfully
+			// AC-8 step 5: set maturity='new' and release with 'gate_review_complete'
+			const orchestratorId = "agenthive/orchestrator";
+			await setProposalMaturity(
+				proposalId,
+				"new",
+				orchestratorId,
+				"gate_review_complete",
+			);
+			if (leaseId) {
+				await releaseDispatchLease(dispatchId, "gate_review_complete");
+			}
+			logger.log(
+				`Gate completion for P${proposalId}: state matches ${normalizedGateToStage}, maturity set to 'new'`,
+			);
+		} else {
+			// State diverged — proposal changed during gate execution
+			// AC-8 step 5: release lease with 'gate_hold' but don't advance maturity
+			if (leaseId) {
+				await releaseDispatchLease(dispatchId, "gate_hold");
+			}
+			logger.log(
+				`Gate completion for P${proposalId}: state diverged (was ${currentStatus}, expected ${normalizedGateToStage}), holding`,
+			);
+		}
+	} catch (err) {
+		const errMsg = err instanceof Error ? err.message : String(err);
+		logger.error(
+			`handleGateCompletion(${dispatchId}) failed: ${errMsg}`,
+		);
+		// Best effort — don't crash the orchestrator on gate completion errors
+	}
+}
+
 export async function dispatchImplicitGate(
 	proposalId: number,
 	reason: string,
