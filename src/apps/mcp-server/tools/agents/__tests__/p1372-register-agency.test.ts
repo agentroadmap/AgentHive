@@ -72,6 +72,12 @@ async function getAgencyRow(agencyId: string): Promise<any> {
 describe("P1372: registerAgency handler", () => {
 	beforeEach(async () => {
 		await cleanupTest();
+		// Ensure test hosts exist in host_model_policy
+		await query(
+			`INSERT INTO roadmap.host_model_policy (host_name, allowed_providers) VALUES ($1, $2), ($3, $2), ($4, $2)
+			 ON CONFLICT (host_name) DO NOTHING`,
+			["bot", '{"claude","codex","gemini"}', "iMac", "custom-host"],
+		);
 	});
 
 	afterEach(async () => {
