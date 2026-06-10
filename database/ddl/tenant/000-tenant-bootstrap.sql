@@ -50,8 +50,9 @@ CREATE TABLE IF NOT EXISTS ${SCHEMA_PREFIX}meta.tenant_info (
   v TEXT NOT NULL
 );
 
--- Safe INSERT: use parameter placeholders instead of string literal substitution
--- This prevents SQL injection if slug contains quotes or other special chars
+-- String interpolation for ${SLUG} is safe because P495 validates the slug against
+-- the kebab-case regex before substitution: ^[a-z0-9]([a-z0-9\-]*[a-z0-9])?$
+-- This prevents SQL injection even though we use string literal substitution.
 INSERT INTO ${SCHEMA_PREFIX}meta.tenant_info (k, v) VALUES
   ('slug', '${SLUG}'),
   ('created_at', now()::text),
