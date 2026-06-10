@@ -17,30 +17,13 @@
  */
 
 import assert from "node:assert";
-import { beforeEach, describe, it } from "node:test";
+import { describe, it } from "node:test";
 import {
 	checkAndEnforceRateLimit,
 	checkRateLimitInMemory,
 } from "../../src/apps/mcp-server/tools/messages/rate-limiter.ts";
 
-// Mock the database query function
-let _auditedViolations: Array<{
-	from_agent: string;
-	channel?: string;
-	reason: string;
-	retry_after: number;
-}> = [];
-
-// We'll need to mock the query function at module import time
-// For now, we focus on the in-memory limiter logic
-
 describe("P1100: Rate Limiter", () => {
-	beforeEach(() => {
-		_auditedViolations = [];
-		// Reset in-memory state between tests
-		// (Note: this would require exposing a reset function in the limiter module)
-	});
-
 	describe("AC-1: Per-sender token bucket sustained rate (10 msg/sec)", () => {
 		it("enforces sustained rate by refilling tokens over time", () => {
 			// The sustained rate is 10 msg/sec, achieved via token refill (1 token per 100ms)

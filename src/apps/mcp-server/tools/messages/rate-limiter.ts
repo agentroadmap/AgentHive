@@ -87,7 +87,11 @@ function getOrCreateBucket(fromAgent: string): TokenBucket {
 			backoffStage: 0,
 		});
 	}
-	return inMemoryBuckets.get(key)!;
+	const bucket = inMemoryBuckets.get(key);
+	if (!bucket) {
+		throw new Error(`Failed to get or create bucket for ${key}`);
+	}
+	return bucket;
 }
 
 function getOrCreateChannelWindow(channel: string): ChannelWindow {
@@ -99,7 +103,10 @@ function getOrCreateChannelWindow(channel: string): ChannelWindow {
 		});
 	}
 
-	const window = inMemoryChannelWindows.get(channel)!;
+	const window = inMemoryChannelWindows.get(channel);
+	if (!window) {
+		throw new Error(`Failed to get or create channel window for ${channel}`);
+	}
 
 	// Reset window if it's older than CHANNEL_WINDOW_MS
 	if (now - window.windowStartAt > CHANNEL_WINDOW_MS) {
