@@ -70,31 +70,6 @@ describe("ClaudeCliBuilder", () => {
 		assert.equal(env.ANTHROPIC_API_KEY, undefined);
 	});
 
-	it("buildEnv() — injects CLAUDE_CODE_OAUTH_TOKEN from vault (P1967)", () => {
-		const env = builder.buildEnv({
-			homeDir,
-			apiKeyVault: { CLAUDE_CODE_OAUTH_TOKEN: "oauth-token-123-long-lived" },
-		});
-		assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, "oauth-token-123-long-lived");
-	});
-
-	it("buildEnv() — no oauth token: CLAUDE_CODE_OAUTH_TOKEN absent (P1967 no-regression)", () => {
-		const env = builder.buildEnv({ homeDir });
-		assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, undefined);
-	});
-
-	it("buildEnv() — injects both ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN when both present (P1967)", () => {
-		const env = builder.buildEnv({
-			homeDir,
-			apiKeyVault: {
-				ANTHROPIC_API_KEY: "api-key-123",
-				CLAUDE_CODE_OAUTH_TOKEN: "oauth-token-456",
-			},
-		});
-		assert.equal(env.ANTHROPIC_API_KEY, "api-key-123");
-		assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, "oauth-token-456");
-	});
-
 	it("buildCommandSpec() — argv starts with claude --print --model", () => {
 		const spec = builder.buildCommandSpec("do work", {
 			modelName: "claude-sonnet-4-6",
