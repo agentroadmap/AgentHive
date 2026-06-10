@@ -5,7 +5,10 @@
  */
 
 /** P742 Layer 1: host_model_policy allowlist/denylist. */
-export function hostPolicyFilterSql(hostParamIdx: number, alias = "mr"): string {
+export function hostPolicyFilterSql(
+	hostParamIdx: number,
+	alias = "mr",
+): string {
 	return `(
 		EXISTS (
 			SELECT 1 FROM roadmap.host_model_policy hp
@@ -24,7 +27,10 @@ export function hostPolicyFilterSql(hostParamIdx: number, alias = "mr"): string 
 }
 
 /** P771 Layer 2: project_route_policy allowlist/denylist. */
-export function projectPolicyFilterSql(projectParamIdx: number, alias = "mr"): string {
+export function projectPolicyFilterSql(
+	projectParamIdx: number,
+	alias = "mr",
+): string {
 	return `(
 		$${projectParamIdx}::bigint IS NULL
 		OR NOT EXISTS (
@@ -40,34 +46,50 @@ export function projectPolicyFilterSql(projectParamIdx: number, alias = "mr"): s
 	)`;
 }
 
-/** P771 Layer 3: agency_route_policy provider allowlist/denylist.
+/** P768 Layer 3: agency_route_policy per-route allow/deny (normalized schema).
  *
- * Rewritten 2026-05-19 (Bug 6 fix) to match the live schema, which is
- * provider-allowlist shape — same as project_route_policy — keyed by
- * agency_identity. The prior implementation referenced a normalized
- * per-route ACL shape (agency_id + route_id + scope + lifecycle_status
- * + allowed) that no longer exists in the live DB; every spawn through
- * agent-spawner crashed with `column arp.agency_id does not exist`.
+ * Implements fail-closed semantics: a DENY row (allowed=false) excludes a route.
+ * No row or ALLOW row (allowed=true) permits the route.
+ * Joins agency.agency by identity, then checks agency_route_policy per-route.
  */
-export function agencyPolicyFilterSql(agencyParamIdx: number, alias = "mr"): string {
+export function agencyPolicyFilterSql(
+	agencyParamIdx: number,
+	alias = "mr",
+): string {
 	return `(
 		$${agencyParamIdx}::text IS NULL
 		OR NOT EXISTS (
+			SELECT 1 FROM roadmap.agency a
+			 WHERE a.agency_id = $${agencyParamIdx}::text
+		)
+		OR NOT EXISTS (
 			SELECT 1 FROM roadmap.agency_route_policy arp
-			 WHERE arp.agency_identity = $${agencyParamIdx}::text
+			 WHERE arp.agency_id = $${agencyParamIdx}::text
+		)
+		OR NOT EXISTS (
+			SELECT 1 FROM roadmap.agency_route_policy arp
+			 WHERE arp.agency_id = $${agencyParamIdx}::text
+			   AND arp.route_id = ${alias}.id
+			   AND arp.scope = 'global'
+			   AND arp.lifecycle_status = 'active'
+			   AND arp.allowed = false
 		)
 		OR EXISTS (
 			SELECT 1 FROM roadmap.agency_route_policy arp
-			 WHERE arp.agency_identity = $${agencyParamIdx}::text
-			   AND (array_length(arp.allowed_route_providers, 1) IS NULL
-			        OR ${alias}.route_provider = ANY(arp.allowed_route_providers))
-			   AND NOT (${alias}.route_provider = ANY(COALESCE(arp.forbidden_route_providers, '{}')))
+			 WHERE arp.agency_id = $${agencyParamIdx}::text
+			   AND arp.route_id = ${alias}.id
+			   AND arp.scope = 'global'
+			   AND arp.lifecycle_status = 'active'
+			   AND arp.allowed = true
 		)
 	)`;
 }
 
 /** P771 Layer 4: agent_role_profile route constraints. */
-export function rolePolicyFilterSql(roleParamIdx: number, alias = "mr"): string {
+export function rolePolicyFilterSql(
+	roleParamIdx: number,
+	alias = "mr",
+): string {
 	return `(
 		$${roleParamIdx}::bigint IS NULL
 		OR NOT EXISTS (

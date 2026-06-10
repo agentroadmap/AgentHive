@@ -24,7 +24,10 @@ function normalize(sql: string): string {
 describe("projectPolicyFilterSql (Layer 2)", () => {
 	it("includes null-skip clause so a null project_id passes all routes", () => {
 		const sql = normalize(projectPolicyFilterSql(4));
-		assert.ok(sql.includes("$4::bigint IS NULL"), "must short-circuit when param is NULL");
+		assert.ok(
+			sql.includes("$4::bigint IS NULL"),
+			"must short-circuit when param is NULL",
+		);
 	});
 
 	it("skips filter when no project_route_policy row exists", () => {
@@ -37,7 +40,10 @@ describe("projectPolicyFilterSql (Layer 2)", () => {
 
 	it("checks allowed_route_providers allowlist", () => {
 		const sql = normalize(projectPolicyFilterSql(4));
-		assert.ok(sql.includes("allowed_route_providers"), "must reference allowed_route_providers");
+		assert.ok(
+			sql.includes("allowed_route_providers"),
+			"must reference allowed_route_providers",
+		);
 		assert.ok(
 			sql.includes("route_provider = ANY(pp.allowed_route_providers)"),
 			"must check route_provider against allowlist",
@@ -47,7 +53,9 @@ describe("projectPolicyFilterSql (Layer 2)", () => {
 	it("checks forbidden_route_providers denylist", () => {
 		const sql = normalize(projectPolicyFilterSql(4));
 		assert.ok(
-			sql.includes("NOT (mr.route_provider = ANY(COALESCE(pp.forbidden_route_providers"),
+			sql.includes(
+				"NOT (mr.route_provider = ANY(COALESCE(pp.forbidden_route_providers",
+			),
 			"must exclude forbidden providers",
 		);
 	});
@@ -71,17 +79,21 @@ describe("projectPolicyFilterSql (Layer 2)", () => {
 describe("agencyPolicyFilterSql (Layer 3)", () => {
 	it("includes null-skip clause for null agency identity", () => {
 		const sql = normalize(agencyPolicyFilterSql(5));
-		assert.ok(sql.includes("$5::text IS NULL"), "must short-circuit when param is NULL");
+		assert.ok(
+			sql.includes("$5::text IS NULL"),
+			"must short-circuit when param is NULL",
+		);
 	});
 
 	it("skips filter when the agency identity does not resolve or has no active policy rows", () => {
 		const sql = normalize(agencyPolicyFilterSql(5));
 		assert.ok(
-			sql.includes("FROM agency.agency a") && sql.includes("a.agency_id = $5::text"),
+			sql.includes("FROM roadmap.agency a") &&
+				sql.includes("a.agency_id = $5::text"),
 			"must resolve the agency by identity",
 		);
 		assert.ok(
-			sql.includes("NOT EXISTS") && sql.includes("agency.agency_route_policy"),
+			sql.includes("NOT EXISTS") && sql.includes("roadmap.agency_route_policy"),
 			"must open-pass when no active policy row is present",
 		);
 	});
@@ -92,7 +104,10 @@ describe("agencyPolicyFilterSql (Layer 3)", () => {
 			sql.includes("arp.route_id = mr.id"),
 			"must match the policy row to the candidate route id",
 		);
-		assert.ok(sql.includes("arp.allowed = true"), "must permit explicit allow rows");
+		assert.ok(
+			sql.includes("arp.allowed = true"),
+			"must permit explicit allow rows",
+		);
 	});
 
 	it("excludes routes with an active allowed=false row", () => {
@@ -105,7 +120,10 @@ describe("agencyPolicyFilterSql (Layer 3)", () => {
 
 	it("filters only global active policy rows", () => {
 		const sql = normalize(agencyPolicyFilterSql(5));
-		assert.ok(sql.includes("arp.scope = 'global'"), "must restrict to global scope rows");
+		assert.ok(
+			sql.includes("arp.scope = 'global'"),
+			"must restrict to global scope rows",
+		);
 		assert.ok(
 			sql.includes("arp.lifecycle_status = 'active'"),
 			"must ignore non-active policy rows",
@@ -123,7 +141,10 @@ describe("agencyPolicyFilterSql (Layer 3)", () => {
 describe("rolePolicyFilterSql (Layer 4)", () => {
 	it("includes null-skip clause for null role profile id", () => {
 		const sql = normalize(rolePolicyFilterSql(6));
-		assert.ok(sql.includes("$6::bigint IS NULL"), "must short-circuit when param is NULL");
+		assert.ok(
+			sql.includes("$6::bigint IS NULL"),
+			"must short-circuit when param is NULL",
+		);
 	});
 
 	it("skips filter when no agent_role_profile row exists", () => {
@@ -161,12 +182,18 @@ describe("rolePolicyFilterSql (Layer 4)", () => {
 describe("budgetFilterSql (Layer 5)", () => {
 	it("includes null-skip clause for null project id", () => {
 		const sql = normalize(budgetFilterSql(4));
-		assert.ok(sql.includes("$4::bigint IS NULL"), "must short-circuit when param is NULL");
+		assert.ok(
+			sql.includes("$4::bigint IS NULL"),
+			"must short-circuit when param is NULL",
+		);
 	});
 
 	it("references route_token_budget table", () => {
 		const sql = normalize(budgetFilterSql(4));
-		assert.ok(sql.includes("route_token_budget"), "must query route_token_budget");
+		assert.ok(
+			sql.includes("route_token_budget"),
+			"must query route_token_budget",
+		);
 	});
 
 	it("uses hour_window = date_trunc('hour', NOW())", () => {
@@ -193,13 +220,17 @@ describe("budgetFilterSql (Layer 5)", () => {
 		const sql = normalize(budgetFilterSql(4));
 		assert.ok(
 			sql.includes("rtb.route_provider = mr.route_provider") ||
-				sql.includes("rtb.route_provider =") && sql.includes("route_provider"),
+				(sql.includes("rtb.route_provider =") &&
+					sql.includes("route_provider")),
 			"must filter by route_provider",
 		);
 	});
 
 	it("binds project_id to the correct param index", () => {
 		const sql = normalize(budgetFilterSql(3));
-		assert.ok(sql.includes("rtb.project_id = $3::bigint") || sql.includes("$3::bigint"), "must use param index 3");
+		assert.ok(
+			sql.includes("rtb.project_id = $3::bigint") || sql.includes("$3::bigint"),
+			"must use param index 3",
+		);
 	});
 });
