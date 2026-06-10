@@ -270,7 +270,7 @@ export default function App() {
 							<AgenciesPage />
 						</Route>
 						<Route path="/achievements">
-							<AchievementsView />
+							<AchievementsView proposals={sharedProposals} />
 						</Route>
 						<Route path="/settings">
 							<SettingsPage />

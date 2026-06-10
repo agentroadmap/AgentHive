@@ -38,3 +38,30 @@ export function maturityBadgeColors(maturity?: string | null): string {
 			return "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300";
 	}
 }
+
+/** General status colors for workflow status, agent activity, dispatch status, etc. */
+export function statusBadgeColors(value?: string | null): string {
+	switch ((value ?? "").toLowerCase()) {
+		case "active":
+		case "assigned":
+		case "open":
+		case "healthy":
+			return "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300";
+		case "mature":
+		case "complete":
+		case "completed":
+		case "delivered":
+			return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300";
+		case "blocked":
+		case "claimed":
+		case "degraded":
+			return "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300";
+		case "obsolete":
+		case "offline":
+		case "expired":
+		case "rejected":
+			return "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300";
+		default:
+			return "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300";
+	}
+}
