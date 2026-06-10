@@ -20,6 +20,7 @@ import { getPool, query } from "../../../../postgres/pool.ts";
 import { agentContextStorage } from "../../../../shared/identity/agent-context.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
+import { checkAndEnforceRateLimit } from "./rate-limiter.ts";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
 	return {
@@ -397,6 +398,17 @@ export class PgMessagingHandlers {
 						],
 					};
 				}
+			}
+
+			// P1100 AC-4: Rate limit enforcement before side effects
+			// Check and enforce per-sender rate limit + global channel limit
+			// (P1099: key on the canonical identity so slash/case variants share a bucket)
+			const rateLimitCheck = await checkAndEnforceRateLimit(
+				canonicalFromAgent,
+				args.channel,
+			);
+			if (!rateLimitCheck.allowed) {
+				return rateLimitCheck.result;
 			}
 
 			// AC#2: Enforce ACL before inserting. DMs require an explicit grant;
