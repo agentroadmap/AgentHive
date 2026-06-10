@@ -233,7 +233,8 @@ export async function checkTopology(ctx: HiveContext, probers: TopologyProbers =
   const execFn = probers.execSync ?? (await import("node:child_process")).execSync;
   const queryFn = probers.poolQuery ?? ((sql: string, params: unknown[]) => getPool().query<{ agent_identity: string; is_attached: boolean }>(sql, params));
   const probeFn = probers.probeHealth ?? probeHealthDefault;
-  const host = ctx.host ?? (await import("node:os")).hostname();
+  // || not ??: an empty-string host (unset AGENTHIVE_HOST) must also fall back
+  const host = ctx.host || (await import("node:os")).hostname();
 
   const dataSourceErrors: string[] = [];
 
