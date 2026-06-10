@@ -33,7 +33,7 @@ var __toESM = (mod, isNodeMode, target) => {
 var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
-// node_modules/picocolors/picocolors.js
+// ../../../node_modules/picocolors/picocolors.js
 var require_picocolors = __commonJS((exports, module) => {
   var p = process || {};
   var argv = p.argv || [];
@@ -103,7 +103,7 @@ var require_picocolors = __commonJS((exports, module) => {
   module.exports.createColors = createColors;
 });
 
-// node_modules/sisteransi/src/index.js
+// ../../../node_modules/sisteransi/src/index.js
 var require_src = __commonJS((exports, module) => {
   var ESC = "\x1B";
   var CSI = `${ESC}[`;
@@ -161,7 +161,7 @@ var require_src = __commonJS((exports, module) => {
   module.exports = { cursor, scroll, erase, beep };
 });
 
-// node_modules/commander/lib/error.js
+// ../../../node_modules/commander/lib/error.js
 var require_error = __commonJS((exports) => {
   class CommanderError extends Error {
     constructor(exitCode, code, message) {
@@ -185,7 +185,7 @@ var require_error = __commonJS((exports) => {
   exports.InvalidArgumentError = InvalidArgumentError;
 });
 
-// node_modules/commander/lib/argument.js
+// ../../../node_modules/commander/lib/argument.js
 var require_argument = __commonJS((exports) => {
   var { InvalidArgumentError } = require_error();
 
@@ -265,7 +265,7 @@ var require_argument = __commonJS((exports) => {
   exports.humanReadableArgName = humanReadableArgName;
 });
 
-// node_modules/commander/lib/help.js
+// ../../../node_modules/commander/lib/help.js
 var require_help = __commonJS((exports) => {
   var { humanReadableArgName } = require_argument();
 
@@ -622,7 +622,7 @@ ${itemIndentStr}`);
   exports.stripColor = stripColor;
 });
 
-// node_modules/commander/lib/option.js
+// ../../../node_modules/commander/lib/option.js
 var require_option = __commonJS((exports) => {
   var { InvalidArgumentError } = require_error();
 
@@ -806,7 +806,7 @@ var require_option = __commonJS((exports) => {
   exports.DualOptions = DualOptions;
 });
 
-// node_modules/commander/lib/suggestSimilar.js
+// ../../../node_modules/commander/lib/suggestSimilar.js
 var require_suggestSimilar = __commonJS((exports) => {
   var maxDistance = 3;
   function editDistance(a, b) {
@@ -879,7 +879,7 @@ var require_suggestSimilar = __commonJS((exports) => {
   exports.suggestSimilar = suggestSimilar;
 });
 
-// node_modules/commander/lib/command.js
+// ../../../node_modules/commander/lib/command.js
 var require_command = __commonJS((exports) => {
   var EventEmitter = __require("node:events").EventEmitter;
   var childProcess = __require("node:child_process");
@@ -2234,7 +2234,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
   exports.useColor = useColor;
 });
 
-// node_modules/commander/index.js
+// ../../../node_modules/commander/index.js
 var require_commander = __commonJS((exports) => {
   var { Argument } = require_argument();
   var { Command } = require_command();
@@ -2262,7 +2262,7 @@ import { userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// node_modules/@clack/core/dist/index.mjs
+// ../../../node_modules/@clack/core/dist/index.mjs
 var import_picocolors = __toESM(require_picocolors(), 1);
 var import_sisteransi = __toESM(require_src(), 1);
 import { stdout as R, stdin as q } from "node:process";
@@ -2777,7 +2777,7 @@ class yt extends x {
   }
 }
 
-// node_modules/@clack/prompts/dist/index.mjs
+// ../../../node_modules/@clack/prompts/dist/index.mjs
 var import_picocolors2 = __toESM(require_picocolors(), 1);
 import N2 from "node:process";
 var import_sisteransi2 = __toESM(require_src(), 1);
@@ -3150,7 +3150,7 @@ var bt2 = ({ indicator: t = "dots", onCancel: r, output: s = process.stdout, can
 var zt = { light: C("─", "-"), heavy: C("━", "="), block: C("█", "#") };
 var Qt = `${import_picocolors2.default.gray(d)}  `;
 
-// node_modules/commander/esm.mjs
+// ../../../node_modules/commander/esm.mjs
 var import__ = __toESM(require_commander(), 1);
 var {
   program,

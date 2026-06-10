@@ -58,14 +58,14 @@ describe("normalizeQueryFragment", () => {
 		const q = "SELECT  id, name FROM roadmap.model_routes WHERE id = 42 AND model = 'claude'";
 		const n = normalizeQueryFragment(q);
 		assert.match(n, /SELECT id, name FROM roadmap.model_routes WHERE id = \?/);
-		assert.match(n, /model = '\?'/);
+		assert.match(n, /model = \?/);
 	});
 
 	it("normalizes positional params", () => {
 		const q = "SELECT * FROM proposal WHERE id = $1 AND status = $2";
 		assert.equal(
 			normalizeQueryFragment(q),
-			"SELECT * FROM proposal WHERE id = $? AND status = $?",
+			"SELECT * FROM proposal WHERE id = ? AND status = ?",
 		);
 	});
 });

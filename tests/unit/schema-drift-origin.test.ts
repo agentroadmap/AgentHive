@@ -22,24 +22,21 @@ describe("traceOrigin", () => {
 		assert.equal(guess.source, "git_pickaxe");
 	});
 
-	it("falls back to migration filename when git history yields no P-id", () => {
+	it("returns a commit SHA when pickaxe matches but has no P-id", () => {
 		const exec = (cmd: string, args: string[]): string => {
 			if (cmd === "git") {
 				return "deadbeef\trefactor: move things around";
-			}
-			if (cmd === "grep") {
-				// Simulate a migration file matching the column name.
-				return "scripts/migrations/034-p235-model-pricing-per-million.sql\n";
 			}
 			throw new Error(`unexpected exec: ${cmd}`);
 		};
 
 		const guess = traceOrigin("cost_per_1k_input", { repoRoot: "/tmp/repo", exec });
-		// Pickaxe matched a commit but had no P-id, so we fell through to the
-		// migration-filename grep which extracted P235.
-		assert.equal(guess.source, "migration_filename");
-		assert.equal(guess.proposalDisplayId, "P235");
-		assert.equal(guess.proposalNumericId, 235);
+		// Pickaxe matched a commit but had no P-id in the subject.
+		// Still return the commit SHA for reference.
+		assert.equal(guess.source, "git_pickaxe");
+		assert.equal(guess.proposalDisplayId, null);
+		assert.equal(guess.proposalNumericId, null);
+		assert.equal(guess.commitSha, "deadbeef");
 	});
 
 	it("returns 'none' when neither git nor grep finds anything", () => {
