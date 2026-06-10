@@ -26,6 +26,17 @@ export interface LiaisonRegisterPayload {
 	capacity_envelope?: Record<string, unknown>;
 	public_key?: string;
 	metadata?: Record<string, unknown>;
+	/**
+	 * P1142 follow-up: when true, the stale-session heal ends ANY open session
+	 * for this agency, ignoring the heartbeat-freshness guard. Only safe for
+	 * callers that are provably the sole liaison host for the agency — i.e. the
+	 * systemd-singleton a2a-host booting agencies bound to its own host. The
+	 * fail-fast exit(1) on LISTEN errors restarts within seconds, while the dead
+	 * instance's last heartbeat is still <60s fresh; without this flag the heal
+	 * skips and the unique active-session index blocks re-registration
+	 * (observed live 2026-06-10: reborn host booted "0 of 2 agencies online").
+	 */
+	supersede_stale_session?: boolean;
 }
 
 export interface LiaisonHeartbeatPayload {
@@ -69,6 +80,7 @@ export async function liaisonRegister(
 		capacity_envelope = {},
 		public_key,
 		metadata = {},
+		supersede_stale_session = false,
 	} = payload;
 
 	if (!agency_id?.trim()) throw new Error("agency_id is required");
@@ -102,19 +114,30 @@ export async function liaisonRegister(
 	// liaison IS heartbeating, this is a no-op and the INSERT below correctly hits
 	// the unique index — rejecting the second liaison instead of split-braining.
 	// A separate statement (not a racing CTE) keeps the heal deterministic.
+	// P1142 follow-up: a singleton host restarting after fail-fast exit(1) may
+	// re-register while the dead instance's heartbeat is still fresh — the
+	// freshness guard would wrongly skip the heal. supersede_stale_session=true
+	// (set only by the systemd-singleton a2a-host for its own host-bound
+	// agencies) ends the open session unconditionally.
 	await runQuery(
 		`UPDATE roadmap.agency_liaison_session s
 		    SET ended_at = now(),
-		        end_reason = COALESCE(end_reason, 'orphan-heal-on-register')
+		        end_reason = COALESCE(end_reason, $2)
 		  WHERE s.agency_id = $1
 		    AND s.ended_at IS NULL
-		    AND NOT EXISTS (
+		    AND ($3 OR NOT EXISTS (
 		      SELECT 1 FROM roadmap.agency a
 		       WHERE a.agency_id = $1
 		         AND a.last_heartbeat_at IS NOT NULL
 		         AND a.last_heartbeat_at > now() - interval '60 seconds'
-		    )`,
-		[agency_id],
+		    ))`,
+		[
+			agency_id,
+			supersede_stale_session
+				? "superseded-on-host-restart"
+				: "orphan-heal-on-register",
+			supersede_stale_session,
+		],
 	);
 
 	const result = (await runQuery(

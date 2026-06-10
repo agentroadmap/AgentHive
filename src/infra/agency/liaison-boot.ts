@@ -122,7 +122,12 @@ export async function bootLiaison(
       }
     : { ...readAgencyConfig(), ...configOverride };
 
-  // AC#2: Registration handshake — liaison calls liaison_register
+  // AC#2: Registration handshake — liaison calls liaison_register.
+  // supersede_stale_session: the a2a-host is a systemd singleton per host and
+  // its agencies are host-bound, so any open session at boot belongs to a dead
+  // predecessor (e.g. P1142 fail-fast exit(1) restarts within seconds, while
+  // the dead instance's heartbeat is still fresh enough to defeat the
+  // freshness-guarded orphan heal).
   const session = await liaisonRegister({
     agency_id: config.agency_id,
     display_name: config.display_name,
@@ -131,6 +136,7 @@ export async function bootLiaison(
     capabilities: config.capabilities,
     capacity_envelope: {},
     public_key: config.public_key,
+    supersede_stale_session: true,
   });
 
   // Start bidirectional message hub — listens for uplink messages from subagents
