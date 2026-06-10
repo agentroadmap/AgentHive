@@ -20,7 +20,10 @@ import {
 } from "./allowlist-handlers.ts";
 import {
 	listProjects,
+	projectArchive,
+	projectDelete,
 	projectHealthCheck,
+	projectReactivate,
 	setProject,
 	updateProjectRegistry,
 } from "./handlers.ts";
@@ -401,6 +404,87 @@ export function registerProjectTools(server: McpServer): void {
 				project_id: args.project_id as number,
 				period: args.period as "day" | "week" | "month",
 				max_usd_cents: args.max_usd_cents as number,
+			});
+		},
+	} as McpToolHandler);
+
+	server.addTool({
+		name: "project_archive",
+		description:
+			"Archive a project (AC-3). Sets status=archived and dispatch handler refuses claims for archived projects. Returns {ok, project, message}.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				project: {
+					type: "string",
+					description: "Project slug or numeric project_id.",
+				},
+				reason: {
+					type: "string",
+					description:
+						"(Optional) Reason for archiving. Default: 'Archived by operator'.",
+				},
+			},
+			required: ["project"],
+		},
+		async handler(args: Record<string, unknown>): Promise<CallToolResult> {
+			return projectArchive({
+				project: args.project as string | undefined,
+				reason: args.reason as string | undefined,
+			});
+		},
+	} as McpToolHandler);
+
+	server.addTool({
+		name: "project_reactivate",
+		description:
+			"Reactivate an archived project (AC-3). Sets status=active and clears archived_at. Returns {ok, project, message}.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				project: {
+					type: "string",
+					description: "Project slug or numeric project_id.",
+				},
+			},
+			required: ["project"],
+		},
+		async handler(args: Record<string, unknown>): Promise<CallToolResult> {
+			return projectReactivate({
+				project: args.project as string | undefined,
+			});
+		},
+	} as McpToolHandler);
+
+	server.addTool({
+		name: "project_delete",
+		description:
+			"Delete a project with safety guards (AC-4). Refuses unless (a) zero non-archived proposals AND (b) confirm_slug matches. Performs cascade delete on routes, capabilities, budgets. Returns {ok, deleted, message}.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				project: {
+					type: "string",
+					description: "Project slug or numeric project_id.",
+				},
+				confirm_slug: {
+					type: "string",
+					description:
+						"Must match the project slug exactly to proceed. Prevents accidental deletion.",
+				},
+				force: {
+					type: "boolean",
+					description:
+						"(Optional) If true, cascade-delete dependent rows (cubics, channels, templates). Default: false (block on dependencies).",
+				},
+			},
+			required: ["project", "confirm_slug"],
+		},
+		async handler(args: Record<string, unknown>): Promise<CallToolResult> {
+			return projectDelete({
+				project: args.project as string | undefined,
+				confirm_slug: args.confirm_slug as string | undefined,
+				force: args.force as boolean | undefined,
 			});
 		},
 	} as McpToolHandler);
