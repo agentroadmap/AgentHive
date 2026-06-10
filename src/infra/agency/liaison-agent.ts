@@ -34,24 +34,29 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Client } from "pg";
-import { query } from "../postgres/pool.ts";
-import { agentNotifyChannel } from "../messaging/a2a-access-control.ts";
-import { sendMessage as sendLiaisonMessage } from "./liaison-message-service.ts";
-import {
-	handleTypedTaskRequest,
-	handleWorkerReport,
-	type TaskDispatcherHelpers,
-} from "./task-dispatcher.ts";
+import { setProviderAuthDown } from "../../core/orchestration/provider-auth.ts";
 import {
 	type CliInvocationHandler,
 	type CliInvocationRegistry,
 	globalCliInvocationRegistry,
 	invokeCliHandler,
 } from "../../core/runtime/cli-invocation.ts";
-import { setProviderAuthDown } from "../../core/orchestration/provider-auth.ts";
 import * as runtimeConfig from "../../shared/runtime/config.ts";
 import { FlagKeys } from "../../shared/runtime/config-keys.ts";
-import { AgencyClaimLoop, makeAgencyClaimExecutor, type ListenerClient as ClaimLoopListenerClient } from "./agency-claim-loop.ts";
+import { agentNotifyChannel } from "../messaging/a2a-access-control.ts";
+import { query } from "../postgres/pool.ts";
+import {
+	AgencyClaimLoop,
+	makeAgencyClaimExecutor,
+	type ListenerClient as ClaimLoopListenerClient,
+} from "./agency-claim-loop.ts";
+import { sendMessage as sendLiaisonMessage } from "./liaison-message-service.ts";
+import { resolveLiaisonLlmTimeoutMs } from "./liaison-timeout.ts";
+import {
+	handleTypedTaskRequest,
+	handleWorkerReport,
+	type TaskDispatcherHelpers,
+} from "./task-dispatcher.ts";
 
 export interface IncomingMessage {
 	id: number;
@@ -354,7 +359,7 @@ export async function runLiaisonAgent(
 			const prompt = `${systemContext}\n\n---\nIncoming message:\n${msg.message_content}`;
 
 			replyContent = await invokeCliHandler(handler, prompt, {
-				timeoutMs: 30000,
+				timeoutMs: resolveLiaisonLlmTimeoutMs(provider),
 			});
 		} catch (err) {
 			const errMsg = err instanceof Error ? err.message : String(err);
