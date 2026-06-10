@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { query } from "../../../infra/postgres/pool.ts";
 
+// LIVE-DB TEST: writes fixture rows to the live agenthive DB (with teardown).
+// Skipped by default to keep the suite hermetic — combined runs also collide
+// with mock.module pool mocks from sibling tests (see P1369). Run with
+// AGENTHIVE_ALLOW_LIVE_DB=1 under a dedicated invocation.
+const LIVE = process.env.AGENTHIVE_ALLOW_LIVE_DB === "1";
+
 /**
  * P1292 Tests: Gate Completion Listener in Orchestrator
  *
@@ -11,7 +17,7 @@ import { query } from "../../../infra/postgres/pool.ts";
  * 4. Resets maturity from 'mature' to 'new' for next dispatch cycle
  */
 
-describe("Orchestrator gate completion listener (P1292)", () => {
+describe.skipIf(!LIVE)("Orchestrator gate completion listener (P1292)", () => {
 	let proposalId: number;
 	let dispatchId: number;
 	let leaseId: number;
