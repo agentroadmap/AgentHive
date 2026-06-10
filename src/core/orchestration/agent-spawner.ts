@@ -1653,6 +1653,23 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 			AGENTHIVE_ROUTE_ABBR: routeAbbr,
 		},
 	});
+
+	// P1967 AC-3: Check OAuth token expiry if present in processEnv
+	if (processEnv.CLAUDE_CODE_OAUTH_TOKEN && route.agentProvider === "claude") {
+		// Token provisioning date from runtime flag (set by operator at token setup)
+		const provisionedAt = await runtimeConfig.get(
+			FlagKeys.CLAUDE_OAUTH_TOKEN_PROVISIONED_AT_MS,
+		) as number | undefined;
+		if (provisionedAt) {
+			const { checkOAuthTokenExpiry } = await import(
+				"../../core/runtime/oauth-token-monitor.ts"
+			);
+			checkOAuthTokenExpiry(provisionedAt, 30, {
+				warn: (msg: string) => console.warn(`[AgentSpawner] ${msg}`),
+			});
+		}
+	}
+
 	try {
 		assertCliAuthAvailable(route, processEnv);
 	} catch (err) {
