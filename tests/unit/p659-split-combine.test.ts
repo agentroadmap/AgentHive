@@ -14,7 +14,12 @@ import { query } from "../../src/infra/postgres/pool.ts";
  *   - No gate_decision_log rows written for split/combine
  */
 
-describe("P659: Operator Split & Combine Actions", () => {
+// Writes real proposal/discussion rows; the guarded pool throws under the
+// default test runner, so opt in explicitly with AGENTHIVE_ALLOW_LIVE_DB=1.
+const describeLive =
+	process.env.AGENTHIVE_ALLOW_LIVE_DB === "1" ? describe : describe.skip;
+
+describeLive("P659: Operator Split & Combine Actions", () => {
 	let sourceProposalId: number;
 	let secondProposalId: number;
 	const createdProposalIds: number[] = [];
