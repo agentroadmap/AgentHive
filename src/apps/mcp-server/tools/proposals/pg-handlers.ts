@@ -37,6 +37,37 @@ function errorResult(msg: string, err: unknown): CallToolResult {
 	};
 }
 
+/**
+ * Resolve the acting identity for a state/maturity change. Never defaults to
+ * 'system': that is an admin identity (it bypasses the lease-ownership check
+ * in validateLease) and it erases attribution in the transition ledgers —
+ * the feed shows "advanced by system" instead of the deciding agent. Order:
+ * explicit identity args → holder of the proposal's active lease. Returns
+ * null when neither exists; callers reject with guidance instead of silently
+ * escalating to the admin identity.
+ */
+async function resolveActingIdentity(
+	proposalId: number,
+	...explicit: unknown[]
+): Promise<string | null> {
+	for (const candidate of explicit) {
+		if (typeof candidate === "string" && candidate.trim()) {
+			return candidate.trim();
+		}
+	}
+	const { rows } = await query<{ agent_identity: string }>(
+		`SELECT agent_identity
+     FROM roadmap_proposal.proposal_lease
+     WHERE proposal_id = $1
+       AND released_at IS NULL
+       AND (expires_at IS NULL OR expires_at > NOW())
+     ORDER BY claimed_at DESC
+     LIMIT 1`,
+		[proposalId],
+	);
+	return rows[0]?.agent_identity ?? null;
+}
+
 function formatScalar(value: unknown): string {
 	if (value instanceof Date) return value.toISOString();
 	if (typeof value === "string") return value;
@@ -554,7 +585,23 @@ export class PgProposalHandlers {
 			}
 
 			// AC-2: Require active lease before allowing transition (P224)
-			const author = args.author ?? args.actor ?? "system";
+			// Attribution: explicit author/actor arg, else the active lease holder
+			// (the leaseholder IS the decision maker). Never default to 'system'.
+			const author = await resolveActingIdentity(id, args.author, args.actor);
+			if (!author) {
+				return {
+					content: [
+						{
+							type: "text",
+							text:
+								`prop_transition: cannot attribute this transition — no author given and no active lease on proposal ${idArg}.\n` +
+								`Pass author="<your agent_identity>" (or actor=), or claim a lease first: ` +
+								`mcp_proposal action=claim { id: "${idArg}", agent: "<your agent_identity>" }.\n` +
+								`Transitions are decision records; "system" is not a decision maker.`,
+						},
+					],
+				};
+			}
 			const leaseResult = await validateLease(id, author);
 			if (!leaseResult.valid) {
 				return {
@@ -723,10 +770,32 @@ export class PgProposalHandlers {
 				};
 			}
 
+			// Attribution: explicit agent/author/actor arg, else the active lease
+			// holder. Never default to 'system' (admin identity + erased attribution).
+			const maturityActor = await resolveActingIdentity(
+				id,
+				args.agent,
+				args.author,
+				args.actor,
+			);
+			if (!maturityActor) {
+				return {
+					content: [
+						{
+							type: "text",
+							text:
+								`prop_set_maturity: cannot attribute this maturity change — no agent given and no active lease on proposal ${idArg}.\n` +
+								`Pass agent="<your agent_identity>", or claim a lease first: ` +
+								`mcp_proposal action=claim { id: "${idArg}", agent: "<your agent_identity>" }.`,
+						},
+					],
+				};
+			}
+
 			const updated = await pg.setMaturity(
 				id,
 				args.maturity as "new" | "active" | "mature" | "obsolete",
-				args.agent ?? "system",
+				maturityActor,
 				args.reason,
 			);
 			if (!updated) {
