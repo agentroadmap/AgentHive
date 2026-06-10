@@ -70,32 +70,36 @@ const queryMock = mock(async (text: string, params?: any[]) => {
 	// INSERT proposal_role_pause with multi-row VALUES
 	if (
 		text.includes("INSERT INTO roadmap_workforce.proposal_role_pause") &&
-		text.includes("VALUES")
+		text.includes("VALUES") &&
+		(text.includes("VALUES\n") || text.includes("VALUES\r") || text.includes("VALUES ("))
 	) {
-		const [p1, r1, p2, r2] = params || [];
-		if (p1 && r1) {
-			const key1 = `${p1}-${r1}`;
+		const [p1, r, p2] = params || [];
+		let inserted = 0;
+		if (p1 && r) {
+			const key1 = `${p1}-${r}`;
 			mockPauseState.set(key1, {
 				proposal_id: p1,
-				role: r1,
+				role: r,
 				pause_reason: "no_eligible_agency",
 				failure_count: 0,
 				pause_cycle: 1,
 				expires_at: new Date(Date.now() + 3600000),
 			});
+			inserted++;
 		}
-		if (p2 && r2) {
-			const key2 = `${p2}-${r2}`;
+		if (p2 && r) {
+			const key2 = `${p2}-${r}`;
 			mockPauseState.set(key2, {
 				proposal_id: p2,
-				role: r2,
+				role: r,
 				pause_reason: "capability_mismatch",
 				failure_count: 0,
 				pause_cycle: 1,
 				expires_at: new Date(Date.now() + 3600000),
 			});
+			inserted++;
 		}
-		return { rows: [], rowCount: p2 ? 2 : 1 };
+		return { rows: [], rowCount: inserted };
 	}
 
 	// UPDATE backoff logic
@@ -139,17 +143,39 @@ const queryMock = mock(async (text: string, params?: any[]) => {
 
 	// DELETE for auto-clear
 	if (text.includes("DELETE FROM roadmap_workforce.proposal_role_pause")) {
-		const [proposalIds] = params || [];
+		// Handle both [[p1, p2]] and [p1, p2] parameter styles
+		let proposalIds = params?.[0];
+		if (!Array.isArray(proposalIds)) {
+			// Fallback: params might be [p1, p2] or empty
+			proposalIds = params || [];
+		}
 		let deleted = 0;
 		const toDelete: string[] = [];
 
-		for (const [key] of mockPauseState) {
+		// Check if query filters by pause_reason
+		const filtersByReason = text.includes("pause_reason IN");
+		// Check if query filters by expiry
+		const filtersByExpiry = text.includes("expires_at >");
+
+		for (const [key, row] of mockPauseState) {
 			const [pid] = key.split("-");
 			const pidNum = Number(pid);
-			if (
-				(Array.isArray(proposalIds) && proposalIds.includes(pidNum)) ||
-				(!Array.isArray(proposalIds) && pidNum === proposalIds)
-			) {
+			const matchesPid = Array.isArray(proposalIds) && proposalIds.includes(pidNum);
+
+			// Check expiry if query filters by it
+			const isNotExpired = !filtersByExpiry || (row.expires_at && new Date(row.expires_at).getTime() > Date.now());
+
+			// If query filters by pause_reason, also check the reason
+			if (filtersByReason && row.pause_reason) {
+				const isValidReason =
+					row.pause_reason === "no_eligible_agency" ||
+					row.pause_reason === "capability_mismatch";
+				if (matchesPid && isValidReason && isNotExpired) {
+					toDelete.push(key);
+					deleted++;
+				}
+			} else if (!filtersByReason && matchesPid && isNotExpired) {
+				// No reason filter, just delete by proposal_id and expiry
 				toDelete.push(key);
 				deleted++;
 			}
@@ -387,7 +413,7 @@ describe("P1291: OfferDispatch upsertPauseRow behavior", () => {
 		const r = "develop";
 
 		// Insert pauses with different reasons
-		await queryMock(
+		const insertResult = await queryMock(
 			`INSERT INTO roadmap_workforce.proposal_role_pause
 			   (proposal_id, role, pause_reason, expires_at, failure_count, pause_cycle)
 			 VALUES
@@ -395,6 +421,8 @@ describe("P1291: OfferDispatch upsertPauseRow behavior", () => {
 			   ($3, $2, 'capability_mismatch', now() + interval '1 hour', 0, 1)`,
 			[p1, r, p2],
 		);
+
+		expect(insertResult.rowCount).toBe(2);
 
 		// Simulate capability_vocabulary_changed: DELETE matching rows
 		const delResult = await queryMock(
@@ -422,10 +450,6 @@ describe("P1291: OfferDispatch upsertPauseRow behavior", () => {
 	 */
 	it("NOTIFY proposal_role_paused can be emitted on activation", () => {
 		// Verify that the SQL for NOTIFY is valid
-		const dispatchId = 99998;
-		const pauseReason = "no_eligible_agency";
-		const pauseCycle = 1;
-		const expiresInMs = 1800000;
 
 		const notifySql = `
 			NOTIFY proposal_role_paused, json_build_object(

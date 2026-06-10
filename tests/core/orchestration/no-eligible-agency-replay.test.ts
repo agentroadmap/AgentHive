@@ -10,7 +10,7 @@
  * 4. Backward compatibility with agent_runs-based circuit breaker
  */
 
-import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 
 // Mock implementation with in-memory state for hermetic testing
 const mockDbState = {
@@ -26,7 +26,10 @@ const queryMock = mock(async (text: string, params?: any[]) => {
 	if (text.includes("provider_registry") && text.includes("capabilities")) {
 		const requiredCaps = params?.[1] as string[];
 		const hasMatchingAgency = false; // Empty provider_registry for test
-		if (!hasMatchingAgency && requiredCaps?.some((c) => !c.includes("develop"))) {
+		if (
+			!hasMatchingAgency &&
+			requiredCaps?.some((c) => !c.includes("develop"))
+		) {
 			throw new Error("no active agency advertises");
 		}
 		return { rows: [], rowCount: 0 };
@@ -90,7 +93,9 @@ const queryMock = mock(async (text: string, params?: any[]) => {
 		const [proposalId, role] = params || [];
 		const matching = Array.from(mockDbState.agentRuns.values()).filter(
 			(a) =>
-				a.proposal_id === proposalId && a.stage === role && a.status === "failed",
+				a.proposal_id === proposalId &&
+				a.stage === role &&
+				a.status === "failed",
 		);
 		return {
 			rows: [{ failure_count: matching.length }],
@@ -160,9 +165,7 @@ class CapabilityMismatchError extends Error {
 		readonly role: string,
 		readonly requiredCapabilities: string[],
 	) {
-		super(
-			`no active agency advertises: ${requiredCapabilities.join(", ")}`,
-		);
+		super(`no active agency advertises: ${requiredCapabilities.join(", ")}`);
 		this.name = "CapabilityMismatchError";
 	}
 }
@@ -318,7 +321,9 @@ describe("P1293: Replay harness for no-eligible-agency dispatch failure loop", (
 
 		let loopErrorThrown = false;
 
-		const failureCount = Array.from(mockDbState.squadDispatches.values()).filter(
+		const failureCount = Array.from(
+			mockDbState.squadDispatches.values(),
+		).filter(
 			(d) =>
 				d.proposal_id === proposalId &&
 				d.dispatch_role === role &&
@@ -332,8 +337,14 @@ describe("P1293: Replay harness for no-eligible-agency dispatch failure loop", (
 		}
 
 		expect(loopErrorThrown).toBe(true);
-		expect(mockDbState.proposals.get(proposalId)?.gate_scanner_paused).toBe(true);
-		expect(mockDbState.notifications.some((n) => n.kind === "dispatch_loop_detected")).toBe(true);
+		expect(mockDbState.proposals.get(proposalId)?.gate_scanner_paused).toBe(
+			true,
+		);
+		expect(
+			mockDbState.notifications.some(
+				(n) => n.kind === "dispatch_loop_detected",
+			),
+		).toBe(true);
 	});
 
 	/**
@@ -379,7 +390,9 @@ describe("P1293: Replay harness for no-eligible-agency dispatch failure loop", (
 		}
 
 		expect(loopErrorThrown).toBe(true);
-		expect(mockDbState.proposals.get(proposalId)?.gate_scanner_paused).toBe(true);
+		expect(mockDbState.proposals.get(proposalId)?.gate_scanner_paused).toBe(
+			true,
+		);
 	});
 
 	/**
@@ -478,7 +491,9 @@ describe("P1293: Replay harness for no-eligible-agency dispatch failure loop", (
 				a.status === "failed",
 		).length;
 
-		const dispatchFailures = Array.from(mockDbState.squadDispatches.values()).filter(
+		const dispatchFailures = Array.from(
+			mockDbState.squadDispatches.values(),
+		).filter(
 			(d) =>
 				d.proposal_id === proposalId &&
 				d.dispatch_role === role &&
