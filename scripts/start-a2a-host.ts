@@ -305,6 +305,13 @@ async function attachListener(row: AgencyRow): Promise<void> {
 			identity,
 			provider,
 			loggerPrefix: `[liaison-agent:${identity}]`,
+			// AC-3: Pass onListenError to exit on per-agency LISTEN client error
+			onListenError: (err: Error, id: string) => {
+				console.error(
+					`[a2a-host] FATAL LISTEN client error on ${id} — exiting for systemd restart: ${err.message}`,
+				);
+				process.exit(1);
+			},
 		});
 	} catch (err) {
 		console.warn(`[a2a-host] runLiaisonAgent failed for ${identity} (non-fatal): ${(err as Error).message}`);

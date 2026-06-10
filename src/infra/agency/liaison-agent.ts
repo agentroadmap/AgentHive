@@ -80,6 +80,12 @@ export interface LiaisonAgentOptions {
 	createListenClient?: () => Promise<Client>;
 	/** Override for tests; defaults to globalCliInvocationRegistry. */
 	registry?: CliInvocationRegistry;
+	/**
+	 * P1142: invoked when the LISTEN client emits an `error` event.
+	 * start-a2a-host.ts uses this to call process.exit(1) for systemd restart.
+	 * When omitted: log-only (backward compat for start-liaison.ts).
+	 */
+	onListenError?: (err: Error, identity: string) => void;
 }
 
 export interface LiaisonAgentHandle {
@@ -413,6 +419,10 @@ export async function runLiaisonAgent(
 
 	listenClient.on("error", (err) => {
 		console.error(`${log} LISTEN client error:`, err);
+		// AC-2: Invoke callback (if provided) AFTER the log
+		if (opts.onListenError) {
+			opts.onListenError(err, identity);
+		}
 	});
 
 	return {
