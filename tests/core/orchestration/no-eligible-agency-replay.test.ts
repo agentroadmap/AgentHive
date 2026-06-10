@@ -149,7 +149,7 @@ const queryMock = mock(async (text: string, params?: any[]) => {
 	return { rows: [], rowCount: 0 };
 });
 
-mock.module("../../../infra/postgres/pool.ts", () => ({
+mock.module("../../../src/infra/postgres/pool.ts", () => ({
 	query: (...args: unknown[]) => queryMock(...args),
 }));
 
@@ -202,34 +202,26 @@ describe("P1293: Replay harness for no-eligible-agency dispatch failure loop", (
 
 	/**
 	 * AC-1: Preflight CapabilityMismatchError
-	 *
-	 * When postWorkOffer is called with a role whose required capabilities
-	 * have zero matching agencies in provider_registry.capabilities->'jobs',
-	 * it must throw CapabilityMismatchError BEFORE inserting any squad_dispatch row.
 	 */
 	it("AC-1: Preflight throws CapabilityMismatchError when no agency matches required capabilities", async () => {
 		const proposalId = nextProposalId();
 		const role = "develop";
 		const requiredCaps = ["nonexistent_cap_xyz_12345"];
 
-		// Mock: no provider_registry matches
 		queryMock.mockImplementationOnce(async () => {
 			throw new CapabilityMismatchError(proposalId, role, requiredCaps);
 		});
 
-		// Create a test proposal via mock
 		mockDbState.proposals.set(proposalId, {
 			id: proposalId,
 			type: "issue",
 			status: "DRAFT",
 		});
 
-		// Attempt to post offer with nonexistent capability
 		let errorThrown = false;
 		let errorMessage = "";
 
 		try {
-			// Simulate postWorkOffer
 			await queryMock(
 				"SELECT 1 FROM provider_registry WHERE capabilities->'jobs' @> $1",
 				[requiredCaps],
@@ -248,17 +240,11 @@ describe("P1293: Replay harness for no-eligible-agency dispatch failure loop", (
 
 		expect(errorThrown).toBe(true);
 		expect(errorMessage).toContain("no active agency advertises");
-
-		// Verify NO squad_dispatch row was inserted
 		expect(mockDbState.squadDispatches.size).toBe(0);
 	});
 
 	/**
 	 * AC-2: Dispatch-level failure metadata
-	 *
-	 * When OrchestratorOfferDispatcher claims an offer and resolveAgency
-	 * returns null, fn_complete_work_offer is called with status='failed' and
-	 * squad_dispatch.metadata contains failure_reason='no_eligible_agency'.
 	 */
 	it("AC-2: Dispatch-level failure metadata when pickAgency returns null", async () => {
 		const proposalId = nextProposalId();
@@ -271,7 +257,6 @@ describe("P1293: Replay harness for no-eligible-agency dispatch failure loop", (
 			status: "DRAFT",
 		});
 
-		// Insert a squad_dispatch row (simulating a claim)
 		const dispatchId = String(Math.random());
 		mockDbState.squadDispatches.set(dispatchId, {
 			id: dispatchId,
@@ -284,7 +269,6 @@ describe("P1293: Replay harness for no-eligible-agency dispatch failure loop", (
 			metadata: { task: "test" },
 		});
 
-		// Stub: update metadata with failure info
 		const dispatch = mockDbState.squadDispatches.get(dispatchId);
 		if (dispatch) {
 			dispatch.metadata = {
@@ -295,7 +279,6 @@ describe("P1293: Replay harness for no-eligible-agency dispatch failure loop", (
 			};
 		}
 
-		// Verify metadata contains failure_reason, required_capabilities, failed_at
 		expect(dispatch?.metadata.failure_reason).toBe("no_eligible_agency");
 		expect(Array.isArray(dispatch?.metadata.required_capabilities)).toBe(true);
 		expect(dispatch?.metadata.failed_at).toBeDefined();
@@ -304,9 +287,6 @@ describe("P1293: Replay harness for no-eligible-agency dispatch failure loop", (
 
 	/**
 	 * AC-3: Circuit breaker counts squad_dispatch failures
-	 *
-	 * After N squad_dispatch rows (N = threshold+1) with dispatch_status='failed',
-	 * the next postWorkOffer throws DispatchLoopError.
 	 */
 	it("AC-3: Circuit breaker trips on squad_dispatch failures", async () => {
 		const proposalId = nextProposalId();
@@ -320,7 +300,6 @@ describe("P1293: Replay harness for no-eligible-agency dispatch failure loop", (
 			gate_scanner_paused: false,
 		});
 
-		// Insert threshold+1 failed squad_dispatch rows
 		const failedCount = threshold + 1;
 		for (let i = 0; i < failedCount; i++) {
 			const id = `dispatch-${i}`;
@@ -337,10 +316,8 @@ describe("P1293: Replay harness for no-eligible-agency dispatch failure loop", (
 			});
 		}
 
-		// Next postWorkOffer should throw DispatchLoopError
 		let loopErrorThrown = false;
 
-		// Check if failures exceed threshold
 		const failureCount = Array.from(mockDbState.squadDispatches.values()).filter(
 			(d) =>
 				d.proposal_id === proposalId &&
@@ -361,10 +338,6 @@ describe("P1293: Replay harness for no-eligible-agency dispatch failure loop", (
 
 	/**
 	 * AC-4: Agent_runs loop detection still works (non-regression)
-	 *
-	 * Insert N agent_runs rows with status='failed' and verify the next
-	 * postWorkOffer throws DispatchLoopError. The count should include both
-	 * agent_runs + squad_dispatch failures.
 	 */
 	it("AC-4: Agent_runs loop detection still works (non-regression)", async () => {
 		const proposalId = nextProposalId();
@@ -378,7 +351,6 @@ describe("P1293: Replay harness for no-eligible-agency dispatch failure loop", (
 			gate_scanner_paused: false,
 		});
 
-		// Insert threshold+1 failed agent_runs rows
 		const failedCount = threshold + 1;
 		for (let i = 0; i < failedCount; i++) {
 			const id = `agentrun-${i}`;
@@ -393,7 +365,6 @@ describe("P1293: Replay harness for no-eligible-agency dispatch failure loop", (
 			});
 		}
 
-		// Check if failures exceed threshold
 		const failureCount = Array.from(mockDbState.agentRuns.values()).filter(
 			(a) =>
 				a.proposal_id === proposalId &&
@@ -413,9 +384,6 @@ describe("P1293: Replay harness for no-eligible-agency dispatch failure loop", (
 
 	/**
 	 * AC-5: No offer row inserted on preflight failure
-	 *
-	 * When CapabilityMismatchError is thrown, verify that a SELECT on
-	 * squad_dispatch returns 0 rows (the INSERT never happened).
 	 */
 	it("AC-5: No offer row inserted on preflight failure", async () => {
 		const proposalId = nextProposalId();
@@ -428,7 +396,6 @@ describe("P1293: Replay harness for no-eligible-agency dispatch failure loop", (
 			status: "DRAFT",
 		});
 
-		// Try to post offer (will throw CapabilityMismatchError)
 		let errorCaught = false;
 		try {
 			throw new CapabilityMismatchError(proposalId, role, requiredCaps);
@@ -441,7 +408,6 @@ describe("P1293: Replay harness for no-eligible-agency dispatch failure loop", (
 
 		expect(errorCaught).toBe(true);
 
-		// Verify NO squad_dispatch row exists for this proposal/role
 		const matching = Array.from(mockDbState.squadDispatches.values()).filter(
 			(d) => d.proposal_id === proposalId && d.dispatch_role === role,
 		);
@@ -450,30 +416,20 @@ describe("P1293: Replay harness for no-eligible-agency dispatch failure loop", (
 
 	/**
 	 * AC-6: Test file structure
-	 *
-	 * Verify that this test file uses the Node test runner via bun:test.
 	 */
 	it("AC-6: Test file uses bun:test and Node test runner pattern", () => {
-		// This test documents that we import from "bun:test"
-		// Actual verification happens at runtime when bun test loads this file
 		expect(true).toBe(true);
 	});
 
 	/**
 	 * AC-7: Runs in CI and local via bun test
-	 *
-	 * Verify that tests can be discovered and run via bun test.
 	 */
 	it("AC-7: Test is discoverable and executable", () => {
-		// If this test runs, then discovery works
 		expect(true).toBe(true);
 	});
 
 	/**
 	 * Integration test: Combined circuit breaker counting
-	 *
-	 * Verify that the circuit breaker counts both agent_runs and squad_dispatch
-	 * failures together in one sum.
 	 */
 	it("Combined circuit breaker counts both agent_runs and squad_dispatch", async () => {
 		const proposalId = nextProposalId();
@@ -487,7 +443,6 @@ describe("P1293: Replay harness for no-eligible-agency dispatch failure loop", (
 			gate_scanner_paused: false,
 		});
 
-		// Insert 3 agent_runs failures
 		for (let i = 0; i < 3; i++) {
 			const id = `agentrun-combined-${i}`;
 			mockDbState.agentRuns.set(id, {
@@ -501,7 +456,6 @@ describe("P1293: Replay harness for no-eligible-agency dispatch failure loop", (
 			});
 		}
 
-		// Insert 4 squad_dispatch failures
 		for (let i = 0; i < 4; i++) {
 			const id = `dispatch-combined-${i}`;
 			mockDbState.squadDispatches.set(id, {
@@ -517,7 +471,6 @@ describe("P1293: Replay harness for no-eligible-agency dispatch failure loop", (
 			});
 		}
 
-		// Total = 7, which exceeds threshold of 6
 		const agentRunFailures = Array.from(mockDbState.agentRuns.values()).filter(
 			(a) =>
 				a.proposal_id === proposalId &&
@@ -534,7 +487,7 @@ describe("P1293: Replay harness for no-eligible-agency dispatch failure loop", (
 
 		const totalFailures = agentRunFailures + dispatchFailures;
 
-		expect(totalFailures).toBe(7); // 3 + 4
+		expect(totalFailures).toBe(7);
 		expect(totalFailures).toBeGreaterThan(threshold);
 	});
 });

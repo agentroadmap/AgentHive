@@ -11,8 +11,12 @@ import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
 const mockPauseState = new Map<string, any>();
 
 const queryMock = mock(async (text: string, params?: any[]) => {
-	// INSERT proposal_role_pause with UPSERT logic
-	if (text.includes("INSERT INTO roadmap_workforce.proposal_role_pause")) {
+	// INSERT proposal_role_pause with UPSERT logic (single insert or RETURNING clause)
+	if (
+		text.includes("INSERT INTO roadmap_workforce.proposal_role_pause") &&
+		!text.includes("VALUES\n") &&
+		!text.includes("VALUES\r")
+	) {
 		const [proposalId, role, reason, expiresAt, failureCount, pauseCycle, dispatchId] =
 			params || [];
 		const key = `${proposalId}-${role}`;
@@ -42,25 +46,56 @@ const queryMock = mock(async (text: string, params?: any[]) => {
 			const row = {
 				proposal_id: proposalId,
 				role,
-				pause_reason: reason,
-				failure_count: failureCount,
-				pause_cycle: pauseCycle,
+				pause_reason: reason || "no_eligible_agency",
+				failure_count: failureCount || 1,
+				pause_cycle: pauseCycle || 1,
 				paused_at: new Date(),
-				expires_at: new Date(expiresAt),
+				expires_at: expiresAt ? new Date(expiresAt) : new Date(Date.now() + 1000),
 				last_failure_dispatch_id: dispatchId,
 			};
 			mockPauseState.set(key, row);
 			return {
 				rows: [
 					{
-						new_failure_count: failureCount,
-						pause_cycle: pauseCycle,
+						new_failure_count: failureCount || 1,
+						pause_cycle: pauseCycle || 1,
 						was_update: 0,
 					},
 				],
 				rowCount: 1,
 			};
 		}
+	}
+
+	// INSERT proposal_role_pause with multi-row VALUES
+	if (
+		text.includes("INSERT INTO roadmap_workforce.proposal_role_pause") &&
+		text.includes("VALUES")
+	) {
+		const [p1, r1, p2, r2] = params || [];
+		if (p1 && r1) {
+			const key1 = `${p1}-${r1}`;
+			mockPauseState.set(key1, {
+				proposal_id: p1,
+				role: r1,
+				pause_reason: "no_eligible_agency",
+				failure_count: 0,
+				pause_cycle: 1,
+				expires_at: new Date(Date.now() + 3600000),
+			});
+		}
+		if (p2 && r2) {
+			const key2 = `${p2}-${r2}`;
+			mockPauseState.set(key2, {
+				proposal_id: p2,
+				role: r2,
+				pause_reason: "capability_mismatch",
+				failure_count: 0,
+				pause_cycle: 1,
+				expires_at: new Date(Date.now() + 3600000),
+			});
+		}
+		return { rows: [], rowCount: p2 ? 2 : 1 };
 	}
 
 	// UPDATE backoff logic
@@ -81,6 +116,21 @@ const queryMock = mock(async (text: string, params?: any[]) => {
 
 	// SELECT for verification
 	if (text.includes("SELECT") && text.includes("proposal_role_pause")) {
+		// Handle IN clause with arrays
+		const inMatch = text.match(/WHERE[\s\S]*?proposal_id\s+IN\s*\(\s*\$1\s*,\s*\$2\s*\)/);
+		if (inMatch) {
+			const [proposalIds] = params || [];
+			const rows: any[] = [];
+			for (const [key, row] of mockPauseState) {
+				const [pid] = key.split("-");
+				if (Array.isArray(proposalIds) && proposalIds.includes(Number(pid))) {
+					rows.push(row);
+				}
+			}
+			return { rows, rowCount: rows.length };
+		}
+
+		// Single (proposal_id, role) query
 		const [proposalId, role] = params || [];
 		const key = `${proposalId}-${role}`;
 		const row = mockPauseState.get(key);
@@ -89,15 +139,24 @@ const queryMock = mock(async (text: string, params?: any[]) => {
 
 	// DELETE for auto-clear
 	if (text.includes("DELETE FROM roadmap_workforce.proposal_role_pause")) {
-		const [proposalIds] = params || [[]];
+		const [proposalIds] = params || [];
 		let deleted = 0;
+		const toDelete: string[] = [];
+
 		for (const [key] of mockPauseState) {
 			const [pid] = key.split("-");
-			if ((Array.isArray(proposalIds) && proposalIds.includes(Number(pid))) ||
-				(!Array.isArray(proposalIds) && Number(pid) === proposalIds)) {
-				mockPauseState.delete(key);
+			const pidNum = Number(pid);
+			if (
+				(Array.isArray(proposalIds) && proposalIds.includes(pidNum)) ||
+				(!Array.isArray(proposalIds) && pidNum === proposalIds)
+			) {
+				toDelete.push(key);
 				deleted++;
 			}
+		}
+		// Actually delete the rows
+		for (const key of toDelete) {
+			mockPauseState.delete(key);
 		}
 		return { rows: [], rowCount: deleted };
 	}
