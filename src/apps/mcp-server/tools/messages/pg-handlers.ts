@@ -12,8 +12,12 @@ import {
 	checkMessageACL,
 } from "../../../../infra/messaging/a2a-access-control.ts";
 import type { A2ANotification } from "../../../../infra/messaging/a2a-types.ts";
-import { agentContextStorage } from "../../../../shared/identity/agent-context.ts";
+import {
+	canonicalizeIdentity,
+	InvalidIdentityError,
+} from "../../../../infra/messaging/identity.ts";
 import { getPool, query } from "../../../../postgres/pool.ts";
+import { agentContextStorage } from "../../../../shared/identity/agent-context.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
 
@@ -141,6 +145,20 @@ export class PgMessagingHandlers {
 		subscribe?: boolean;
 	}): Promise<CallToolResult> {
 		try {
+			// P1099 AC-1: Canonicalize agent_identity before any comparison or storage
+			let canonicalAgentIdentity: string;
+			try {
+				canonicalAgentIdentity = canonicalizeIdentity(args.agent_identity);
+			} catch (err) {
+				if (err instanceof InvalidIdentityError) {
+					return errorResult(
+						`Invalid agent_identity (P1099): ${err.message}`,
+						err,
+					);
+				}
+				throw err;
+			}
+
 			const doSubscribe = args.subscribe ?? true;
 
 			if (doSubscribe) {
@@ -160,20 +178,20 @@ export class PgMessagingHandlers {
 					`INSERT INTO channel_subscription (agent_identity, channel)
 					 VALUES ($1, $2)
 					 ON CONFLICT (agent_identity, channel) DO UPDATE SET subscribed_at = now()`,
-					[args.agent_identity, args.channel],
+					[canonicalAgentIdentity, args.channel],
 				);
 
 				// Get total subscription count for this agent
 				const { rows } = await query(
 					`SELECT COUNT(*) as count FROM channel_subscription WHERE agent_identity = $1`,
-					[args.agent_identity],
+					[canonicalAgentIdentity],
 				);
 
 				return {
 					content: [
 						{
 							type: "text",
-							text: `Subscribed ${args.agent_identity} to channel: ${args.channel} (total subscriptions: ${rows[0]?.count ?? 0})`,
+							text: `Subscribed ${canonicalAgentIdentity} to channel: ${args.channel} (total subscriptions: ${rows[0]?.count ?? 0})`,
 						},
 					],
 				};
@@ -182,19 +200,19 @@ export class PgMessagingHandlers {
 			// Unsubscribe
 			await query(
 				`DELETE FROM channel_subscription WHERE agent_identity = $1 AND channel = $2`,
-				[args.agent_identity, args.channel],
+				[canonicalAgentIdentity, args.channel],
 			);
 
 			const { rows } = await query(
 				`SELECT COUNT(*) as count FROM channel_subscription WHERE agent_identity = $1`,
-				[args.agent_identity],
+				[canonicalAgentIdentity],
 			);
 
 			return {
 				content: [
 					{
 						type: "text",
-						text: `Unsubscribed ${args.agent_identity} from channel: ${args.channel} (remaining subscriptions: ${rows[0]?.count ?? 0})`,
+						text: `Unsubscribed ${canonicalAgentIdentity} from channel: ${args.channel} (remaining subscriptions: ${rows[0]?.count ?? 0})`,
 					},
 				],
 			};
@@ -255,7 +273,10 @@ export class PgMessagingHandlers {
 	// -------------------------------------------------------------------------
 
 	// P1105 AC-5: write rejected bearer events to operator_audit_log
-	private async _logAuthRejection(fromAgent: string, reason: string): Promise<void> {
+	private async _logAuthRejection(
+		fromAgent: string,
+		reason: string,
+	): Promise<void> {
 		try {
 			await query(
 				`INSERT INTO roadmap.operator_audit_log
@@ -279,46 +300,111 @@ export class PgMessagingHandlers {
 		_signature?: string; // P159: optional hex-encoded Ed25519 signature
 	}): Promise<CallToolResult> {
 		try {
+			// P1099 AC-1: Canonicalize from_agent and to_agent before any comparison or storage
+			let canonicalFromAgent: string;
+			try {
+				canonicalFromAgent = canonicalizeIdentity(args.from_agent);
+			} catch (err) {
+				if (err instanceof InvalidIdentityError) {
+					return errorResult(
+						`Invalid from_agent identity (P1099): ${err.message}`,
+						err,
+					);
+				}
+				throw err;
+			}
+
+			let canonicalToAgent: string | undefined;
+			if (args.to_agent) {
+				try {
+					canonicalToAgent = canonicalizeIdentity(args.to_agent);
+				} catch (err) {
+					if (err instanceof InvalidIdentityError) {
+						return errorResult(
+							`Invalid to_agent identity (P1099): ${err.message}`,
+							err,
+						);
+					}
+					throw err;
+				}
+			}
+
 			// P159 AC-5: Soft-fail identity verification for all agents (not just user/*)
 			// Signature and data are optional; unsigned requests are logged but allowed
-			const { verifyAgentIdentity } = await import("../../../../core/identity/identity-verification.ts");
+			const { verifyAgentIdentity } = await import(
+				"../../../../core/identity/identity-verification.ts"
+			);
 			const verification = await verifyAgentIdentity(
-				args.from_agent,
+				canonicalFromAgent,
 				args._signature as string | undefined,
 				args.message_content, // Sign over message content
 			);
 
 			// In hard-fail mode (AGENTHIVE_AUTH_REQUIRED=true), reject if verification.rejected
 			if (verification.rejected) {
-				const httpStatus = verification.reason === "public_key_not_found" ? 401 : 403;
+				const httpStatus =
+					verification.reason === "public_key_not_found" ? 401 : 403;
 				return {
-					content: [{ type: "text", text: `⛔ [P159] Identity verification failed (${verification.reason}). HTTP ${httpStatus}.` }],
+					content: [
+						{
+							type: "text",
+							text: `⛔ [P159] Identity verification failed (${verification.reason}). HTTP ${httpStatus}.`,
+						},
+					],
 				};
 			}
 
 			// P1105 AC-3: USER senders must carry a valid bearer token whose sub matches from_agent.
-			if (args.from_agent?.startsWith("user/")) {
+			if (canonicalFromAgent?.startsWith("user/")) {
 				const ctx = agentContextStorage.getStore();
 				if (!ctx?.verified) {
-					await this._logAuthRejection(args.from_agent, "missing_bearer_token");
+					await this._logAuthRejection(
+						canonicalFromAgent,
+						"missing_bearer_token",
+					);
 					return {
-						content: [{ type: "text", text: "⛔ 401 Unauthorized: Bearer token required for user/* senders." }],
+						content: [
+							{
+								type: "text",
+								text: "⛔ 401 Unauthorized: Bearer token required for user/* senders.",
+							},
+						],
 					};
 				}
-				if (ctx.verified.principal_id !== args.from_agent) {
-					await this._logAuthRejection(args.from_agent, "sub_mismatch");
+				// P1099 AC-1: Compare canonical form of token sub with canonical from_agent
+				let canonicalTokenSub: string;
+				try {
+					canonicalTokenSub = canonicalizeIdentity(ctx.verified.principal_id);
+				} catch {
+					await this._logAuthRejection(canonicalFromAgent, "invalid_token_sub");
 					return {
-						content: [{ type: "text", text: `⛔ 403 Forbidden: Token sub '${ctx.verified.principal_id}' does not match from_agent '${args.from_agent}'.` }],
+						content: [
+							{
+								type: "text",
+								text: "⛔ 403 Forbidden: Token sub is malformed.",
+							},
+						],
+					};
+				}
+				if (canonicalTokenSub !== canonicalFromAgent) {
+					await this._logAuthRejection(canonicalFromAgent, "sub_mismatch");
+					return {
+						content: [
+							{
+								type: "text",
+								text: `⛔ 403 Forbidden: Token sub '${canonicalTokenSub}' does not match from_agent '${canonicalFromAgent}'.`,
+							},
+						],
 					};
 				}
 			}
 
 			// AC#2: Enforce ACL before inserting. DMs require an explicit grant;
 			// channel posts require a channel_post grant.
-			const grantType = args.to_agent ? "dm" : "channel_post";
+			const grantType = canonicalToAgent ? "dm" : "channel_post";
 			const aclResult = await checkMessageACL(
-				args.from_agent,
-				args.to_agent ?? null,
+				canonicalFromAgent,
+				canonicalToAgent ?? null,
 				grantType,
 			);
 			if (!aclResult.allowed) {
@@ -338,8 +424,8 @@ export class PgMessagingHandlers {
                  VALUES ($1, $2, $3, $4, $5, $6, $7)
                  RETURNING id, nonce, created_at`,
 				[
-					args.from_agent,
-					args.to_agent || null,
+					canonicalFromAgent,
+					canonicalToAgent || null,
 					args.channel || null,
 					args.message_content,
 					args.message_type || "text",
