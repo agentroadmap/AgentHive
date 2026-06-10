@@ -69,6 +69,11 @@ import {
 	suspendProviderRoute,
 	resumeProviderRoute,
 } from "../../core/governance/operator-stop-controls.ts";
+import {
+	pauseAgencyOperator,
+	resumeAgencyOperator,
+	retireAgencyOperator,
+} from "../../core/orchestration/resolvers/agency-resolver.ts";
 
 // Regex pattern to match any prefix (letters followed by dash)
 const PREFIX_PATTERN = /^[a-zA-Z]+-/i;
@@ -4973,6 +4978,18 @@ export class RoadmapServer {
 		if (auth.rejected) return auth.rejected;
 
 		try {
+			const reason = typeof body.reason === "string" ? body.reason : undefined;
+			const operator = auth.outcome.operatorName ?? "operator";
+
+			// Update agency status for operator-initiated pause/resume/retire (P766 AC-2/AC-4)
+			if (action === "liaison_pause") {
+				await pauseAgencyOperator(agencyId, operator, reason);
+			} else if (action === "liaison_resume") {
+				await resumeAgencyOperator(agencyId, operator, reason);
+			} else if (action === "agency_retire") {
+				await retireAgencyOperator(agencyId, operator, reason);
+			}
+
 			const payload =
 				action === "claim_revoke"
 					? {
