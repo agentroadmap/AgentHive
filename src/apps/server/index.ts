@@ -1199,6 +1199,8 @@ export class RoadmapServer {
 				const dispatchId = pathname.split("/").at(-1)!;
 				return await this.handleControlReplay(req, dispatchId);
 			}
+			if (pathname === "/api/operator/action" && method === "POST")
+				return await this.handleOperatorGateAction(req);
 			if (pathname === "/api/pulse" && method === "GET")
 				return await this.handleListPulse(req);
 			if (pathname === "/api/channels" && method === "GET")
@@ -5836,6 +5838,389 @@ agenthive_mcp_tool_calls_total ${toolCallCount}
 		} catch (err) {
 			console.error("[p435] replay failed:", (err as Error).message);
 			return Response.json({ error: "replay query failed" }, { status: 500 });
+		}
+	}
+
+	/**
+	 * POST /api/operator/action
+	 * P659: Operator-as-Gate-Agent gate actions (advance/hold/move_back/split/combine)
+	 * Body: { action, proposalIds, args?, comment }
+	 *
+	 * AC-7: Identity enforcement: decided_by and author are always 'operator'/'operator-dashboard'
+	 * AC-8: Security: reject with 403 unless from loopback (127.0.0.1/::1/::ffff:127.0.0.1)
+	 */
+	private async handleOperatorGateAction(req: Request): Promise<Response> {
+		// AC-8: Loopback-only security check
+		const remoteAddr = (req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()) ||
+			(req.headers.get("x-real-ip")) ||
+			"unknown";
+		const isLoopback = ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(remoteAddr);
+		if (!isLoopback) {
+			return Response.json(
+				{ error: "Operator gate actions only allowed from loopback" },
+				{ status: 403 },
+			);
+		}
+
+		// Require operator auth
+		const auth = await requireOperator(req, { action: "gate.action" });
+		if (auth.rejected) return auth.rejected;
+
+		try {
+			const body = await req.json() as Record<string, unknown>;
+			const action = String(body.action ?? "").trim().toLowerCase();
+			const proposalIds = Array.isArray(body.proposalIds) ? body.proposalIds : [];
+			const comment = typeof body.comment === "string" ? body.comment.trim() : "";
+			const args = (typeof body.args === "object" && body.args !== null)
+				? (body.args as Record<string, unknown>)
+				: {};
+
+			if (!action) {
+				return Response.json({ error: "action is required" }, { status: 400 });
+			}
+
+			if (!Array.isArray(proposalIds) || proposalIds.length === 0) {
+				return Response.json({ error: "proposalIds array is required" }, { status: 400 });
+			}
+
+			// Validate all proposal IDs are numbers
+			const numIds = proposalIds.map(id => {
+				const num = Number(id);
+				if (Number.isNaN(num)) throw new Error(`Invalid proposal ID: ${id}`);
+				return num;
+			});
+
+			// Dispatch to action-specific handlers
+			switch (action) {
+				case "advance":
+					return await this.handleOperatorAdvance(numIds, comment);
+				case "hold":
+					return await this.handleOperatorHold(numIds, comment);
+				case "move_back":
+					return await this.handleOperatorMoveBack(numIds, comment);
+				case "split":
+					return await this.handleOperatorSplit(numIds[0]!, args, comment);
+				case "combine":
+					return await this.handleOperatorCombine(numIds, args, comment);
+				default:
+					return Response.json(
+						{ error: `Unknown action: ${action}` },
+						{ status: 400 },
+					);
+			}
+		} catch (err) {
+			console.error("[p659] gate action failed:", (err as Error).message);
+			return Response.json({ error: "gate action failed" }, { status: 500 });
+		}
+	}
+
+	/**
+	 * Operator advance action: insert gate_decision_log, then prop_transition
+	 * AC-2: INSERT before transition; if INSERT fails, abort
+	 * AC-7: identity constants enforced server-side
+	 */
+	private async handleOperatorAdvance(
+		proposalIds: number[],
+		rationale: string,
+	): Promise<Response> {
+		try {
+			const results = [];
+			const pool = getPool();
+
+			for (const proposalId of proposalIds) {
+				// Fetch current proposal state
+				const { rows: proposals } = await query(
+					`SELECT id, status, maturity FROM roadmap_proposal.proposal WHERE id = $1`,
+					[proposalId],
+				);
+
+				if (proposals.length === 0) {
+					results.push({ proposal_id: proposalId, error: "Proposal not found" });
+					continue;
+				}
+
+				const proposal = proposals[0] as any;
+				const currentStatus = proposal.status;
+
+				// Determine next status based on current workflow
+				let nextStatus: string;
+				if (currentStatus === "DRAFT") nextStatus = "REVIEW";
+				else if (currentStatus === "REVIEW") nextStatus = "DEVELOP";
+				else if (currentStatus === "DEVELOP") nextStatus = "MERGE";
+				else if (currentStatus === "MERGE") nextStatus = "COMPLETE";
+				else {
+					results.push({
+						proposal_id: proposalId,
+						error: `Cannot advance from status ${currentStatus}`,
+					});
+					continue;
+				}
+
+				// AC-2: INSERT gate_decision_log first
+				try {
+					await query(
+						`INSERT INTO roadmap_proposal.gate_decision_log
+							(proposal_id, from_state, to_state, maturity, gate, decided_by,
+							 authority_agent, decision, rationale, project_id)
+						 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+						[
+							proposalId,
+							currentStatus,
+							nextStatus,
+							"mature",
+							"operator-dashboard",
+							"operator",
+							"operator-dashboard",
+							"advance",
+							rationale,
+							1, // project_id
+						],
+					);
+				} catch (insertErr) {
+					console.error(
+						`[p659] gate_decision_log INSERT failed for proposal ${proposalId}:`,
+						(insertErr as Error).message,
+					);
+					return Response.json(
+						{ error: "Failed to record gate decision", detail: (insertErr as Error).message },
+						{ status: 500 },
+					);
+				}
+
+				// Then invoke MCP prop_transition
+				if (!this.mcpServer) {
+					return Response.json({ error: "MCP server not initialized" }, { status: 500 });
+				}
+
+				const mcp = this.mcpServer as any;
+				const toolResult = await mcp.testInterface.callTool({
+					params: {
+						name: "prop_transition",
+						arguments: {
+							proposal_id: proposalId,
+							to_state: nextStatus,
+							author: "operator",
+							reason: "decision",
+							notes: rationale,
+						},
+					},
+				});
+
+				results.push({
+					proposal_id: proposalId,
+					from_state: currentStatus,
+					to_state: nextStatus,
+					tool_result: toolResult,
+				});
+			}
+
+			return Response.json({ results });
+		} catch (err) {
+			console.error("[p659] advance failed:", (err as Error).message);
+			return Response.json({ error: "advance action failed" }, { status: 500 });
+		}
+	}
+
+	/**
+	 * Operator hold action: set maturity to 'new'
+	 */
+	private async handleOperatorHold(
+		proposalIds: number[],
+		rationale: string,
+	): Promise<Response> {
+		try {
+			const results = [];
+
+			for (const proposalId of proposalIds) {
+				// Record hold decision
+				await query(
+					`INSERT INTO roadmap_proposal.gate_decision_log
+						(proposal_id, from_state, to_state, maturity, gate, decided_by,
+						 authority_agent, decision, rationale, project_id)
+					 SELECT id, status, status, 'new', 'operator-dashboard', 'operator',
+						    'operator-dashboard', 'hold', $2, project_id
+					   FROM roadmap_proposal.proposal
+					  WHERE id = $1`,
+					[proposalId, rationale],
+				);
+
+				// Call prop_set_maturity
+				if (!this.mcpServer) {
+					return Response.json({ error: "MCP server not initialized" }, { status: 500 });
+				}
+
+				const mcp = this.mcpServer as any;
+				const toolResult = await mcp.testInterface.callTool({
+					params: {
+						name: "prop_set_maturity",
+						arguments: {
+							proposal_id: proposalId,
+							maturity: "new",
+							agent: "operator",
+							reason: rationale,
+						},
+					},
+				});
+
+				results.push({ proposal_id: proposalId, tool_result: toolResult });
+			}
+
+			return Response.json({ results });
+		} catch (err) {
+			console.error("[p659] hold failed:", (err as Error).message);
+			return Response.json({ error: "hold action failed" }, { status: 500 });
+		}
+	}
+
+	/**
+	 * Operator move_back action: transition to prior stage
+	 */
+	private async handleOperatorMoveBack(
+		proposalIds: number[],
+		rationale: string,
+	): Promise<Response> {
+		try {
+			const results = [];
+
+			for (const proposalId of proposalIds) {
+				// Fetch current status
+				const { rows: proposals } = await query(
+					`SELECT status FROM roadmap_proposal.proposal WHERE id = $1`,
+					[proposalId],
+				);
+
+				if (proposals.length === 0) {
+					results.push({ proposal_id: proposalId, error: "Proposal not found" });
+					continue;
+				}
+
+				const currentStatus = (proposals[0] as any).status;
+				let priorStatus: string;
+
+				if (currentStatus === "REVIEW") priorStatus = "DRAFT";
+				else if (currentStatus === "DEVELOP") priorStatus = "REVIEW";
+				else if (currentStatus === "MERGE") priorStatus = "DEVELOP";
+				else if (currentStatus === "COMPLETE") priorStatus = "MERGE";
+				else {
+					results.push({
+						proposal_id: proposalId,
+						error: `Cannot move back from status ${currentStatus}`,
+					});
+					continue;
+				}
+
+				// Record rejection decision
+				await query(
+					`INSERT INTO roadmap_proposal.gate_decision_log
+						(proposal_id, from_state, to_state, maturity, gate, decided_by,
+						 authority_agent, decision, rationale, project_id)
+					 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+					[
+						proposalId,
+						currentStatus,
+						priorStatus,
+						"new",
+						"operator-dashboard",
+						"operator",
+						"operator-dashboard",
+						"reject",
+						rationale,
+						1,
+					],
+				);
+
+				// Call prop_transition
+				if (!this.mcpServer) {
+					return Response.json({ error: "MCP server not initialized" }, { status: 500 });
+				}
+
+				const mcp = this.mcpServer as any;
+				const toolResult = await mcp.testInterface.callTool({
+					params: {
+						name: "prop_transition",
+						arguments: {
+							proposal_id: proposalId,
+							to_state: priorStatus,
+							author: "operator",
+							reason: "iteration",
+							notes: rationale,
+						},
+					},
+				});
+
+				results.push({
+					proposal_id: proposalId,
+					from_state: currentStatus,
+					to_state: priorStatus,
+					tool_result: toolResult,
+				});
+			}
+
+			return Response.json({ results });
+		} catch (err) {
+			console.error("[p659] move_back failed:", (err as Error).message);
+			return Response.json({ error: "move_back action failed" }, { status: 500 });
+		}
+	}
+
+	/**
+	 * Operator split action: create N child proposals
+	 * No gate_decision_log row; mark source obsolete with 'superseded_by_split'
+	 */
+	private async handleOperatorSplit(
+		sourceId: number,
+		args: Record<string, unknown>,
+		rationale: string,
+	): Promise<Response> {
+		try {
+			const children = Array.isArray(args.children) ? args.children : [];
+			if (children.length === 0) {
+				return Response.json(
+					{ error: "children array required for split action" },
+					{ status: 400 },
+				);
+			}
+
+			// For now, return not-implemented
+			// Full implementation would:
+			// 1. Call prop_create for each child with parent_id=sourceId
+			// 2. Call prop_set_maturity maturity='obsolete' on source
+			// 3. Record discussion entry with superseded_by_split
+			return Response.json(
+				{ error: "split action not yet implemented" },
+				{ status: 501 },
+			);
+		} catch (err) {
+			console.error("[p659] split failed:", (err as Error).message);
+			return Response.json({ error: "split action failed" }, { status: 500 });
+		}
+	}
+
+	/**
+	 * Operator combine action: merge two proposals into one
+	 * No gate_decision_log row; mark originals obsolete with 'superseded_by'
+	 */
+	private async handleOperatorCombine(
+		proposalIds: number[],
+		args: Record<string, unknown>,
+		rationale: string,
+	): Promise<Response> {
+		try {
+			if (proposalIds.length < 2) {
+				return Response.json(
+					{ error: "At least 2 proposals required for combine action" },
+					{ status: 400 },
+				);
+			}
+
+			// For now, return not-implemented
+			return Response.json(
+				{ error: "combine action not yet implemented" },
+				{ status: 501 },
+			);
+		} catch (err) {
+			console.error("[p659] combine failed:", (err as Error).message);
+			return Response.json({ error: "combine action failed" }, { status: 500 });
 		}
 	}
 }
