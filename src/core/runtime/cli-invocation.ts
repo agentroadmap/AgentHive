@@ -201,7 +201,14 @@ export async function invokeCliHandler(
 			clearTimeout(timeout);
 
 			if (timedOut) {
-				return reject(new Error(`${handler.bin} timed out after ${timeoutMs}ms`));
+				const detail = [err.trim(), out.trim()]
+					.filter(Boolean)
+					.join("\n")
+					.slice(0, 300);
+				const suffix = detail ? `: ${detail}` : "";
+				return reject(
+					new Error(`${handler.bin} timed out after ${timeoutMs}ms${suffix}`),
+				);
 			}
 
 			if (code === 0) {
