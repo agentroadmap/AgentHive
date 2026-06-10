@@ -438,6 +438,26 @@ export class PgProposalHandlers {
 				};
 			}
 
+			// P150: Reject status changes in prop_update — all status transitions
+			// require gate decision records. Route to prop_transition (which enforces
+			// gate decisions) or mcp_proposal action=gate_decision (atomic decision + transition).
+			if (args.status) {
+				return {
+					content: [
+						{
+							type: "text",
+							text:
+								"⚠️ prop_update: status changes are not permitted via this tool. " +
+								"Proposal status transitions require gate decision records for audit compliance (P150).\n\n" +
+								"Use one of:\n" +
+								'  1. prop_transition with a prior gate_decision_log record (decision=advance within 10 min)\n' +
+								'  2. mcp_proposal action=gate_decision { gate: "D1"|"D2"|"D3"|"D4", decision: "advance", rationale: "..." } ' +
+								"     — this atomically records the decision AND transitions status in one call",
+						},
+					],
+				};
+			}
+
 			const id = await pg.resolveProposalId(args.id);
 			if (id === null) {
 				return {
@@ -461,14 +481,6 @@ export class PgProposalHandlers {
 				Object.keys(updates).length > 0
 					? await pg.updateProposal(id, updates, args.author ?? "unknown")
 					: await pg.getProposal(id);
-			if (args.status) {
-				updated = await pg.transitionProposal(
-					id,
-					args.status,
-					args.author ?? "system",
-					"Updated via prop_update",
-				);
-			}
 
 			if (!updated) {
 				return {
