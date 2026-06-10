@@ -1,67 +1,63 @@
-> **Type:** design note  
-> **MCP-tracked:** P516  
-> **Source-of-truth:** Postgres `roadmap_proposal.proposal` row P516
+# Per-Tenant Repository Architecture (P516)
 
-# Per-Tenant Repositories
+## Overview
 
-P516 separates tenant application code from the AgentHive control-plane repository. AgentHive remains the runtime and governance plane; each tenant owns a separate git repository and worktree for tenant-specific code, schema, tests, and CI.
+AgentHive moves toward **per-project code isolation** by enabling each tenant project to maintain its own git repository for application code, separate from the AgentHive control-plane codebase.
 
-## Registry Fields
+This document defines:
+- **Code boundaries:** what lives in the control-plane repo vs. tenant repos
+- **Worktree convention:** how agent worktrees map to per-project repositories
+- **Shared library strategy:** how tenants consume common code via published packages
 
-`roadmap.project` records the tenant repository boundary:
+## Code Boundary Definition
 
-| Column | Meaning |
-| --- | --- |
-| `git_repo_url` | Tenant repository remote URL. Operators set this after creating the repo. |
-| `git_default_branch` | Default branch used for provisioning and repair. Defaults to `main`. |
-| `worktree_root` | Local tenant worktree path. Defaults to `/data/code/<slug>/worktree` for tenant projects. |
+### AgentHive Control-Plane Repo (`/data/code/AgentHive/`)
 
-AgentHive is the current exception: its control-plane checkout may still live at `/data/code/AgentHive` or `/data/code/worktree` depending on host setup. A separate migration should standardize the AgentHive path if the operator chooses to adopt `/data/code/agenthive/worktree`.
+The control-plane houses all infrastructure and orchestration code:
 
-## Repository Boundary
+- **MCP server** (agenthive-mcp service): handlers, validators, route/model management, proposal lifecycle
+- **Core services:** orchestrator, agency lifecycle, config resolver, vault adapter
+- **Database:** DDL for hiveControl (control_project, agent_registry, model_routes, etc.), plus tenant bootstrap templates
+- **Shared libraries (published):** Extracted modules published to GitLab Package Registry with semver tags (e.g., `@agenthive/core@1.2.3`). Tenants depend on published packages only, never via symlinks or source imports.
+- **Documentation:** Architecture, conventions, operations, publishing workflows
 
-The AgentHive repository contains:
+### Tenant Repos (`/data/code/<slug>/worktree/`)
 
-- MCP server, proposal handlers, gate logic, pool registry, vault adapter, config resolver, and dispatch plumbing.
-- Control-plane DDL for `hiveControl` and tenant bootstrap templates.
-- Shared libraries only until they are extracted into published packages.
+Each tenant project owns its business logic and tenant-specific configuration:
 
-Tenant repositories contain:
+- **Business logic:** Tenant-specific application code (audio processing, song generation, etc.)
+- **Database:** Tenant-specific DDL beyond bootstrap templates; tenant-owned Postgres schema
+- **Tests:** Unit, integration, e2e tests for tenant code only
+- **CI:** Per-tenant `.gitlab-ci.yml` (copied from templates/tenant-ci.yml during provisioning)
+- **Dependencies:** Pulled from published packages (npm, GitLab Package Registry) only; no source imports from AgentHive
 
-- Tenant business logic.
-- Tenant-specific Postgres DDL beyond bootstrap.
-- Tenant tests and fixtures.
-- Tenant CI configuration copied from `templates/tenant-ci.yml` and adapted as needed.
+## Worktree Convention
 
-Tenant code must not import AgentHive source files. If tenant code needs a reusable runtime utility, extract it into a semver package such as `@agenthive/core` and publish it to the GitLab Package Registry.
+### Standard Per-Tenant Layout
 
-## Operator Provisioning
+Each tenant project has its own filesystem root and worktree:
 
-Provisioning is manual for v1 and must be idempotent:
-
-```bash
-git clone <git_repo_url> /data/code/<slug>
-git -C /data/code/<slug> worktree add worktree main
+```
+/data/code/<slug>/                    # Project root (git repository clone)
+  ├── worktree/                        # Primary working directory (git worktree)
+  │   ├── .git/                        # Git worktree metadata
+  │   ├── src/                         # Source code
+  │   ├── tests/                       # Test suite
+  │   ├── package.json                 # Dependencies (includes @agenthive/* packages)
+  │   ├── .gitlab-ci.yml               # Per-tenant CI/CD
+  │   └── README.md
+  └── .git/                            # Git repository administrative files
 ```
 
-Then update the registry:
+Registry fields:
+- `worktree_root`: `/data/code/<slug>/worktree` (resolves per-project agent working directory)
+- `git_repo_url`: `gitlab.local/tenants/<slug>.git` (tenant's git repository)
+- `git_default_branch`: `main` (branch for new agent worktrees)
 
-```sql
-UPDATE roadmap.project
-   SET git_repo_url = '<git_repo_url>',
-       git_default_branch = 'main',
-       worktree_root = '/data/code/<slug>/worktree'
- WHERE slug = '<slug>';
-```
+### AgentHive Exception Note (P517 Future)
 
-Before dispatching tenant work, smoke test the registry/worktree pair:
+AgentHive itself currently lives at `/data/code/AgentHive/` without a `/worktree/` subdirectory. This is a legacy exception pending P517 (future standardization). Future work will align AgentHive to the per-project convention:
+- Current: `/data/code/AgentHive/src/...`
+- Future (P517): `/data/code/agenthive/worktree/src/...`
 
-```text
-mcp_ops action=health_check project_id=N
-```
-
-The health check returns `ERROR_WORKTREE_NOT_FOUND` when the configured `worktree_root` is absent. Operators should repair the tenant checkout with `git worktree repair` or reprovision the worktree before dispatch.
-
-## Dispatch Rule
-
-`cubic_create` accepts `project_id`. When provided, it resolves the active `roadmap.project` row and creates the cubic under that row's `worktree_root`. Missing project rows fail with `ERROR_PROJECT_NOT_FOUND`; missing worktrees fail with `ERROR_WORKTREE_NOT_FOUND`. Dispatch must not silently fall back to the AgentHive worktree for tenant work.
+Until P517 lands, AgentHive is the only project that deviates from the `/data/code/<slug>/worktree/` convention.
