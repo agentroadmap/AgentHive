@@ -329,6 +329,129 @@ export interface OfflineAlertRow {
 }
 
 /**
+ * Operator action: pause an agency (P766 AC-2).
+ *
+ * State transition: roadmap.agency.status → 'paused'
+ * Audit: records to operator_audit_log
+ * Effect: agency is unavailable for dispatch while paused, but liaison may still run
+ * Reversible via resumeAgencyOperator
+ *
+ * @param agencyIdentity — roadmap.agency.agency_id TEXT identity string
+ * @param operator — operator name for audit trail
+ * @param reason — optional reason for audit trail
+ */
+export async function pauseAgencyOperator(
+	agencyIdentity: string,
+	operator: string,
+	reason?: string,
+): Promise<void> {
+	await query(
+		`UPDATE roadmap.agency
+		 SET status        = 'paused',
+		     status_reason = $2
+		 WHERE agency_id = $1`,
+		[agencyIdentity, reason ?? 'Operator pause'],
+	);
+
+	// Audit log
+	await query(
+		`INSERT INTO roadmap.operator_audit_log
+		 (operator_name, action, decision, target_kind, target_identity, request_summary)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		[
+			operator,
+			'liaison_pause',
+			'allow',
+			'agency',
+			agencyIdentity,
+			JSON.stringify({ reason: reason ?? 'Operator pause' }),
+		],
+	);
+}
+
+/**
+ * Operator action: resume a paused agency (P766 AC-2).
+ *
+ * State transition: roadmap.agency.status='paused' → 'active'
+ * Audit: records to operator_audit_log
+ * Effect: agency becomes available for dispatch again
+ * Reverses pauseAgencyOperator
+ *
+ * @param agencyIdentity — roadmap.agency.agency_id TEXT identity string
+ * @param operator — operator name for audit trail
+ * @param reason — optional reason for audit trail
+ */
+export async function resumeAgencyOperator(
+	agencyIdentity: string,
+	operator: string,
+	reason?: string,
+): Promise<void> {
+	await query(
+		`UPDATE roadmap.agency
+		 SET status        = 'active',
+		     status_reason = $2
+		 WHERE agency_id = $1`,
+		[agencyIdentity, reason ?? 'Operator resume'],
+	);
+
+	// Audit log
+	await query(
+		`INSERT INTO roadmap.operator_audit_log
+		 (operator_name, action, decision, target_kind, target_identity, request_summary)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		[
+			operator,
+			'liaison_resume',
+			'allow',
+			'agency',
+			agencyIdentity,
+			JSON.stringify({ reason: reason ?? 'Operator resume' }),
+		],
+	);
+}
+
+/**
+ * Operator action: retire an agency (P766 AC-2).
+ *
+ * State transition: any → 'retired' (terminal)
+ * Audit: records to operator_audit_log
+ * Effect: agency is permanently removed from dispatch eligibility
+ * Not reversible
+ *
+ * @param agencyIdentity — roadmap.agency.agency_id TEXT identity string
+ * @param operator — operator name for audit trail
+ * @param reason — optional reason for audit trail
+ */
+export async function retireAgencyOperator(
+	agencyIdentity: string,
+	operator: string,
+	reason?: string,
+): Promise<void> {
+	await query(
+		`UPDATE roadmap.agency
+		 SET status        = 'retired',
+		     status_reason = $2
+		 WHERE agency_id = $1`,
+		[agencyIdentity, reason ?? 'Operator retire'],
+	);
+
+	// Audit log
+	await query(
+		`INSERT INTO roadmap.operator_audit_log
+		 (operator_name, action, decision, target_kind, target_identity, request_summary)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		[
+			operator,
+			'agency_retire',
+			'allow',
+			'agency',
+			agencyIdentity,
+			JSON.stringify({ reason: reason ?? 'Operator retire' }),
+		],
+	);
+}
+
+/**
  * Scan for offline-alert conditions and emit notifications (P765 AC-3/AC-4).
  *
  * Two cases are handled per call:
