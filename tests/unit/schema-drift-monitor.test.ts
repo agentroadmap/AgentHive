@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { runMonitorCycle } from "../../src/core/schema-drift/monitor.ts";
+import { extractDriftHits, fingerprintHit } from "../../src/core/schema-drift/parse.ts";
 
 /**
  * In-memory stand-ins for `pg.Pool` and the proposal creator. Each test
@@ -101,9 +102,12 @@ describe("runMonitorCycle", () => {
 
 	it("repeat occurrence below threshold bumps counter without escalating", async () => {
 		const seen = new Map<string, FakeRow>();
-		// Fingerprint must match what the monitor actually produces from the
-		// log line below — see fingerprintHit() + normalizeQueryFragment().
-		const fp = "42703::cost_per_1k_input::SELECT cost_per_1k_input FROM model_routes WHERE id = ? -- column";
+		// Use real parsing to compute the fingerprint
+		const log = `Error: SELECT cost_per_1k_input FROM model_routes WHERE id = 1 -- column "cost_per_1k_input" does not exist`;
+		const hits = extractDriftHits(log);
+		assert.ok(hits.length > 0, "expected at least one hit");
+		const fp = fingerprintHit(hits[0]);
+
 		seen.set(fp, {
 			fingerprint: fp,
 			occurrence_count: 1,
@@ -115,7 +119,6 @@ describe("runMonitorCycle", () => {
 		});
 		const { pool, escalations } = makeFakePool(seen);
 
-		const log = `Error: SELECT cost_per_1k_input FROM model_routes WHERE id = 1 -- column "cost_per_1k_input" does not exist`;
 		const result = await runMonitorCycle({
 			pool,
 			repoRoot: "/tmp/r",
@@ -133,7 +136,11 @@ describe("runMonitorCycle", () => {
 
 	it("escalates after 4th occurrence when still unresolved", async () => {
 		const seen = new Map<string, FakeRow>();
-		const fp = '42703::missing_col::no_query';
+		const log = `error: column "missing_col" does not exist`;
+		const hits = extractDriftHits(log);
+		assert.ok(hits.length > 0, "expected at least one hit");
+		const fp = fingerprintHit(hits[0]);
+
 		seen.set(fp, {
 			fingerprint: fp,
 			occurrence_count: 3,
@@ -145,7 +152,6 @@ describe("runMonitorCycle", () => {
 		});
 		const { pool, escalations } = makeFakePool(seen);
 
-		const log = `column "missing_col" does not exist`;
 		const result = await runMonitorCycle({
 			pool,
 			repoRoot: "/tmp/r",
@@ -164,7 +170,11 @@ describe("runMonitorCycle", () => {
 
 	it("escalates after 2h unresolved even on the 2nd occurrence", async () => {
 		const seen = new Map<string, FakeRow>();
-		const fp = '42703::aged_col::no_query';
+		const log = `error: column "aged_col" does not exist`;
+		const hits = extractDriftHits(log);
+		assert.ok(hits.length > 0, "expected at least one hit");
+		const fp = fingerprintHit(hits[0]);
+
 		seen.set(fp, {
 			fingerprint: fp,
 			occurrence_count: 1,
@@ -176,7 +186,6 @@ describe("runMonitorCycle", () => {
 		});
 		const { pool, escalations } = makeFakePool(seen);
 
-		const log = `column "aged_col" does not exist`;
 		const result = await runMonitorCycle({
 			pool,
 			repoRoot: "/tmp/r",
@@ -193,7 +202,11 @@ describe("runMonitorCycle", () => {
 
 	it("respects the 1h cooldown between escalations", async () => {
 		const seen = new Map<string, FakeRow>();
-		const fp = '42703::cooldown_col::no_query';
+		const log = `error: column "cooldown_col" does not exist`;
+		const hits = extractDriftHits(log);
+		assert.ok(hits.length > 0, "expected at least one hit");
+		const fp = fingerprintHit(hits[0]);
+
 		seen.set(fp, {
 			fingerprint: fp,
 			occurrence_count: 6,
@@ -205,7 +218,6 @@ describe("runMonitorCycle", () => {
 		});
 		const { pool, escalations } = makeFakePool(seen);
 
-		const log = `column "cooldown_col" does not exist`;
 		const result = await runMonitorCycle({
 			pool,
 			repoRoot: "/tmp/r",
@@ -222,7 +234,11 @@ describe("runMonitorCycle", () => {
 
 	it("stops escalating once resolved", async () => {
 		const seen = new Map<string, FakeRow>();
-		const fp = '42703::done_col::no_query';
+		const log = `error: column "done_col" does not exist`;
+		const hits = extractDriftHits(log);
+		assert.ok(hits.length > 0, "expected at least one hit");
+		const fp = fingerprintHit(hits[0]);
+
 		seen.set(fp, {
 			fingerprint: fp,
 			occurrence_count: 5,
@@ -234,7 +250,6 @@ describe("runMonitorCycle", () => {
 		});
 		const { pool, escalations } = makeFakePool(seen);
 
-		const log = `column "done_col" does not exist`;
 		await runMonitorCycle({
 			pool,
 			repoRoot: "/tmp/r",

@@ -1,0 +1,22 @@
+[Unit]
+Description=AgentHive Schema Drift Monitor
+Documentation=https://gitlab.local/agenthive
+After=network.target postgresql.service
+
+[Service]
+Type=oneshot
+User=agenthive
+Group=agenthive
+EnvironmentFile=/etc/agenthive/env
+Environment=NODE_ENV=production
+Environment=PATH=/home/agenthive/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HOME=/home/agenthive
+ExecStart=/usr/local/bin/agenthive-schema-drift-monitor.sh
+Restart=no
+TimeoutStartSec=60
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agenthive-schema-drift-monitor
+
+[Install]
+WantedBy=multi-user.target

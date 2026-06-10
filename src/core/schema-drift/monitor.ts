@@ -4,9 +4,13 @@
  * One pass: scrape journalctl, extract drift hits, dedupe, upsert into
  * roadmap.schema_drift_seen, file hotfix proposals on first occurrence,
  * escalate via notification_queue (P674) on repeat.
+ *
+ * AC-21: Scrape is behind an injectable interface. SCHEMA_DRIFT_LOG_INPUT env
+ * overrides journalctl with synthetic logs from a file for testing.
  */
 
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 
 import {
 	dedupeHits,
@@ -247,6 +251,12 @@ async function escalate(
 }
 
 function defaultScrape(windowMinutes: number): string {
+	// AC-21: Allow injection of synthetic logs via SCHEMA_DRIFT_LOG_INPUT env for testing.
+	const logInputPath = process.env.SCHEMA_DRIFT_LOG_INPUT;
+	if (logInputPath) {
+		return readFileSync(logInputPath, "utf8");
+	}
+
 	return execFileSync(
 		"journalctl",
 		[
