@@ -279,4 +279,143 @@ describe("runMonitorCycle", () => {
 		assert.equal(result.errors.length, 1);
 		assert.match(result.errors[0], /journalctl/);
 	});
+
+	it("AC-12: detects regression when error re-appears after resolved_at", async () => {
+		const log = `error: column "regressed_col" does not exist`;
+		const hits = extractDriftHits(log);
+		assert.ok(hits.length > 0, "expected at least one hit");
+		const fp = fingerprintHit(hits[0]);
+
+		const now = new Date();
+		const escalations: any[] = [];
+		const logMessages: string[] = [];
+
+		const pool: any = {
+			query: async (text: string, params: any[] = []) => {
+				if (/SELECT fingerprint, occurrence_count/i.test(text)) {
+					// Return row with resolved_at set (regression case)
+					return {
+						rows: [
+							{
+								fingerprint: fp,
+								occurrence_count: 1,
+								first_seen: new Date(now.getTime() - 5 * 60 * 1000), // 5 min ago
+								last_seen: new Date(),
+								hotfix_proposal_id: "666",
+								resolved_at: new Date(now.getTime() - 1 * 60 * 1000), // Resolved 1 min ago
+								last_escalated_at: null,
+							},
+						],
+					};
+				}
+				if (/INSERT INTO roadmap.notification_queue/i.test(text)) {
+					logMessages.push("[ESCALATE]");
+					escalations.push({
+						proposal_id: params[0],
+						title: params[1],
+						body: params[2],
+					});
+					return { rows: [] };
+				}
+				if (/UPDATE roadmap.schema_drift_seen/i.test(text)) {
+					return { rows: [] };
+				}
+				if (/SELECT fingerprint, missing_name, hotfix_proposal_id/i.test(text)) {
+					// detectSelfHeals query
+					return { rows: [] };
+				}
+				return { rows: [] };
+			},
+		};
+
+		const result = await runMonitorCycle({
+			pool,
+			repoRoot: "/tmp/r",
+			scrape: () => log,
+			exec: () => "",
+			createHotfixProposal: async () => null,
+			now: () => now,
+			log: (m) => logMessages.push(m),
+			warn: () => {},
+		});
+
+		// AC-12: Regression should escalate immediately, bypassing cooldown
+		assert.equal(result.repeats, 1, `repeats=${result.repeats}`);
+		assert.equal(result.escalations, 1, `escalations=${result.escalations}, escalated=${escalations.length}, logs=${logMessages.join("|")}`);
+		assert.equal(escalations.length, 1);
+		assert.match(escalations[0].title, /Schema drift unresolved/);
+	});
+
+	it("AC-15: retries hotfix creation when hotfix_proposal_id is NULL", async () => {
+		const log = `error: column "retry_col" does not exist`;
+		const hits = extractDriftHits(log);
+		assert.ok(hits.length > 0, "expected at least one hit");
+		const fp = fingerprintHit(hits[0]);
+
+		const createCalls: any[] = [];
+		const updateCalls: any[] = [];
+
+		const pool: any = {
+			query: async (text: string, params: any[] = []) => {
+				logMessages.push(`[pool.query] ${text.slice(0, 50)}`);
+				if (/SELECT fingerprint, occurrence_count/i.test(text)) {
+					// Return existing row with null hotfix_proposal_id
+					return {
+						rows: [
+							{
+								fingerprint: fp,
+								occurrence_count: 1,
+								first_seen: new Date(Date.now() - 5 * 60 * 1000),
+								last_seen: new Date(),
+								hotfix_proposal_id: null,
+								resolved_at: null,
+								last_escalated_at: null,
+							},
+						],
+					};
+				}
+				if (text.includes("hotfix_proposal_id") && text.includes("UPDATE")) {
+					logMessages.push("[MATCH] hotfix_proposal_id UPDATE");
+					updateCalls.push({ text: text.slice(0, 60), params });
+					return { rows: [] };
+				}
+				if (/UPDATE roadmap.schema_drift_seen.*occurrence_count/i.test(text)) {
+					logMessages.push("[MATCH] occurrence_count UPDATE");
+					return { rows: [] };
+				}
+				if (/INSERT INTO roadmap.schema_drift_seen/i.test(text)) {
+					logMessages.push("[MATCH] INSERT");
+					return { rows: [] };
+				}
+				logMessages.push("[MATCH] default return");
+				return { rows: [] };
+			},
+		};
+
+		const logMessages: string[] = [];
+		const result = await runMonitorCycle({
+			pool,
+			repoRoot: "/tmp/r",
+			scrape: () => log,
+			exec: () => "",
+			createHotfixProposal: async (args) => {
+				createCalls.push(args);
+				logMessages.push(`createHotfixProposal called with ${args.missingName}`);
+				return { id: 777, displayId: "P777" };
+			},
+			log: (m) => logMessages.push(m),
+			warn: () => {},
+		});
+
+		// AC-15: Should retry hotfix creation and succeed
+		assert.ok(createCalls.length > 0, `expected hotfix creation to be attempted`);
+		assert.equal(result.repeats, 1);
+		// Debug the pool queries that were called
+		const queries = logMessages.filter(m => m.startsWith("[pool.query]"));
+		const updates = logMessages.filter(m => m.includes("UPDATE"));
+		assert.ok(queries.length > 0, `pool.query called: ${queries.join("|")}`);
+		assert.ok(updates.length > 0, `UPDATE queries seen: ${updates.join("|")}`);
+		assert.equal(result.newHotfixes, 1, `newHotfixes=${result.newHotfixes}, createCalls=${createCalls.length}`);
+		assert.ok(updateCalls.length > 0, "expected UPDATE of hotfix_proposal_id");
+	});
 });
