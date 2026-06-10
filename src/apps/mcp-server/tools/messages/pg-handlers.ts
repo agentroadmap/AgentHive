@@ -12,10 +12,11 @@ import {
 	checkMessageACL,
 } from "../../../../infra/messaging/a2a-access-control.ts";
 import type { A2ANotification } from "../../../../infra/messaging/a2a-types.ts";
-import { agentContextStorage } from "../../../../shared/identity/agent-context.ts";
 import { getPool, query } from "../../../../postgres/pool.ts";
+import { agentContextStorage } from "../../../../shared/identity/agent-context.ts";
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
+import { checkAndEnforceRateLimit } from "./rate-limiter.ts";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
 	return {
@@ -255,7 +256,10 @@ export class PgMessagingHandlers {
 	// -------------------------------------------------------------------------
 
 	// P1105 AC-5: write rejected bearer events to operator_audit_log
-	private async _logAuthRejection(fromAgent: string, reason: string): Promise<void> {
+	private async _logAuthRejection(
+		fromAgent: string,
+		reason: string,
+	): Promise<void> {
 		try {
 			await query(
 				`INSERT INTO roadmap.operator_audit_log
@@ -281,7 +285,9 @@ export class PgMessagingHandlers {
 		try {
 			// P159 AC-5: Soft-fail identity verification for all agents (not just user/*)
 			// Signature and data are optional; unsigned requests are logged but allowed
-			const { verifyAgentIdentity } = await import("../../../../core/identity/identity-verification.ts");
+			const { verifyAgentIdentity } = await import(
+				"../../../../core/identity/identity-verification.ts"
+			);
 			const verification = await verifyAgentIdentity(
 				args.from_agent,
 				args._signature as string | undefined,
@@ -290,9 +296,15 @@ export class PgMessagingHandlers {
 
 			// In hard-fail mode (AGENTHIVE_AUTH_REQUIRED=true), reject if verification.rejected
 			if (verification.rejected) {
-				const httpStatus = verification.reason === "public_key_not_found" ? 401 : 403;
+				const httpStatus =
+					verification.reason === "public_key_not_found" ? 401 : 403;
 				return {
-					content: [{ type: "text", text: `⛔ [P159] Identity verification failed (${verification.reason}). HTTP ${httpStatus}.` }],
+					content: [
+						{
+							type: "text",
+							text: `⛔ [P159] Identity verification failed (${verification.reason}). HTTP ${httpStatus}.`,
+						},
+					],
 				};
 			}
 
@@ -302,15 +314,35 @@ export class PgMessagingHandlers {
 				if (!ctx?.verified) {
 					await this._logAuthRejection(args.from_agent, "missing_bearer_token");
 					return {
-						content: [{ type: "text", text: "⛔ 401 Unauthorized: Bearer token required for user/* senders." }],
+						content: [
+							{
+								type: "text",
+								text: "⛔ 401 Unauthorized: Bearer token required for user/* senders.",
+							},
+						],
 					};
 				}
 				if (ctx.verified.principal_id !== args.from_agent) {
 					await this._logAuthRejection(args.from_agent, "sub_mismatch");
 					return {
-						content: [{ type: "text", text: `⛔ 403 Forbidden: Token sub '${ctx.verified.principal_id}' does not match from_agent '${args.from_agent}'.` }],
+						content: [
+							{
+								type: "text",
+								text: `⛔ 403 Forbidden: Token sub '${ctx.verified.principal_id}' does not match from_agent '${args.from_agent}'.`,
+							},
+						],
 					};
 				}
+			}
+
+			// P1100 AC-4: Rate limit enforcement before side effects
+			// Check and enforce per-sender rate limit + global channel limit
+			const rateLimitCheck = await checkAndEnforceRateLimit(
+				args.from_agent,
+				args.channel,
+			);
+			if (!rateLimitCheck.allowed) {
+				return rateLimitCheck.result;
 			}
 
 			// AC#2: Enforce ACL before inserting. DMs require an explicit grant;
