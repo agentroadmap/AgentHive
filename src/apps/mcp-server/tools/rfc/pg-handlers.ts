@@ -1393,6 +1393,36 @@ export async function recordGateDecision(args: {
 		}
 		const { status: fromState, maturity } = propRows[0];
 
+		// Resolve the forward gate target so the fn_apply_gate_advance trigger
+		// actually advances status on an 'advance' decision. This handler used to
+		// write to_state = from_state, which made the trigger's idempotency check
+		// (status == to_state -> RETURN NULL) a permanent no-op: gate_decision
+		// recorded a row but never advanced, contradicting the tool description.
+		// Resolve via the SAME workflow source the prop_transition validator uses
+		// (the `workflows` table + workflow_templates), so the two paths agree
+		// even for proposals whose proposal.workflow_name has drifted. Pick the
+		// single forward transition for this from_state (allowed_reasons that
+		// represent a gate advance, never the backward iterate/revision/reject
+		// ones). Falls back to from_state (no-op) for non-advance decisions or
+		// when no forward transition exists.
+		let toState = fromState;
+		if (args.decision === "advance") {
+			const { rows: fwd } = await query<{ to_state: string }>(
+				`SELECT pvt.to_state
+				   FROM workflows w
+				   JOIN workflow_templates wt ON wt.id = w.template_id
+				   JOIN roadmap_proposal.proposal_valid_transitions pvt
+				     ON pvt.workflow_name = wt.name
+				  WHERE w.proposal_id = $1
+				    AND LOWER(pvt.from_state) = LOWER($2)
+				    AND pvt.allowed_reasons && ARRAY['mature','decision','deploy','accepted','submit','approve','advance','quorum_met']::text[]
+				  ORDER BY pvt.to_state
+				  LIMIT 1`,
+				[proposalId, fromState],
+			);
+			if (fwd.length) toState = fwd[0].to_state;
+		}
+
 		// Shadow-mode skip: if a row with the same agent_run_id already exists,
 		// the new MCP path already wrote the canonical record — skip the insert.
 		if (args.agent_run_id) {
@@ -1425,7 +1455,7 @@ export async function recordGateDecision(args: {
 			[
 				proposalId,
 				fromState,
-				fromState, // to_state mirrors from_state — transition is a separate step
+				toState, // resolved forward gate target so fn_apply_gate_advance advances (was from_state, a permanent no-op)
 				maturity,
 				args.gate,
 				args.decided_by ?? "mcp",
@@ -1436,10 +1466,26 @@ export async function recordGateDecision(args: {
 			],
 		);
 
+		// The fn_apply_gate_advance trigger fired AFTER INSERT in the same
+		// transaction; re-read the status so the message reflects reality (the
+		// trigger no-ops on state drift, so toState is the request, not a promise).
+		let advanceNote = "";
+		if (args.decision === "advance" && toState !== fromState) {
+			const { rows: after } = await query<{ status: string }>(
+				`SELECT status FROM roadmap_proposal.proposal WHERE id = $1`,
+				[proposalId],
+			);
+			const newState = after[0]?.status ?? fromState;
+			advanceNote =
+				newState.toUpperCase() === toState.toUpperCase()
+					? ` → status advanced ${fromState} → ${newState}.`
+					: ` (status NOT advanced — still ${newState}; expected ${fromState} → ${toState}. Check for state drift.)`;
+		}
+
 		return {
 			content: [{
 				type: "text",
-				text: `✅ Gate decision recorded: id=${rows[0].id} proposal=${args.proposal_id} gate=${args.gate} decision=${args.decision}`,
+				text: `✅ Gate decision recorded: id=${rows[0].id} proposal=${args.proposal_id} gate=${args.gate} decision=${args.decision}${advanceNote}`,
 			}],
 		};
 	} catch (err) {
