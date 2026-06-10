@@ -602,6 +602,7 @@ export class PgCubicHandlers {
 		phase?: string;
 		budget_usd?: number;
 		worktree_path?: string;
+		project_id?: number;
 	}): Promise<CallToolResult> {
 		try {
 			// P462: Sanitize agent identity (will throw if invalid or collides)
@@ -615,6 +616,39 @@ export class PgCubicHandlers {
 					`Agent identity collision`,
 					`"${args.agent_identity}" collides with existing "${collision}"`,
 				);
+			}
+
+			// AC-101: Check project status before acquisition (refuse archived projects)
+			if (args.project_id) {
+				const projectCheck = await query<{ status: string }>(
+					`SELECT status FROM roadmap.project WHERE project_id = $1`,
+					[args.project_id],
+				);
+				if (!projectCheck.rows.length) {
+					return errorResult(
+						"Project not found",
+						new Error(`project_id=${args.project_id} does not exist`),
+					);
+				}
+				if (projectCheck.rows[0].status === "archived") {
+					return {
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify(
+									{
+										ok: false,
+										error: "project_archived",
+										project_id: args.project_id,
+										message: "Cannot acquire cubic for archived project",
+									},
+									null,
+									2,
+								),
+							},
+						],
+					};
+				}
 			}
 
 			// P462: Sanitize worktree path if provided

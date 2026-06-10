@@ -500,6 +500,387 @@ export async function projectHealthCheck(args: {
 }
 
 /**
+ * Archive a project (AC-3, AC-101): set status=archived and log timestamp.
+ * Dispatch handler will refuse claims for archived projects.
+ */
+export async function projectArchive(args: {
+	project?: string;
+	reason?: string;
+}): Promise<CallToolResult> {
+	try {
+		if (!args.project) {
+			return errorResult(
+				"project_archive requires 'project' (slug or numeric id)",
+				new Error("Missing project"),
+			);
+		}
+
+		const projectValue = args.project.trim();
+		const numericProject = /^\d+$/.test(projectValue);
+		const reason = args.reason?.trim() || "Archived by operator";
+
+		const { rows: existing } = await query<{ status: string; slug: string }>(
+			`SELECT status, slug FROM roadmap.project
+			  WHERE ${numericProject ? "project_id" : "slug"} = $1`,
+			[numericProject ? Number(projectValue) : projectValue],
+		);
+
+		if (!existing.length) {
+			return jsonResult({
+				ok: false,
+				error: "project_not_found",
+				project: args.project,
+			});
+		}
+
+		if (existing[0].status === "archived") {
+			return jsonResult({
+				ok: true,
+				already_archived: true,
+				slug: existing[0].slug,
+				message: "Project is already archived",
+			});
+		}
+
+		const gitSelect = await projectGitSelect();
+		const { rows } = await query<{
+			project_id: number;
+			slug: string;
+			name: string;
+			worktree_root: string;
+			git_repo_url: string | null;
+			git_default_branch: string;
+			status: string;
+			archived_at: string | null;
+		}>(
+			`UPDATE roadmap.project
+				SET status = 'archived', archived_at = NOW()
+			  WHERE ${numericProject ? "project_id" : "slug"} = $1
+			  RETURNING project_id, slug, name, worktree_root, ${gitSelect}, status, archived_at`,
+			[numericProject ? Number(projectValue) : projectValue],
+		);
+
+		if (!rows.length) {
+			return jsonResult({
+				ok: false,
+				error: "update_failed",
+				project: args.project,
+			});
+		}
+
+		const project = rows[0];
+		return jsonResult({
+			ok: true,
+			project: {
+				project_id: project.project_id,
+				slug: project.slug,
+				name: project.name,
+				status: project.status,
+				archived_at: project.archived_at,
+			},
+			message: `Project '${project.slug}' archived. Dispatch will refuse claims for archived projects.`,
+		});
+	} catch (err) {
+		return errorResult("Failed to archive project", err);
+	}
+}
+
+/**
+ * Reactivate a project (AC-3): set status=active and clear archived_at.
+ */
+export async function projectReactivate(args: {
+	project?: string;
+}): Promise<CallToolResult> {
+	try {
+		if (!args.project) {
+			return errorResult(
+				"project_reactivate requires 'project' (slug or numeric id)",
+				new Error("Missing project"),
+			);
+		}
+
+		const projectValue = args.project.trim();
+		const numericProject = /^\d+$/.test(projectValue);
+
+		const { rows: existing } = await query<{ status: string; slug: string }>(
+			`SELECT status, slug FROM roadmap.project
+			  WHERE ${numericProject ? "project_id" : "slug"} = $1`,
+			[numericProject ? Number(projectValue) : projectValue],
+		);
+
+		if (!existing.length) {
+			return jsonResult({
+				ok: false,
+				error: "project_not_found",
+				project: args.project,
+			});
+		}
+
+		if (existing[0].status !== "archived") {
+			return jsonResult({
+				ok: true,
+				already_active: true,
+				slug: existing[0].slug,
+				status: existing[0].status,
+				message: `Project is already in status '${existing[0].status}'`,
+			});
+		}
+
+		const gitSelect = await projectGitSelect();
+		const { rows } = await query<{
+			project_id: number;
+			slug: string;
+			name: string;
+			worktree_root: string;
+			git_repo_url: string | null;
+			git_default_branch: string;
+			status: string;
+		}>(
+			`UPDATE roadmap.project
+				SET status = 'active', archived_at = NULL
+			  WHERE ${numericProject ? "project_id" : "slug"} = $1
+			  RETURNING project_id, slug, name, worktree_root, ${gitSelect}, status`,
+			[numericProject ? Number(projectValue) : projectValue],
+		);
+
+		if (!rows.length) {
+			return jsonResult({
+				ok: false,
+				error: "update_failed",
+				project: args.project,
+			});
+		}
+
+		const project = rows[0];
+		return jsonResult({
+			ok: true,
+			project: {
+				project_id: project.project_id,
+				slug: project.slug,
+				name: project.name,
+				status: project.status,
+			},
+			message: `Project '${project.slug}' reactivated. Dispatch will accept claims for this project again.`,
+		});
+	} catch (err) {
+		return errorResult("Failed to reactivate project", err);
+	}
+}
+
+/**
+ * Delete a project (AC-4): safety-guarded deletion with preflight cascade checks.
+ * Refuses unless:
+ * 1. Project has zero non-archived proposals
+ * 2. Operator passes confirm_slug matching the project slug
+ * 3. Optional --force flag for cascade with second confirmation
+ */
+export async function projectDelete(args: {
+	project?: string;
+	confirm_slug?: string;
+	force?: boolean;
+}): Promise<CallToolResult> {
+	try {
+		if (!args.project) {
+			return errorResult(
+				"project_delete requires 'project' (slug or numeric id)",
+				new Error("Missing project"),
+			);
+		}
+
+		const projectValue = args.project.trim();
+		const numericProject = /^\d+$/.test(projectValue);
+
+		// Fetch the project
+		const { rows: projectRows } = await query<{
+			project_id: number;
+			slug: string;
+			name: string;
+			status: string;
+		}>(
+			`SELECT project_id, slug, name, status FROM roadmap.project
+			  WHERE ${numericProject ? "project_id" : "slug"} = $1`,
+			[numericProject ? Number(projectValue) : projectValue],
+		);
+
+		if (!projectRows.length) {
+			return jsonResult({
+				ok: false,
+				error: "project_not_found",
+				project: args.project,
+			});
+		}
+
+		const project = projectRows[0];
+
+		// Check: confirm_slug must match
+		if (!args.confirm_slug || args.confirm_slug.trim() !== project.slug) {
+			return jsonResult({
+				ok: false,
+				error: "confirm_slug_mismatch",
+				slug: project.slug,
+				message: `Must pass confirm_slug='${project.slug}' to proceed with deletion`,
+			});
+		}
+
+		// Check: zero dependent proposal dependencies/discussions/criteria/reviews/events
+		// Note: roadmap_proposal.proposal itself is tenant-scoped and has no project_id;
+		// only the dependent relationship tables have project_id
+		const { rows: propDeps } = await query<{ count: string }>(
+			`SELECT COUNT(*)::text AS count FROM roadmap_proposal.proposal_dependencies
+			  WHERE project_id = $1`,
+			[project.project_id],
+		);
+
+		const propDepCount = Number(propDeps[0]?.count ?? 0);
+		if (propDepCount > 0) {
+			return jsonResult({
+				ok: false,
+				error: "dependent_proposals_exist",
+				project_id: project.project_id,
+				slug: project.slug,
+				dependent_count: propDepCount,
+				message: `Cannot delete project with ${propDepCount} dependent proposal relationships. Archive them first.`,
+			});
+		}
+
+		// Preflight: check cascade scope
+		const cascadeChecks = await performCascadeChecks(project.project_id);
+		if (!cascadeChecks.safe && !args.force) {
+			return jsonResult({
+				ok: false,
+				error: "cascade_dependencies_exist",
+				project_id: project.project_id,
+				slug: project.slug,
+				cascade_checks: cascadeChecks,
+				message: "Project has dependent data. Use force=true and confirm_slug to cascade-delete.",
+			});
+		}
+
+		if (!args.force && cascadeChecks.dependencyCount > 0) {
+			return jsonResult({
+				ok: false,
+				error: "cascade_dependencies_exist",
+				project_id: project.project_id,
+				slug: project.slug,
+				message: "Pass force=true to cascade-delete dependent rows.",
+			});
+		}
+
+		// Perform deletion
+		try {
+			await query("BEGIN");
+			try {
+				// Delete cascade on all FK dependent tables
+				await query("DELETE FROM roadmap.project_route_allowlist WHERE project_id = $1", [
+					project.project_id,
+				]);
+				await query("DELETE FROM roadmap.project_route_policy WHERE project_id = $1", [
+					project.project_id,
+				]);
+				await query("DELETE FROM roadmap.project_capability_scope WHERE project_id = $1", [
+					project.project_id,
+				]);
+				await query("DELETE FROM roadmap.project_budget_cap WHERE project_id = $1", [
+					project.project_id,
+				]);
+				await query("DELETE FROM roadmap.project_repair_queue WHERE project_id = $1", [
+					project.project_id,
+				]);
+				await query("DELETE FROM roadmap.project_capacity_config WHERE project_id = $1", [
+					project.project_id,
+				]);
+
+				// Delete the project itself
+				await query("DELETE FROM roadmap.project WHERE project_id = $1", [
+					project.project_id,
+				]);
+
+				await query("COMMIT");
+			} catch (err) {
+				await query("ROLLBACK");
+				throw err;
+			}
+		} catch (err) {
+			return errorResult("Failed to delete project", err);
+		}
+
+		return jsonResult({
+			ok: true,
+			deleted: true,
+			project_id: project.project_id,
+			slug: project.slug,
+			message: `Project '${project.slug}' deleted along with dependent routes, capabilities, and budgets.`,
+		});
+	} catch (err) {
+		return errorResult("Failed to delete project", err);
+	}
+}
+
+/**
+ * Preflight check for cascade dependencies before deletion (AC-102).
+ * Returns {safe: bool, dependencyCount: number, details: {...}}
+ */
+async function performCascadeChecks(projectId: number): Promise<{
+	safe: boolean;
+	dependencyCount: number;
+	active_cubics?: number;
+	proposal_dependencies?: number;
+	workflow_templates?: number;
+	workflows?: number;
+}> {
+	const checks = {
+		safe: true,
+		dependencyCount: 0,
+		active_cubics: 0,
+		proposal_dependencies: 0,
+		workflow_templates: 0,
+		workflows: 0,
+	};
+
+	// Non-recycled cubics (status='complete' and 'expired' are terminal; others are active)
+	const { rows: cubicRows } = await query<{ count: string }>(
+		`SELECT COUNT(*)::text AS count FROM roadmap.cubics
+		  WHERE project_id = $1 AND status NOT IN ('complete', 'expired')`,
+		[projectId],
+	);
+	checks.active_cubics = Number(cubicRows[0]?.count ?? 0);
+
+	// Proposal dependencies with this project_id
+	const { rows: propDepRows } = await query<{ count: string }>(
+		`SELECT COUNT(*)::text AS count FROM roadmap_proposal.proposal_dependencies
+		  WHERE project_id = $1`,
+		[projectId],
+	);
+	checks.proposal_dependencies = Number(propDepRows[0]?.count ?? 0);
+
+	// Workflow templates owned by this project
+	const { rows: templateRows } = await query<{ count: string }>(
+		`SELECT COUNT(*)::text AS count FROM roadmap.workflow_templates
+		  WHERE project_id = $1`,
+		[projectId],
+	);
+	checks.workflow_templates = Number(templateRows[0]?.count ?? 0);
+
+	// Workflows owned by this project
+	const { rows: wfRows } = await query<{ count: string }>(
+		`SELECT COUNT(*)::text AS count FROM roadmap.workflows
+		  WHERE project_id = $1`,
+		[projectId],
+	);
+	checks.workflows = Number(wfRows[0]?.count ?? 0);
+
+	checks.dependencyCount =
+		checks.active_cubics +
+		checks.proposal_dependencies +
+		checks.workflow_templates +
+		checks.workflows;
+
+	checks.safe = checks.dependencyCount === 0;
+
+	return checks;
+}
+
+/**
  * Retrieve the currently bound project for a session.
  * Internal use (not exposed as MCP action in Phase 1).
  */
