@@ -6,16 +6,19 @@
  * are in terminal state (COMPLETE or maturity='obsolete'), FALSE otherwise.
  */
 
-import { describe, it, before, after } from "node:test";
-import assert from "node:assert/strict";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { query as defaultQuery } from "../src/infra/postgres/pool.ts";
 
-describe("P926 AC-8: fn_check_umbrella_closeout()", () => {
-  let query = defaultQuery;
-  let testUmbrellaId: number;
-  let testChildIds: number[] = [];
+// LIVE-DB TEST: inserts fixture proposals (with teardown). Skipped by default
+// to keep the suite hermetic; run with AGENTHIVE_ALLOW_LIVE_DB=1.
+const LIVE = process.env.AGENTHIVE_ALLOW_LIVE_DB === "1";
 
-  before(async () => {
+describe.skipIf(!LIVE)("P926 AC-8: fn_check_umbrella_closeout()", () => {
+  const query = defaultQuery;
+  let testUmbrellaId: number;
+  const testChildIds: number[] = [];
+
+  beforeAll(async () => {
     // Create test umbrella proposal
     const umbrellaResult = await query(
       `
@@ -67,7 +70,7 @@ describe("P926 AC-8: fn_check_umbrella_closeout()", () => {
     testChildIds.push(child3.rows[0].id);
   });
 
-  after(async () => {
+  afterAll(async () => {
     // Clean up: delete proposals in reverse order
     for (const childId of testChildIds) {
       await query(`DELETE FROM roadmap_proposal.proposal WHERE id = $1`, [childId]);
@@ -80,11 +83,8 @@ describe("P926 AC-8: fn_check_umbrella_closeout()", () => {
       `SELECT roadmap_proposal.fn_check_umbrella_closeout($1) AS result`,
       [testUmbrellaId]
     );
-    assert.strictEqual(
-      result.rows[0].result,
-      false,
-      "Function should return FALSE when some children are not COMPLETE"
-    );
+    // FALSE expected: one child still DEVELOP
+    expect(result.rows[0].result).toBe(false);
   });
 
   it("should return TRUE when all children are COMPLETE", async () => {
@@ -98,11 +98,7 @@ describe("P926 AC-8: fn_check_umbrella_closeout()", () => {
       `SELECT roadmap_proposal.fn_check_umbrella_closeout($1) AS result`,
       [testUmbrellaId]
     );
-    assert.strictEqual(
-      result.rows[0].result,
-      true,
-      "Function should return TRUE when all children are COMPLETE"
-    );
+    expect(result.rows[0].result).toBe(true);
   });
 
   it("should return TRUE for umbrella with no children", async () => {
@@ -122,11 +118,8 @@ describe("P926 AC-8: fn_check_umbrella_closeout()", () => {
       `SELECT roadmap_proposal.fn_check_umbrella_closeout($1) AS result`,
       [emptyUmbrella.rows[0].id]
     );
-    assert.strictEqual(
-      result.rows[0].result,
-      true,
-      "Function should return TRUE for umbrella with no children (trivially satisfied)"
-    );
+    // trivially satisfied: no children
+    expect(result.rows[0].result).toBe(true);
 
     // Clean up
     await query(`DELETE FROM roadmap_proposal.proposal WHERE id = $1`, [
