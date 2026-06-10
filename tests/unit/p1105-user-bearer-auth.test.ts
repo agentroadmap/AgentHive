@@ -12,17 +12,23 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { after, before, describe, it } from "node:test";
-import { closePool, getPool } from "../../src/infra/postgres/pool.ts";
 import {
-	verifyUserBearer,
-	logBearerRejection,
 	extractBearerFromHeader,
+	logBearerRejection,
+	verifyUserBearer,
 } from "../../src/apps/mcp-server/tools/messages/user-bearer-auth.ts";
+import { closePool, getPool } from "../../src/infra/postgres/pool.ts";
 
 // ── JWT helpers ────────────────────────────────────────────────────────────────
 
-function makeJwt(sub: string, secret: string, opts: { expOffset?: number } = {}): string {
-	const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+function makeJwt(
+	sub: string,
+	secret: string,
+	opts: { expOffset?: number } = {},
+): string {
+	const header = Buffer.from(
+		JSON.stringify({ alg: "HS256", typ: "JWT" }),
+	).toString("base64url");
 	const now = Math.floor(Date.now() / 1000);
 	const payload = Buffer.from(
 		JSON.stringify({
@@ -96,11 +102,12 @@ describe("verifyUserBearer — AC-3", () => {
 		assert.equal(result.error, "invalid_sig");
 	});
 
-	it("expired token → error=exp_expired", () => {
+	it("expired token → error=token_expired (P1098)", () => {
 		const token = makeJwt(FROM_AGENT, SECRET_A, { expOffset: -120 }); // 2 min ago
 		const result = verifyUserBearer(token, FROM_AGENT);
 		assert.equal(result.ok, false);
-		assert.equal(result.error, "exp_expired");
+		// P1098 standardizes the error code to 'token_expired'
+		assert.equal(result.error, "token_expired");
 	});
 
 	it("no secret configured → error=no_secret", () => {
