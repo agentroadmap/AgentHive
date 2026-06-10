@@ -1,4 +1,4 @@
-/* node_modules/@uiw/react-markdown-preview/esm/styles/markdown.css */
+/* ../../../node_modules/@uiw/react-markdown-preview/esm/styles/markdown.css */
 @media (prefers-color-scheme: dark) {
   .wmde-markdown, .wmde-markdown-var {
     --buncss-light: ;
@@ -1197,7 +1197,7 @@
   cursor: help;
 }
 
-/* node_modules/@uiw/react-md-editor/esm/components/Toolbar/Child.css */
+/* ../../../node_modules/@uiw/react-md-editor/esm/components/Toolbar/Child.css */
 .w-md-editor-toolbar-child {
   position: absolute;
   box-shadow: 0 0 0 1px var(--md-editor-box-shadow-color), 0 0 0 var(--md-editor-box-shadow-color), 0 1px 1px var(--md-editor-box-shadow-color);
@@ -1229,7 +1229,7 @@
   padding: 3px 4px 2px;
 }
 
-/* node_modules/@uiw/react-md-editor/esm/components/Toolbar/index.css */
+/* ../../../node_modules/@uiw/react-md-editor/esm/components/Toolbar/index.css */
 .w-md-editor-toolbar {
   border-bottom: 1px solid var(--md-editor-box-shadow-color);
   background-color: var(--md-editor-background-color);
@@ -1316,7 +1316,7 @@
   margin: -3px 3px 0 !important;
 }
 
-/* node_modules/@uiw/react-md-editor/esm/components/TextArea/index.css */
+/* ../../../node_modules/@uiw/react-md-editor/esm/components/TextArea/index.css */
 .w-md-editor-area {
   overflow: auto;
   border-radius: 5px;
@@ -1446,7 +1446,7 @@
   color: var(--color-prettylights-syntax-markup-deleted-text, #82071e) !important;
 }
 
-/* node_modules/@uiw/react-md-editor/esm/components/DragBar/index.css */
+/* ../../../node_modules/@uiw/react-md-editor/esm/components/DragBar/index.css */
 .w-md-editor-bar {
   position: absolute;
   cursor: s-resize;
@@ -1467,7 +1467,7 @@
   margin: 0 auto;
 }
 
-/* node_modules/@uiw/react-md-editor/esm/index.css */
+/* ../../../node_modules/@uiw/react-md-editor/esm/index.css */
 .w-md-editor {
   text-align: left;
   position: relative;

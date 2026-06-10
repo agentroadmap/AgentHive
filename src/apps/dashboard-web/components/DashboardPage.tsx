@@ -6,7 +6,7 @@ import type {
 	Channel as WebSocketChannel,
 } from "../hooks/useWebSocket";
 import { apiClient } from "../lib/api";
-import { maturityBadgeColors } from "../lib/maturity-colors";
+import { maturityBadgeColors, maturityBarColors, statusBadgeColors } from "../lib/maturity-colors";
 import ActivityFeed from "./ActivityFeed";
 import AgentDetail from "./AgentDetail";
 import LiveOpsPanel from "./LiveOpsPanel";
@@ -76,32 +76,6 @@ function heartbeatText(seconds?: number): string {
 	if (seconds < 60) return `${seconds}s`;
 	if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
 	return `${Math.floor(seconds / 3600)}h`;
-}
-
-function badgeClass(value: string): string {
-	switch (value.toLowerCase()) {
-		case "active":
-		case "assigned":
-		case "open":
-		case "healthy":
-			return "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300";
-		case "mature":
-		case "complete":
-		case "completed":
-		case "delivered":
-			return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300";
-		case "blocked":
-		case "claimed":
-		case "degraded":
-			return "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300";
-		case "obsolete":
-		case "offline":
-		case "expired":
-		case "rejected":
-			return "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300";
-		default:
-			return "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300";
-	}
 }
 
 const DashboardPage: React.FC<DashboardPageProps> = ({
@@ -372,7 +346,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
 												{proposal.id}
 											</span>
 											<span
-												className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${badgeClass(proposal.status)}`}
+												className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${statusBadgeColors(proposal.status)}`}
 											>
 												{proposal.status}
 											</span>
@@ -482,7 +456,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
 										</div>
 										<div className="text-xs text-gray-600 dark:text-gray-300 md:text-right">
 											<div
-												className={`inline-flex rounded-full px-2 py-0.5 font-medium ${badgeClass(agent.isActive ? "active" : "offline")}`}
+												className={`inline-flex rounded-full px-2 py-0.5 font-medium ${statusBadgeColors(agent.isActive ? "active" : "offline")}`}
 											>
 												{agent.isActive ? "active" : "offline"}
 											</div>
@@ -535,7 +509,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
 												</div>
 												<div className="text-right text-xs">
 													<div
-														className={`inline-flex rounded-full px-2 py-0.5 font-medium ${badgeClass(dispatch.dispatch_status)}`}
+														className={`inline-flex rounded-full px-2 py-0.5 font-medium ${statusBadgeColors(dispatch.dispatch_status)}`}
 													>
 														{dispatch.dispatch_status}
 													</div>

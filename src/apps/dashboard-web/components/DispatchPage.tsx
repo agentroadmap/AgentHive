@@ -5,6 +5,8 @@ import { apiClient } from "../lib/api";
 interface Dispatch {
 	id: number;
 	proposal_id: number;
+	proposal_display_id?: string | null;
+	proposal_title?: string | null;
 	agent_identity: string;
 	worker_identity: string | null;
 	squad_name: string;
@@ -215,7 +217,7 @@ const DispatchPage: React.FC = () => {
 							className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden"
 						>
 							<div className="bg-gray-50 dark:bg-gray-800 px-4 py-2 border-b border-gray-200 dark:border-gray-700">
-								<span className="font-semibold">P{proposalId}</span>
+								<span className="font-semibold">{pDispatches[0]?.proposal_display_id ?? `P${proposalId}`}</span>
 								<span className="text-sm text-gray-500 ml-2">
 									{pDispatches.length} dispatch{pDispatches.length > 1 ? "es" : ""}
 								</span>
