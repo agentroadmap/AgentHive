@@ -16,6 +16,21 @@ BEGIN;
 --       (agency_id, route_id, scope, project_id, allowed, lifecycle_status)
 --       Join semantics via FK to roadmap.agency (acting as agency registry).
 -- ============================================================
+-- A legacy text-array table (agency_identity, allowed_route_providers[], ...)
+-- may exist under this name from earlier work; it has zero rows and zero code
+-- readers (text-array consumers read project_route_policy). Move it aside so
+-- the normalized schema can take the canonical name.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema='roadmap' AND table_name='agency_route_policy'
+      AND column_name='allowed_route_providers'
+  ) THEN
+    ALTER TABLE roadmap.agency_route_policy RENAME TO agency_route_policy_legacy_textarray;
+  END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS roadmap.agency_route_policy (
     id                BIGSERIAL PRIMARY KEY,
     agency_id         TEXT NOT NULL REFERENCES roadmap.agency(agency_id) ON DELETE CASCADE,
@@ -27,32 +42,37 @@ CREATE TABLE IF NOT EXISTS roadmap.agency_route_policy (
     lifecycle_status  TEXT NOT NULL DEFAULT 'active'
                       CHECK (lifecycle_status IN ('active', 'deprecated', 'retired', 'blocked')),
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (agency_id, route_id, scope, COALESCE(project_id, 0))
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Expression uniqueness must be an index, not a table constraint
+CREATE UNIQUE INDEX IF NOT EXISTS uq_agency_route_policy_scope
+    ON roadmap.agency_route_policy (agency_id, route_id, scope, COALESCE(project_id, 0));
 
 CREATE INDEX IF NOT EXISTS idx_agency_route_policy_agency_id
     ON roadmap.agency_route_policy(agency_id);
 
 -- Trigger to update updated_at on every write
+CREATE OR REPLACE FUNCTION roadmap.fn_agency_route_policy_touch()
+RETURNS trigger LANGUAGE plpgsql AS $fn$
+BEGIN
+  NEW.updated_at := now();
+  RETURN NEW;
+END;
+$fn$;
+
 DO $$
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.triggers
-    WHERE trigger_name = 'trg_agency_route_policy_updated_at'
+    WHERE trigger_name = 'trg_agency_route_policy_touch'
       AND event_object_schema = 'roadmap'
       AND event_object_table = 'agency_route_policy'
   ) THEN
-    CREATE TRIGGER trg_agency_route_policy_updated_at
+    CREATE TRIGGER trg_agency_route_policy_touch
       BEFORE UPDATE ON roadmap.agency_route_policy
       FOR EACH ROW
-      EXECUTE FUNCTION (
-        CASE
-          WHEN EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'set_agency_route_policy_updated_at')
-            THEN 'set_agency_route_policy_updated_at'
-          ELSE 'set_updated_at'
-        END
-      )();
+      EXECUTE FUNCTION roadmap.fn_agency_route_policy_touch();
   END IF;
 END $$;
 

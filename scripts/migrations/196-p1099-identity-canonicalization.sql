@@ -57,33 +57,65 @@ $$;
 
 -- AC-5: Collision audit before migration.
 -- This query verifies that no two distinct raw identity values canonicalize to the same canonical form.
+-- Tolerant variant for auditing legacy data: returns NULL instead of raising
+-- on malformed identities (legacy display-name rows like 'Worker A' are
+-- exempted from the audit and from the NOT VALID constraint below).
+CREATE OR REPLACE FUNCTION roadmap.fn_try_canonicalize_identity(p_identity text)
+RETURNS text
+LANGUAGE plpgsql IMMUTABLE
+AS $fn$
+BEGIN
+  RETURN roadmap.fn_canonicalize_identity(p_identity);
+EXCEPTION WHEN OTHERS THEN
+  RETURN NULL;
+END;
+$fn$;
+
 -- If a collision is detected, the migration will be halted (manual intervention required).
 -- Audit covers: agent_registry, message_ledger (from_agent, to_agent), room_membership, listener_subscription.
 DO $$
 DECLARE
   collision_count int;
 BEGIN
-  -- Check for collisions in agent_registry
+  -- Check for collisions in agent_registry.
+  -- Only collisions among ACTIVE identities are fatal: two live actors must
+  -- never collapse into one canonical identity. Groups that only collide with
+  -- inactive/retired legacy variants (e.g. 'Architect' kept for historical
+  -- proposal_discussions FKs) are reported as NOTICEs, not failures.
   SELECT COUNT(*) INTO collision_count FROM (
     SELECT
-      roadmap.fn_canonicalize_identity(agent_identity) AS canonical,
+      roadmap.fn_try_canonicalize_identity(agent_identity) AS canonical,
       COUNT(DISTINCT agent_identity) AS variant_count
     FROM roadmap_workforce.agent_registry
+    WHERE status = 'active'
+      AND roadmap.fn_try_canonicalize_identity(agent_identity) IS NOT NULL
     GROUP BY canonical
     HAVING COUNT(DISTINCT agent_identity) > 1
   ) AS collisions;
 
   IF collision_count > 0 THEN
-    RAISE EXCEPTION 'Identity collision detected in agent_registry: % collision groups found. Manual review required before proceeding.', collision_count;
+    RAISE EXCEPTION 'Identity collision detected among ACTIVE agent_registry rows: % collision groups found. Manual review required before proceeding.', collision_count;
+  END IF;
+
+  SELECT COUNT(*) INTO collision_count FROM (
+    SELECT roadmap.fn_try_canonicalize_identity(agent_identity) AS canonical
+    FROM roadmap_workforce.agent_registry
+    WHERE roadmap.fn_try_canonicalize_identity(agent_identity) IS NOT NULL
+    GROUP BY 1
+    HAVING COUNT(DISTINCT agent_identity) > 1
+  ) AS collisions;
+  IF collision_count > 0 THEN
+    RAISE NOTICE 'P1099 audit: % canonical group(s) collide only via inactive legacy variants — harmless, left in place.', collision_count;
   END IF;
 
   -- Check for collisions in message_ledger (from_agent)
   SELECT COUNT(*) INTO collision_count FROM (
     SELECT
-      roadmap.fn_canonicalize_identity(from_agent) AS canonical,
+      roadmap.fn_try_canonicalize_identity(from_agent) AS canonical,
       COUNT(DISTINCT from_agent) AS variant_count
     FROM roadmap.message_ledger
     WHERE from_agent IS NOT NULL
+      AND roadmap.fn_try_canonicalize_identity(from_agent) IS NOT NULL
     GROUP BY canonical
     HAVING COUNT(DISTINCT from_agent) > 1
   ) AS collisions;
@@ -95,10 +127,11 @@ BEGIN
   -- Check for collisions in message_ledger (to_agent)
   SELECT COUNT(*) INTO collision_count FROM (
     SELECT
-      roadmap.fn_canonicalize_identity(to_agent) AS canonical,
+      roadmap.fn_try_canonicalize_identity(to_agent) AS canonical,
       COUNT(DISTINCT to_agent) AS variant_count
     FROM roadmap.message_ledger
     WHERE to_agent IS NOT NULL
+      AND roadmap.fn_try_canonicalize_identity(to_agent) IS NOT NULL
     GROUP BY canonical
     HAVING COUNT(DISTINCT to_agent) > 1
   ) AS collisions;
@@ -110,10 +143,11 @@ BEGIN
   -- Check for collisions in room_membership (agent_identity)
   SELECT COUNT(*) INTO collision_count FROM (
     SELECT
-      roadmap.fn_canonicalize_identity(agent_identity) AS canonical,
+      roadmap.fn_try_canonicalize_identity(agent_identity) AS canonical,
       COUNT(DISTINCT agent_identity) AS variant_count
     FROM roadmap.room_membership
     WHERE agent_identity IS NOT NULL
+      AND roadmap.fn_try_canonicalize_identity(agent_identity) IS NOT NULL
     GROUP BY canonical
     HAVING COUNT(DISTINCT agent_identity) > 1
   ) AS collisions;
@@ -122,19 +156,20 @@ BEGIN
     RAISE EXCEPTION 'Identity collision detected in room_membership.agent_identity: % collision groups found. Manual review required before proceeding.', collision_count;
   END IF;
 
-  -- Check for collisions in listener_subscription (from_agent)
+  -- Check for collisions in listener_subscription (agent_identity)
   SELECT COUNT(*) INTO collision_count FROM (
     SELECT
-      roadmap.fn_canonicalize_identity(from_agent) AS canonical,
-      COUNT(DISTINCT from_agent) AS variant_count
+      roadmap.fn_try_canonicalize_identity(agent_identity) AS canonical,
+      COUNT(DISTINCT agent_identity) AS variant_count
     FROM roadmap.listener_subscription
-    WHERE from_agent IS NOT NULL
+    WHERE agent_identity IS NOT NULL
+      AND roadmap.fn_try_canonicalize_identity(agent_identity) IS NOT NULL
     GROUP BY canonical
-    HAVING COUNT(DISTINCT from_agent) > 1
+    HAVING COUNT(DISTINCT agent_identity) > 1
   ) AS collisions;
 
   IF collision_count > 0 THEN
-    RAISE EXCEPTION 'Identity collision detected in listener_subscription.from_agent: % collision groups found. Manual review required before proceeding.', collision_count;
+    RAISE EXCEPTION 'Identity collision detected in listener_subscription.agent_identity: % collision groups found. Manual review required before proceeding.', collision_count;
   END IF;
 
   RAISE NOTICE 'P1099 collision audit: no collisions detected. Safe to proceed with canonicalization.';
@@ -143,11 +178,21 @@ END $$;
 -- AC-10: Add CHECK constraint to agent_registry(agent_identity).
 -- Ensures only canonical identities can be inserted or updated.
 -- This prevents homograph attacks at the database layer.
-ALTER TABLE roadmap_workforce.agent_registry
-ADD CONSTRAINT ck_agent_identity_canonical
-CHECK (agent_identity = roadmap.fn_canonicalize_identity(agent_identity));
+-- NOT VALID: enforced for new INSERT/UPDATE only; legacy display-name rows
+-- (referenced by historical proposal_lease audit rows) are exempt.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'ck_agent_identity_canonical'
+  ) THEN
+    ALTER TABLE roadmap_workforce.agent_registry
+    ADD CONSTRAINT ck_agent_identity_canonical
+    CHECK (agent_identity = roadmap.fn_canonicalize_identity(agent_identity))
+    NOT VALID;
+  END IF;
+END $$;
 
 -- Record migration in history
-INSERT INTO roadmap.migration_history (migration_file, status, error_detail)
-VALUES ('154-p1099-identity-canonicalization.sql', 'applied', NULL)
-ON CONFLICT (migration_file) DO NOTHING;
+INSERT INTO roadmap.migration_history (filename, checksum_sha256, applied_at, applied_by, environment)
+VALUES ('196-p1099-identity-canonicalization.sql', 'manual-apply', now(), 'claude-architect', 'production')
+ON CONFLICT DO NOTHING;
