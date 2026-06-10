@@ -37,6 +37,7 @@ import {
 	dispatchImplicitGate,
 	drainEnhancementRevisions,
 	drainImplicitGateReady,
+	handleGateCompletion,
 	handleStateChange,
 	reconcileStaleDispatches,
 	reconcileStrandedAdvances,
@@ -95,6 +96,7 @@ const DEFAULT_SHUTDOWN_DRAIN_MS = Number(
 const GATE_READY_CHANNEL = "proposal_gate_ready";
 const MATURITY_CHANGED_CHANNEL = "proposal_maturity_changed";
 const RUNTIME_FLAG_CHANNEL = "runtime_flag_changed";
+const OFFER_COMPLETED_CHANNEL = "offer_completed";
 
 /** Whether the 2-minute state-change poll fallback is enabled (env-driven). */
 const ENABLE_POLLING = process.env.AGENTHIVE_ORCHESTRATOR_POLL === "1";
@@ -330,8 +332,9 @@ export class Orchestrator {
 		await this.listenClient.query(`LISTEN ${GATE_READY_CHANNEL}`);
 		await this.listenClient.query(`LISTEN ${MATURITY_CHANGED_CHANNEL}`);
 		await this.listenClient.query(`LISTEN ${RUNTIME_FLAG_CHANNEL}`);
+		await this.listenClient.query(`LISTEN ${OFFER_COMPLETED_CHANNEL}`);
 		console.log(
-			`[Orchestrator] LISTEN registered: ${GATE_READY_CHANNEL}, ${MATURITY_CHANGED_CHANNEL}, ${RUNTIME_FLAG_CHANNEL}`,
+			`[Orchestrator] LISTEN registered: ${GATE_READY_CHANNEL}, ${MATURITY_CHANGED_CHANNEL}, ${RUNTIME_FLAG_CHANNEL}, ${OFFER_COMPLETED_CHANNEL}`,
 		);
 
 		// Schedule the five legacy poll timers. Each is parity with the
@@ -668,7 +671,8 @@ export class Orchestrator {
 
 		if (
 			channel !== GATE_READY_CHANNEL &&
-			channel !== MATURITY_CHANGED_CHANNEL
+			channel !== MATURITY_CHANGED_CHANNEL &&
+			channel !== OFFER_COMPLETED_CHANNEL
 		) {
 			return;
 		}
@@ -676,6 +680,7 @@ export class Orchestrator {
 			const data = JSON.parse(payload) as {
 				proposal_id?: number | string;
 				id?: number | string;
+				dispatch_id?: number | string;
 			};
 
 			if (channel === GATE_READY_CHANNEL) {
@@ -683,6 +688,16 @@ export class Orchestrator {
 				if (Number.isFinite(pid)) {
 					await this.trackInFlight(
 						dispatchImplicitGate(pid, "notify:proposal_gate_ready"),
+					);
+				}
+				return;
+			}
+
+			if (channel === OFFER_COMPLETED_CHANNEL) {
+				const dispatchId = Number(data.dispatch_id);
+				if (Number.isFinite(dispatchId)) {
+					await this.trackInFlight(
+						handleGateCompletion(dispatchId),
 					);
 				}
 				return;
