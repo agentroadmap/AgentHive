@@ -27,14 +27,16 @@ export type QueryFn = (
  * escalation_log row with obstacle_type='PROVIDER_AUTH_DOWN'.
  *
  * @param agentIdentity - The agency identity that encountered the auth error
- * @param routeProvider - The route provider (e.g., 'anthropic', 'openai')
+ * @param agentProvider - The CLI/agent provider whose credential failed (e.g., 'codex', 'claude').
+ *   Matches model_routes.agent_provider, NOT route_provider: the dead credential belongs to the
+ *   CLI brand, while route_provider is the API vendor shared by other CLIs with their own creds.
  * @param statusCode - HTTP status code (401 or 403)
  * @param errorDetail - Error message for resolution_note
  * @param queryFn - Injected for testing; defaults to live DB pool
  */
 export async function setProviderAuthDown(
 	agentIdentity: string,
-	routeProvider: string,
+	agentProvider: string,
 	statusCode: number,
 	errorDetail: string,
 	queryFn: QueryFn = defaultQuery,
@@ -55,19 +57,22 @@ export async function setProviderAuthDown(
 				"PROVIDER_AUTH_DOWN",
 				agentIdentity,
 				escalatedTo,
-				`${statusCode} auth error from ${routeProvider}: ${errorDetail.slice(0, 200)}`,
+				`${statusCode} auth error from ${agentProvider}: ${errorDetail.slice(0, 200)}`,
 				"critical",
 			],
 		);
 
-		// Mark the provider route as having auth down for 1 hour
-		// This affects offer/claim eligibility for ALL agencies using this provider
+		// Mark the provider's routes as having auth down for 1 hour
+		// This affects offer/claim eligibility for ALL agencies using this provider.
+		// agent_provider (CLI brand, e.g. 'codex') is the credential boundary;
+		// route_provider (API vendor, e.g. 'openai') is shared by CLIs with
+		// independent credentials and must not be taken down collectively.
 		await queryFn(
 			`UPDATE roadmap.model_routes
        SET auth_down_until = NOW() + INTERVAL '1 hour'
-       WHERE route_provider = $1
+       WHERE agent_provider = $1
          AND (auth_down_until IS NULL OR auth_down_until < NOW())`,
-			[routeProvider],
+			[agentProvider],
 		);
 
 		await queryFn("COMMIT");
