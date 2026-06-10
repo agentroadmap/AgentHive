@@ -6174,22 +6174,156 @@ agenthive_mcp_tool_calls_total ${toolCallCount}
 	): Promise<Response> {
 		try {
 			const children = Array.isArray(args.children) ? args.children : [];
-			if (children.length === 0) {
+
+			// Validate: at least 2 children required
+			if (children.length < 2) {
 				return Response.json(
-					{ error: "children array required for split action" },
+					{ error: "split action requires at least 2 children" },
 					{ status: 400 },
 				);
 			}
 
-			// For now, return not-implemented
-			// Full implementation would:
-			// 1. Call prop_create for each child with parent_id=sourceId
-			// 2. Call prop_set_maturity maturity='obsolete' on source
-			// 3. Record discussion entry with superseded_by_split
-			return Response.json(
-				{ error: "split action not yet implemented" },
-				{ status: 501 },
+			// Validate: all children have non-empty titles
+			for (let i = 0; i < children.length; i++) {
+				const child = children[i] as Record<string, unknown>;
+				if (!child || typeof child !== "object") {
+					return Response.json(
+						{ error: `Child ${i} is not an object` },
+						{ status: 400 },
+					);
+				}
+				if (typeof child.title !== "string" || !child.title.trim()) {
+					return Response.json(
+						{ error: `Child ${i} requires non-empty title` },
+						{ status: 400 },
+					);
+				}
+			}
+
+			// Validate: rationale is required
+			if (!rationale || !rationale.trim()) {
+				return Response.json(
+					{ error: "comment/rationale is required for split action" },
+					{ status: 400 },
+				);
+			}
+
+			// Fetch source proposal
+			const { rows: proposals } = await query(
+				`SELECT id, display_id, type, title, status FROM roadmap_proposal.proposal WHERE id = $1`,
+				[sourceId],
 			);
+
+			if (proposals.length === 0) {
+				return Response.json(
+					{ error: `Source proposal ${sourceId} not found` },
+					{ status: 404 },
+				);
+			}
+
+			const sourceProposal = proposals[0] as any;
+
+			// Check MCP server initialization
+			if (!this.mcpServer) {
+				return Response.json({ error: "MCP server not initialized" }, { status: 500 });
+			}
+
+			const mcp = this.mcpServer as any;
+			const createdChildren = [];
+
+			// Step 1: Create each child proposal via MCP prop_create
+			for (const childInput of children) {
+				const child = childInput as Record<string, unknown>;
+				const toolResult = await mcp.testInterface.callTool({
+					params: {
+						name: "prop_create",
+						arguments: {
+							type: sourceProposal.type,
+							title: String(child.title).trim(),
+							summary: child.summary ? String(child.summary).trim() : undefined,
+							parent_id: sourceId,
+							author: "operator",
+						},
+					},
+				});
+
+				// Check for errors in the MCP result
+				if (toolResult.content && toolResult.content.length > 0) {
+					const content = toolResult.content[0];
+					if (content.type === "text") {
+						const text = content.text || "";
+						// MCP errors contain "⚠️"
+						if (text.includes("⚠️") || text.toLowerCase().includes("error")) {
+							return Response.json(
+								{
+									error: "Failed to create child proposal",
+									detail: text,
+									created_children: createdChildren.map((c) => c.display_id),
+								},
+								{ status: 500 },
+							);
+						}
+						// Try to parse result to extract the created proposal
+						try {
+							// MCP returns YAML-like text; look for 'id:' or 'display_id:'
+							const displayIdMatch = text.match(/display_id:\s*(\S+)/i);
+							if (displayIdMatch) {
+								createdChildren.push({
+									display_id: displayIdMatch[1],
+									title: child.title,
+								});
+							}
+						} catch {
+							// Continue on parse error; we at least attempted the create
+						}
+					}
+				}
+			}
+
+			// Step 2: Mark source proposal obsolete via prop_set_maturity
+			const obsoleteResult = await mcp.testInterface.callTool({
+				params: {
+					name: "prop_set_maturity",
+					arguments: {
+						proposal_id: sourceId,
+						maturity: "obsolete",
+						agent: "operator",
+						reason: `Split into ${children.length} child proposals: ${createdChildren.map((c) => c.display_id).join(", ")}`,
+					},
+				},
+			});
+
+			// Check for errors in obsolete call
+			if (obsoleteResult.content && obsoleteResult.content.length > 0) {
+				const content = obsoleteResult.content[0];
+				if (content.type === "text" && content.text && content.text.includes("⚠️")) {
+					return Response.json(
+						{
+							error: "Failed to obsolete source proposal",
+							detail: content.text,
+							created_children: createdChildren.map((c) => c.display_id),
+						},
+						{ status: 500 },
+					);
+				}
+			}
+
+			// Step 3: Record discussion entry on source with superseded_by_split
+			const childDisplayIds = createdChildren.map((c) => c.display_id).join(", ");
+			const discussionBody = `Split into child proposals: ${childDisplayIds}. Rationale: ${rationale}`;
+
+			await query(
+				`INSERT INTO roadmap_proposal.proposal_discussions
+					(proposal_id, author_identity, context_prefix, body)
+				 VALUES ($1, $2, 'superseded_by_split:', $3)`,
+				[sourceId, "operator", discussionBody],
+			);
+
+			return Response.json({
+				result: "split completed",
+				source_id: sourceId,
+				created_children: createdChildren,
+			});
 		} catch (err) {
 			console.error("[p659] split failed:", (err as Error).message);
 			return Response.json({ error: "split action failed" }, { status: 500 });
@@ -6206,18 +6340,150 @@ agenthive_mcp_tool_calls_total ${toolCallCount}
 		rationale: string,
 	): Promise<Response> {
 		try {
-			if (proposalIds.length < 2) {
+			// Validate: exactly 2 proposals required
+			if (proposalIds.length !== 2) {
 				return Response.json(
-					{ error: "At least 2 proposals required for combine action" },
+					{ error: "combine action requires exactly 2 proposals" },
 					{ status: 400 },
 				);
 			}
 
-			// For now, return not-implemented
-			return Response.json(
-				{ error: "combine action not yet implemented" },
-				{ status: 501 },
+			// Validate: title and summary provided
+			const mergedTitle = args.title ? String(args.title).trim() : "";
+			const mergedSummary = args.summary ? String(args.summary).trim() : "";
+
+			if (!mergedTitle) {
+				return Response.json(
+					{ error: "merged proposal requires a non-empty title" },
+					{ status: 400 },
+				);
+			}
+
+			// Validate: rationale is required
+			if (!rationale || !rationale.trim()) {
+				return Response.json(
+					{ error: "comment/rationale is required for combine action" },
+					{ status: 400 },
+				);
+			}
+
+			// Fetch both source proposals
+			const { rows: sources } = await query(
+				`SELECT id, display_id, type, title, status FROM roadmap_proposal.proposal
+				 WHERE id = ANY($1::int[])`,
+				[proposalIds],
 			);
+
+			if (sources.length !== 2) {
+				return Response.json(
+					{ error: `One or both proposals not found (found ${sources.length} of 2)` },
+					{ status: 404 },
+				);
+			}
+
+			const source1 = sources[0] as any;
+			const source2 = sources[1] as any;
+
+			// Check MCP server initialization
+			if (!this.mcpServer) {
+				return Response.json({ error: "MCP server not initialized" }, { status: 500 });
+			}
+
+			const mcp = this.mcpServer as any;
+
+			// Step 1: Create merged proposal via MCP prop_create
+			const mergedResult = await mcp.testInterface.callTool({
+				params: {
+					name: "prop_create",
+					arguments: {
+						type: source1.type, // Use type from first source
+						title: mergedTitle,
+						summary: mergedSummary || undefined,
+						author: "operator",
+					},
+				},
+			});
+
+			// Check for errors in the MCP result
+			let mergedDisplayId: string | null = null;
+			if (mergedResult.content && mergedResult.content.length > 0) {
+				const content = mergedResult.content[0];
+				if (content.type === "text") {
+					const text = content.text || "";
+					if (text.includes("⚠️") || text.toLowerCase().includes("error")) {
+						return Response.json(
+							{
+								error: "Failed to create merged proposal",
+								detail: text,
+							},
+							{ status: 500 },
+						);
+					}
+					// Try to extract display_id from result
+					const displayIdMatch = text.match(/display_id:\s*(\S+)/i);
+					if (displayIdMatch) {
+						mergedDisplayId = displayIdMatch[1];
+					}
+				}
+			}
+
+			if (!mergedDisplayId) {
+				return Response.json(
+					{
+						error: "Could not extract merged proposal display_id from MCP response",
+					},
+					{ status: 500 },
+				);
+			}
+
+			// Step 2: Mark both source proposals obsolete via prop_set_maturity
+			for (const sourceId of proposalIds) {
+				const obsoleteResult = await mcp.testInterface.callTool({
+					params: {
+						name: "prop_set_maturity",
+						arguments: {
+							proposal_id: sourceId,
+							maturity: "obsolete",
+							agent: "operator",
+							reason: `Combined with other proposal into: ${mergedDisplayId}`,
+						},
+					},
+				});
+
+				// Check for errors
+				if (obsoleteResult.content && obsoleteResult.content.length > 0) {
+					const content = obsoleteResult.content[0];
+					if (content.type === "text" && content.text && content.text.includes("⚠️")) {
+						return Response.json(
+							{
+								error: `Failed to obsolete source proposal ${sourceId}`,
+								detail: content.text,
+								merged_proposal_id: mergedDisplayId,
+							},
+							{ status: 500 },
+						);
+					}
+				}
+			}
+
+			// Step 3: Record discussion entries on both sources with superseded_by
+			for (const source of sources) {
+				const discussionBody = `Combined with other proposal into: ${mergedDisplayId}. Rationale: ${rationale}`;
+
+				await query(
+					`INSERT INTO roadmap_proposal.proposal_discussions
+						(proposal_id, author_identity, context_prefix, body)
+					 VALUES ($1, $2, 'superseded_by:', $3)`,
+					[source.id, "operator", discussionBody],
+				);
+			}
+
+			return Response.json({
+				result: "combine completed",
+				source_ids: proposalIds,
+				merged_proposal_id: mergedDisplayId,
+				source_proposals: sources.map((s) => s.display_id),
+			});
 		} catch (err) {
 			console.error("[p659] combine failed:", (err as Error).message);
 			return Response.json({ error: "combine action failed" }, { status: 500 });
