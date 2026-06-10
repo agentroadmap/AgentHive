@@ -120,12 +120,6 @@ export class ClaudeCliBuilder implements CliBuilder {
 		if (options.apiKeyVault?.ANTHROPIC_API_KEY) {
 			env.ANTHROPIC_API_KEY = options.apiKeyVault.ANTHROPIC_API_KEY;
 		}
-		// P1967: Inject CLAUDE_CODE_OAUTH_TOKEN when available (long-lived subscription token)
-		// Sits above daemon-managed ~/.claude/.credentials.json in auth precedence.
-		// Absent token => host_inherit fallback (current behavior, no regression).
-		if (options.apiKeyVault?.CLAUDE_CODE_OAUTH_TOKEN) {
-			env.CLAUDE_CODE_OAUTH_TOKEN = options.apiKeyVault.CLAUDE_CODE_OAUTH_TOKEN;
-		}
 		return env;
 	}
 
