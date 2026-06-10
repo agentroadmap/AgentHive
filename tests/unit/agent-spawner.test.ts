@@ -237,6 +237,87 @@ describe("Hermes route compatibility", () => {
 			}
 		}
 	});
+
+	it("P1967 AC-5: injects CLAUDE_CODE_OAUTH_TOKEN when route configured with api_key_env", () => {
+		const originalToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+		process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-fake-test-token-abc123xyz";
+
+		try {
+			const env = buildSpawnProcessEnv({
+				worktree: "claude-worker",
+				route: {
+					modelName: "claude-sonnet-4-6",
+					routeProvider: "anthropic",
+					agentProvider: "claude",
+					agentCli: "claude",
+					apiSpec: "anthropic",
+					baseUrl: "https://api.anthropic.com",
+					planType: "token_plan",
+					costPer1kInput: 0.00003,
+					costPerMillionInput: 30,
+					costPerMillionOutput: 120,
+					apiKeyEnv: "CLAUDE_CODE_OAUTH_TOKEN", // P1967: Real injection path via route config
+					cliApiKeyEnv: "CLAUDE_CODE_OAUTH_TOKEN",
+					baseUrlEnv: "ANTHROPIC_BASE_URL",
+				} as any,
+				agentEnv: {
+					DATABASE_URL: "postgresql://example",
+				},
+				extraEnv: {},
+			});
+
+			assert.equal(
+				env.CLAUDE_CODE_OAUTH_TOKEN,
+				"sk-fake-test-token-abc123xyz",
+				"token must be injected from process.env via route config",
+			);
+			assert.equal(env.AGENT_PROVIDER, "claude");
+		} finally {
+			if (originalToken === undefined) {
+				delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+			} else {
+				process.env.CLAUDE_CODE_OAUTH_TOKEN = originalToken;
+			}
+		}
+	});
+
+	it("P1967 AC-1: absent CLAUDE_CODE_OAUTH_TOKEN keeps env identical to today (no regression)", () => {
+		const originalToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+		delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+
+		try {
+			const env = buildSpawnProcessEnv({
+				worktree: "claude-worker",
+				route: {
+					modelName: "claude-sonnet-4-6",
+					routeProvider: "anthropic",
+					agentProvider: "claude",
+					agentCli: "claude",
+					apiSpec: "anthropic",
+					baseUrl: "https://api.anthropic.com",
+					planType: "token_plan",
+					costPer1kInput: 0.00003,
+					costPerMillionInput: 30,
+					costPerMillionOutput: 120,
+					apiKeyEnv: "CLAUDE_CODE_OAUTH_TOKEN",
+					cliApiKeyEnv: "CLAUDE_CODE_OAUTH_TOKEN",
+					baseUrlEnv: "ANTHROPIC_BASE_URL",
+				} as any,
+				agentEnv: {
+					DATABASE_URL: "postgresql://example",
+				},
+				extraEnv: {},
+			});
+
+			// Token not in process.env, so it should NOT be in env
+			assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, undefined, "no-regression fallback: env must not contain absent token");
+			assert.equal(env.AGENT_PROVIDER, "claude");
+		} finally {
+			if (originalToken !== undefined) {
+				process.env.CLAUDE_CODE_OAUTH_TOKEN = originalToken;
+			}
+		}
+	});
 });
 
 describe("P738 HF-B: closing hint forbids worker-side set_maturity", () => {

@@ -41,6 +41,7 @@ import {
 	globalCliInvocationRegistry,
 	invokeCliHandler,
 } from "../../core/runtime/cli-invocation.ts";
+import { emitOAuthRotateSignal } from "../../core/runtime/oauth-token-monitor.ts";
 import * as runtimeConfig from "../../shared/runtime/config.ts";
 import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 import { agentNotifyChannel } from "../messaging/a2a-access-control.ts";
@@ -375,13 +376,17 @@ export async function runLiaisonAgent(
 			if (errMsg.includes("401") || errMsg.includes("403") ||
 			    errMsg.includes("Unauthorized") || errMsg.includes("Forbidden") ||
 			    errMsg.includes("invalid api key") || errMsg.includes("authentication")) {
+				const statusCode = errMsg.includes("403") ? 403 : 401;
 				console.warn(`${log} Auth error detected; marking provider '${provider}' auth as down`);
 				try {
-					await setProviderAuthDown(identity, provider,
-						errMsg.includes("403") ? 403 : 401,
-						errMsg);
+					await setProviderAuthDown(identity, provider, statusCode, errMsg);
 				} catch (authErr) {
 					console.error(`${log} Failed to log auth failure:`, authErr);
+				}
+
+				// P1967 AC-6: Emit structured rotation signal for 401 OAuth token failures
+				if (statusCode === 401 && provider === "claude") {
+					emitOAuthRotateSignal(401, `${provider} liaison handler returned 401 Unauthorized: ${errMsg.slice(0, 100)}`);
 				}
 			}
 
