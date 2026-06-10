@@ -402,6 +402,35 @@ MERGE phase:
 
 **Why this pattern:** keeps the architectural proposal alive as an active coordination anchor through implementation, surfaces design corrections as children reveal edge cases, and ensures MERGE is a meaningful system-level gate rather than a formality.
 
+#### Umbrella Closeout Rule (P926 AC-8)
+
+When all children of an umbrella proposal reach a terminal state (status='COMPLETE' OR maturity='obsolete'), the umbrella is eligible for COMPLETE.
+
+**Eligibility check:** Call the helper function before the MERGE gate decision:
+
+```sql
+SELECT roadmap_proposal.fn_check_umbrella_closeout(<umbrella_id>);
+```
+
+The function returns `TRUE` if all children are terminal, `FALSE` otherwise. The gate agent runs this query as part of the MERGE pre-flight and records the result in the gate_decision discussion before advancing the umbrella to COMPLETE.
+
+**No automatic trigger:** The function is a checker, not an automatic state-flip. The operator (or gate agent) decides when to advance the umbrella to COMPLETE; the function only verifies that the precondition is met.
+
+#### 7-Day Rollback Window (P926 AC-9)
+
+Obsoletion actions taken as part of an umbrella consolidation (e.g., P926) are reversible within 7 days of the action.
+
+**Recovery process:**
+1. **Pre-mutation snapshot:** AC-3 of P926 (or the relevant consolidation) requires a `feedback:` discussion appended to each obsoleted proposal before any mutation, containing a JSON snapshot of its design, ACs, dependencies, and maturity history.
+2. **Un-obsolete within 7 days:** Any operator can call `mcp_proposal action=set_maturity args={id: <proposal_id>, maturity: 'new'}` to restore a proposal to active status within 7 days of obsoletion.
+3. **After 7 days:** The obsoletion is treated as permanent. The snapshot discussion serves as historical documentation and can be archived to a parent thread.
+
+**Operator pre-MERGE checklist (before closing an umbrella or consolidation):**
+- [ ] All pre-mutation snapshots are attached to obsoleted proposals (searchable via `context_prefix='feedback:'`).
+- [ ] Obsoletion action record created with timestamp.
+- [ ] Verify 7-day clock: if reversing an obsoletion, confirm `created_at` of the mutation discussion is < 7 days old.
+- [ ] No partial reversals: un-obsoleting a proposal restores only its maturity; caller is responsible for restoring sub-decisions (e.g., re-activating a dependent proposal if the parent was un-obsoleted).
+
 ### 5b. Program Phases and Build-Order Gate (P471)
 
 The multi-tenancy program is sequenced into four phases tracked in `roadmap.program_phases`
