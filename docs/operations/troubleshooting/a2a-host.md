@@ -117,3 +117,20 @@ Output: PASS/FAIL with timing breakdown. Use this to verify the recovery loop af
 - **P1138** (this proposal, DEVELOP/new) — PG reconnect hotfix. Phase 1: exit-on-pool-error + systemd restart. Phase 2 (in-process reconnect) deferred.
 - **P1135** (DEVELOP/new) — `hive doctor --check topology` runtime verification of agency-to-host attachment. When this lands, `hive doctor` will surface drift in the agency-coverage and legacy-template-retirement sub-checks automatically.
 - **P1123** (DEVELOP/new) — Pool poisoning sentinel + watchdog. Distinct from this hotfix: P1123 prevents stray `closePool()` calls in long-running services; P1138 handles terminal pool errors that the pg library cannot recover from internally.
+
+## LISTEN client failure → fail-fast restart (P1142)
+
+Each agency liaison holds a dedicated pg LISTEN connection
+(`application_name = agenthive-a2a-listen-<agency>`). If that client emits
+`error`/`end`, the a2a-host now logs the agency + reason and calls
+`process.exit(1)` so systemd (`Restart=`) revives the whole host with fresh
+connections — a deaf-but-alive liaison is worse than a restart.
+
+Symptoms before this behavior: agency shows online, messages pile up unread,
+no journal errors. Verify the guard:
+
+```bash
+# pick a listener backend and kill it (recoverable chaos test):
+psql "$DATABASE_URL" -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name LIKE 'agenthive-a2a-listen-%' LIMIT 1"
+journalctl -u agenthive-a2a-host.service -n 20 --no-pager   # expect: listen-error exit + systemd restart + boot complete
+```
