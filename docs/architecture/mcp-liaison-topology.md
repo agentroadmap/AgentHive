@@ -73,18 +73,26 @@ WHERE presence_state IN ('online', 'busy');
 
 ## Topology Check Logic (`hive doctor --check topology`)
 
-The check performs three sub-checks in order:
+The check performs four sub-checks in order:
 
-### Sub-check A: A2A Host Service Liveness
+### Sub-check 1: Critical Services Liveness (AC-2)
+
+Verifies all 5 critical services are active:
 
 ```bash
+systemctl is-active agenthive-mcp.service
 systemctl is-active agenthive-a2a-host.service
+systemctl is-active agenthive-board.service
+systemctl is-active agenthive-state-feed.service
+systemctl is-active agenthive-notification-router.service
 ```
 
-- `active` → pass
-- anything else → **error** (all agency routing is down)
+- All active → pass
+- Any inactive → **error** (name the inactive services for targeted remediation)
 
-### Sub-check B: Agency Attachment Coverage
+### Sub-check 2: Agency Attachment Coverage (AC-3)
+
+Host-scoped query matching the discovery contract in `scripts/start-a2a-host.ts:172`:
 
 ```sql
 WITH expected AS (
@@ -104,21 +112,41 @@ FROM expected e
 LEFT JOIN attached a ON a.agency_id = e.agent_identity
 ```
 
-- All attached → ok
-- Any unattached → **error** (dispatch gaps; restart a2a-host)
-- DB query fails → **warn** (service may be fine, but can't verify)
+Result thresholds:
+- 0 unattached → `ok`
+- 1–2 unattached → `warn` ("transitional — likely brief restart window or test/legacy identity")
+- ≥3 unattached → `warn` with up-to-5 named agencies
 
-### Sub-check C: Legacy Template Instance Cleanup
+**Rationale:** Host-scoping via `agent_registry.host_affinity` prevents false-warns when only some hosts
+have all agencies attached. Codex review (discussion #7990 finding #1) flagged global scoping as false-warn
+generator.
+
+### Sub-check 3: Legacy Template Instance Cleanup (AC-4)
 
 ```bash
 systemctl list-units 'agenthive-agency@*.service' --state=active --no-pager --no-legend
 ```
 
-- Zero running instances → ok
-- Any running → **warn** (template file may remain installed; running instances create
-  duplicate LISTEN sessions and double-consume messages)
+Distinguishes "loaded but inactive" (acceptable for rollback safety) from "running" (must be zero post-P1132 MERGE).
 
-## Check Output Shape
+- Zero RUNNING instances → ok
+- ≥1 RUNNING instance → `warn` ("P1132 migration may be incomplete or rollback in progress")
+
+**Caveat:** The template file at `/etc/systemd/system/agenthive-agency@.service` may remain installed in
+`indirect/enabled` state for rollback safety — this is normal and NOT a warn condition. Only RUNNING INSTANCES trigger warn.
+
+### Sub-check 4: MCP Health Reachability (AC-5)
+
+```bash
+curl -s http://127.0.0.1:6421/health --max-time 1
+```
+
+Expects HTTP 200 with JSON body `{"status": "ok"}`.
+
+- 200 + status ok → pass
+- anything else → **error** (MCP is down or misconfigured)
+
+## Check Output Shape (AC-12 Structured Observability)
 
 ```json
 {
@@ -127,29 +155,59 @@ systemctl list-units 'agenthive-agency@*.service' --state=active --no-pager --no
   "message": "...",
   "remediation": "...",
   "details": {
-    "host": "bot",
-    "a2a_host_service": "active",
-    "expected_agencies": 20,
-    "attached_agencies": 20,
-    "unattached": [],
-    "legacy_template_instances": []
+    "checked_host": "bot",
+    "expected_source": "agent_registry.host_affinity",
+    "expected_count": 20,
+    "attached_count": 20,
+    "unattached_ids": [],
+    "legacy_running_count": 0,
+    "mcp_health_latency_ms": 45,
+    "data_source_errors": []
   }
 }
 ```
+
+All 8 fields are present in details, even when zero/empty, for machine-readable monitoring and operator debugging.
+
+## P1132 Transition Window (AC-7 Historical Reference)
+
+| Aspect | Before P1132 | After P1132 |
+|:---|:---|:---|
+| Service unit(s) | `agenthive-agency@<name>.service` × N | `agenthive-a2a-host.service` × 1 |
+| Process count | N (one per agency) | 1 (all agencies multiplexed) |
+| Connection pool | N independent | 1 shared |
+| LISTEN channels | N independent | 1 host-level pool, N per-agency channels |
+| Restart window | N × individually | single atomic restart |
+| Health isolation | per-agency | all-or-nothing per host |
+
+**Migration window:** When P1132 reaches MERGE status (occurred 2026-05-18), the legacy
+`agenthive-agency@<name>.service` template is removed from systemd unit files and CONVENTIONS.md
+documentation. The transition is complete when the `hive doctor --check topology` reports:
+
+- All 5 critical services active
+- All expected agencies attached (0–2 unattached is OK during brief windows)
+- Zero running `agenthive-agency@*` instances
+- MCP /health responding
+
+**Caveat during transition:** If you see `1–2` unattached agencies in the check output, this is a
+normal transient state during a2a-host startup or agency restart. The check marks this as `warn` (not
+error) to allow safe observation windows. If more than 2 remain unattached for >5 minutes, investigate
+with `sudo systemctl status agenthive-a2a-host.service`.
 
 ## Operator Quick Reference
 
 | Symptom | Command |
 |:---|:---|
-| a2a-host not running | `sudo systemctl start agenthive-a2a-host.service` |
+| Critical services down | `sudo systemctl status agenthive-{mcp,a2a-host,board,state-feed,notification-router}.service` |
 | Agencies not attaching | `sudo systemctl restart agenthive-a2a-host.service` |
-| Legacy instances running | `sudo systemctl stop agenthive-agency@<name>.service` |
-| Reload agency list | `sudo systemctl kill -s HUP agenthive-a2a-host.service` |
-| Check topology | `hive doctor --check topology --verbose` |
-| Full JSON output | `hive doctor --check topology --json` |
+| Legacy instances still running | `sudo systemctl stop agenthive-agency@<name>.service` |
+| Reload agency list (live) | `sudo systemctl kill -s HUP agenthive-a2a-host.service` |
+| Check topology (human-readable) | `hive doctor --check topology --verbose` |
+| Check topology (structured) | `hive doctor --check topology --json` |
+| Tail a2a-host logs | `journalctl -u agenthive-a2a-host.service -f` |
 
 ## Related Proposals
 
-- **P1132** — A2A host implementation (COMPLETE); introduces the shared host + per-agency LISTEN model
-- **P1095** — Original doctor topology check proposal; this doc fulfills its AC-9 documentation requirement
+- **P1132** — A2A host implementation (MERGE); introduced the shared host + per-agency LISTEN model
+- **P1095** — Original doctor topology check proposal; AC-9 documentation requirement fulfilled here
 - **P1135** — P1095 child: hive doctor topology check implementation (this work)

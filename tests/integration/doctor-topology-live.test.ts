@@ -38,40 +38,44 @@ describe("doctor --check topology (live smoke)", { skip: SKIP ? "set RUN_LIVE_SM
     );
   });
 
-  it("topology details contains expected shape fields", () => {
+  it("topology details contains AC-12 spec fields", () => {
     const topologyCheck = result.checks.find((c) => c.name === "topology")!;
     const d = topologyCheck.details as Record<string, unknown> | undefined;
     assert.ok(d, "details must be present");
-    assert.ok("host" in d, "details.host must be present");
-    assert.ok("a2a_host_service" in d, "details.a2a_host_service must be present");
-    assert.ok("expected_agencies" in d, "details.expected_agencies must be present");
-    assert.ok("attached_agencies" in d, "details.attached_agencies must be present");
-    assert.ok(Array.isArray(d.unattached), "details.unattached must be an array");
-    assert.ok(
-      Array.isArray(d.legacy_template_instances),
-      "details.legacy_template_instances must be an array",
-    );
+    assert.ok("checked_host" in d, "details.checked_host must be present");
+    assert.ok("expected_source" in d, "details.expected_source must be present");
+    assert.ok("expected_count" in d, "details.expected_count must be present");
+    assert.ok("attached_count" in d, "details.attached_count must be present");
+    assert.ok("unattached_ids" in d, "details.unattached_ids must be an array");
+    assert.ok("legacy_running_count" in d, "details.legacy_running_count must be present");
+    assert.ok("mcp_health_latency_ms" in d, "details.mcp_health_latency_ms must be present");
+    assert.ok("data_source_errors" in d, "details.data_source_errors must be an array");
   });
 
-  it("a2a_host_service is 'active' on a live system", () => {
+  it("checked_host is reported on a live system", () => {
     const topologyCheck = result.checks.find((c) => c.name === "topology")!;
     const d = topologyCheck.details as Record<string, unknown>;
-    assert.equal(d.a2a_host_service, "active");
+    assert.ok(typeof d.checked_host === "string");
+    assert.notEqual(d.checked_host, "");
   });
 
-  it("unattached array is empty on a healthy system", () => {
-    const topologyCheck = result.checks.find((c) => c.name === "topology")!;
-    const d = topologyCheck.details as Record<string, unknown>;
-    assert.deepEqual(d.unattached, [], `Unattached agencies: ${JSON.stringify(d.unattached)}`);
-  });
-
-  it("legacy_template_instances is empty (P1132 migration complete)", () => {
+  it("unattached_ids is empty on a healthy system", () => {
     const topologyCheck = result.checks.find((c) => c.name === "topology")!;
     const d = topologyCheck.details as Record<string, unknown>;
     assert.deepEqual(
-      d.legacy_template_instances,
+      d.unattached_ids,
       [],
-      `Legacy instances still running: ${JSON.stringify(d.legacy_template_instances)}`,
+      `Unattached agency IDs: ${JSON.stringify(d.unattached_ids)}`,
+    );
+  });
+
+  it("legacy_running_count is 0 (P1132 migration complete)", () => {
+    const topologyCheck = result.checks.find((c) => c.name === "topology")!;
+    const d = topologyCheck.details as Record<string, unknown>;
+    assert.equal(
+      d.legacy_running_count,
+      0,
+      `Legacy instances still running: ${JSON.stringify(d.legacy_running_count)}`,
     );
   });
 

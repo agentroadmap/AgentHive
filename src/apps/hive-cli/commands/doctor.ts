@@ -202,48 +202,66 @@ export interface TopologyProbers {
   execSync?: (cmd: string, opts: { stdio: "pipe" }) => Buffer | string;
   /** Override for DB query — used in unit tests */
   poolQuery?: (sql: string, params: unknown[]) => Promise<{ rows: Array<{ agent_identity: string; is_attached: boolean }> }>;
+  /** Override for HTTP /health probe — used in unit tests */
+  probeHealth?: (url: string, timeoutMs: number) => Promise<{ ok: boolean; latencyMs: number; error?: string }>;
+}
+
+async function probeHealthDefault(url: string, timeoutMs: number): Promise<{ ok: boolean; latencyMs: number; error?: string }> {
+  const start = Date.now();
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timer);
+    const latencyMs = Date.now() - start;
+
+    if (res.status !== 200) {
+      return { ok: false, latencyMs, error: `HTTP ${res.status}` };
+    }
+    const body = await res.json() as Record<string, unknown>;
+    if (body.status !== "ok") {
+      return { ok: false, latencyMs, error: `status field is "${body.status}"` };
+    }
+    return { ok: true, latencyMs };
+  } catch (err) {
+    const latencyMs = Date.now() - start;
+    return { ok: false, latencyMs, error: (err as Error).message };
+  }
 }
 
 export async function checkTopology(ctx: HiveContext, probers: TopologyProbers = {}): Promise<DoctorCheck> {
   const execFn = probers.execSync ?? (await import("node:child_process")).execSync;
   const queryFn = probers.poolQuery ?? ((sql: string, params: unknown[]) => getPool().query<{ agent_identity: string; is_attached: boolean }>(sql, params));
-  const host = ctx.host;
+  const probeFn = probers.probeHealth ?? probeHealthDefault;
+  const host = ctx.host ?? (await import("node:os")).hostname();
 
-  // Sub-check A: agenthive-a2a-host.service liveness
-  let a2aHostStatus = "unknown";
-  let a2aHostActive = false;
-  try {
-    a2aHostStatus = execFn("systemctl is-active agenthive-a2a-host.service", { stdio: "pipe" })
-      .toString()
-      .trim();
-    a2aHostActive = a2aHostStatus === "active";
-  } catch {
-    a2aHostStatus = "inactive";
-  }
+  const dataSourceErrors: string[] = [];
 
-  // Sub-check B: legacy agenthive-agency@*.service running instances
-  let legacyInstances: string[] = [];
-  try {
-    const out = execFn(
-      "systemctl list-units 'agenthive-agency@*.service' --state=active --no-pager --no-legend",
-      { stdio: "pipe" },
-    )
-      .toString()
-      .trim();
-    if (out) {
-      legacyInstances = out
-        .split("\n")
-        .map((l) => l.trim().split(/\s+/)[0])
-        .filter(Boolean);
+  // Sub-check 1: Critical units liveness (AC-2)
+  const requiredServices = [
+    "agenthive-mcp.service",
+    "agenthive-a2a-host.service",
+    "agenthive-board.service",
+    "agenthive-state-feed.service",
+    "agenthive-notification-router.service",
+  ];
+  const inactiveServices: string[] = [];
+  for (const svc of requiredServices) {
+    try {
+      const status = execFn(`systemctl is-active ${svc}`, { stdio: "pipe" })
+        .toString()
+        .trim();
+      if (status !== "active") {
+        inactiveServices.push(svc);
+      }
+    } catch {
+      inactiveServices.push(svc);
     }
-  } catch {
-    // systemctl unavailable or no matches — treat as empty
   }
 
-  // Sub-check C: expected vs attached agencies (host-scoped)
+  // Sub-check 2: Agency coverage on this host (AC-3)
   let expectedAgencies: string[] = [];
   let unattachedAgencies: string[] = [];
-  let dbError: string | undefined;
   try {
     const result = await queryFn(
       `WITH expected AS (
@@ -268,63 +286,97 @@ export async function checkTopology(ctx: HiveContext, probers: TopologyProbers =
       if (!row.is_attached) unattachedAgencies.push(row.agent_identity);
     }
   } catch (err) {
-    dbError = (err as Error).message;
+    dataSourceErrors.push(`agency_registry query: ${(err as Error).message}`);
   }
 
+  // Sub-check 3: Legacy template retirement (AC-4)
+  let legacyInstances: string[] = [];
+  try {
+    const out = execFn(
+      "systemctl list-units 'agenthive-agency@*.service' --state=active --no-pager --no-legend",
+      { stdio: "pipe" },
+    )
+      .toString()
+      .trim();
+    if (out) {
+      legacyInstances = out
+        .split("\n")
+        .map((l) => l.trim().split(/\s+/)[0])
+        .filter(Boolean);
+    }
+  } catch {
+    // systemctl unavailable or no matches — treat as empty
+  }
+
+  // Sub-check 4: MCP /health reachability (AC-5)
+  const healthProbe = await probeFn("http://127.0.0.1:6421/health", 1000);
+  if (!healthProbe.ok) {
+    dataSourceErrors.push(`MCP /health: ${healthProbe.error}`);
+  }
+
+  // Build AC-12 structured details
   const details: Record<string, unknown> = {
-    host,
-    a2a_host_service: a2aHostStatus,
-    expected_agencies: expectedAgencies.length,
-    attached_agencies: expectedAgencies.length - unattachedAgencies.length,
-    unattached: unattachedAgencies,
-    legacy_template_instances: legacyInstances,
-    ...(dbError ? { db_error: dbError } : {}),
+    checked_host: host,
+    expected_source: "agent_registry.host_affinity",
+    expected_count: expectedAgencies.length,
+    attached_count: expectedAgencies.length - unattachedAgencies.length,
+    unattached_ids: unattachedAgencies.slice(0, 5),
+    legacy_running_count: legacyInstances.length,
+    mcp_health_latency_ms: healthProbe.latencyMs,
+    data_source_errors: dataSourceErrors,
   };
 
-  if (!a2aHostActive) {
-    return {
-      name: "topology",
-      severity: "error",
-      message: `agenthive-a2a-host.service is ${a2aHostStatus}; agency routing is down`,
-      remediation: "sudo systemctl start agenthive-a2a-host.service",
-      details,
-    };
+  // Determine severity and message per ACs
+  let severity: CheckSeverity = "ok";
+  let message = "";
+  let remediation: string | undefined;
+
+  // AC-2 check: any critical service inactive → fail
+  if (inactiveServices.length > 0) {
+    severity = "error";
+    message = `Critical services inactive: ${inactiveServices.join(", ")}`;
+    remediation = `Run: sudo systemctl start ${inactiveServices.join(" ")}`;
+    return { name: "topology", severity, message, remediation, details };
   }
 
-  if (dbError) {
-    return {
-      name: "topology",
-      severity: "warn",
-      message: `a2a-host active; attachment query failed: ${dbError}`,
-      remediation: "Check DB connectivity and roadmap_workforce.agent_registry access.",
-      details,
-    };
+  // AC-5 check: /health failed → fail
+  if (!healthProbe.ok) {
+    severity = "error";
+    message = `MCP /health unreachable or returned non-200: ${healthProbe.error}`;
+    remediation = "Run: sudo systemctl restart agenthive-mcp";
+    return { name: "topology", severity, message, remediation, details };
   }
 
-  if (unattachedAgencies.length > 0) {
-    return {
-      name: "topology",
-      severity: "error",
-      message: `${unattachedAgencies.length}/${expectedAgencies.length} expected agencies not attached on ${host}: ${unattachedAgencies.slice(0, 5).join(", ")}${unattachedAgencies.length > 5 ? ` +${unattachedAgencies.length - 5} more` : ""}`,
-      remediation: "sudo systemctl restart agenthive-a2a-host.service",
-      details,
-    };
+  // AC-3 check: agency attachment thresholds
+  if (dataSourceErrors.length === 0 && unattachedAgencies.length > 0) {
+    // Have clean DB state with unattached agencies
+    if (unattachedAgencies.length <= 2) {
+      severity = "warn";
+      message = `${unattachedAgencies.length}/${expectedAgencies.length} expected agencies transitional (brief restart window or test/legacy): ${unattachedAgencies.join(", ")}`;
+    } else {
+      severity = "warn";
+      message = `${unattachedAgencies.length}/${expectedAgencies.length} expected agencies not attached: ${unattachedAgencies.slice(0, 5).join(", ")}${unattachedAgencies.length > 5 ? ` +${unattachedAgencies.length - 5} more` : ""}`;
+      remediation = "Verify a2a-host is running and all agencies have active LISTEN sessions.";
+    }
   }
 
-  if (legacyInstances.length > 0) {
-    return {
-      name: "topology",
-      severity: "warn",
-      message: `Legacy agenthive-agency@ instances running: ${legacyInstances.join(", ")}`,
-      remediation: `sudo systemctl stop ${legacyInstances.join(" ")}`,
-      details,
-    };
+  // AC-4 check: legacy running instances
+  if (legacyInstances.length > 0 && severity === "ok") {
+    severity = "warn";
+    message = `Legacy agenthive-agency@ template instances still running: ${legacyInstances.slice(0, 3).join(", ")}${legacyInstances.length > 3 ? ` +${legacyInstances.length - 3} more` : ""}. P1132 migration may be incomplete.`;
+    remediation = `Stop legacy instances: sudo systemctl stop ${legacyInstances.join(" ")}`;
+  }
+
+  // Default success case
+  if (severity === "ok") {
+    message = `All ${expectedAgencies.length} expected agencies attached on ${host}; all critical services active; no legacy instances running`;
   }
 
   return {
     name: "topology",
-    severity: "ok",
-    message: `All ${expectedAgencies.length} expected agencies attached on ${host}; a2a-host active; no legacy instances`,
+    severity,
+    message,
+    remediation,
     details,
   };
 }

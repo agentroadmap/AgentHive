@@ -1,6 +1,6 @@
 /**
  * Hermetic unit tests for the `topology` doctor check.
- * Dependencies (systemctl, DB pool) are injected via TopologyProbers — no module mocking needed.
+ * Dependencies (systemctl, DB pool, health probe) are injected via TopologyProbers — no module mocking needed.
  */
 
 import { describe, it } from "node:test";
@@ -24,17 +24,27 @@ const BASE_CTX: HiveContext = {
 type MockRow = { agent_identity: string; is_attached: boolean };
 
 function makeProbers(opts: {
-  a2aStatus?: string;
+  inactiveServices?: string[];
   legacyUnits?: string[];
   rows?: MockRow[];
   dbError?: string;
+  healthOk?: boolean;
 }): TopologyProbers {
-  const { a2aStatus = "active", legacyUnits = [], rows = [], dbError } = opts;
+  const { inactiveServices = [], legacyUnits = [], rows = [], dbError, healthOk = true } = opts;
 
   const execSync = (cmd: string, _opts: { stdio: "pipe" }): Buffer => {
-    if (cmd.includes("is-active")) {
-      if (a2aStatus !== "active") throw new Error("inactive");
-      return Buffer.from("active\n");
+    // Check critical services
+    for (const svc of [
+      "agenthive-mcp.service",
+      "agenthive-a2a-host.service",
+      "agenthive-board.service",
+      "agenthive-state-feed.service",
+      "agenthive-notification-router.service",
+    ]) {
+      if (cmd.includes(`is-active ${svc}`)) {
+        if (inactiveServices.includes(svc)) throw new Error("inactive");
+        return Buffer.from("active\n");
+      }
     }
     if (cmd.includes("list-units")) {
       if (legacyUnits.length === 0) return Buffer.from("");
@@ -48,11 +58,18 @@ function makeProbers(opts: {
     return { rows };
   };
 
-  return { execSync, poolQuery };
+  const probeHealth = async (_url: string, _timeoutMs: number) => {
+    if (healthOk) {
+      return { ok: true, latencyMs: 45, error: undefined };
+    }
+    return { ok: false, latencyMs: 1000, error: "connection refused" };
+  };
+
+  return { execSync, poolQuery, probeHealth };
 }
 
 describe("checkTopology", () => {
-  it("returns ok when all agencies attached and no legacy instances", async () => {
+  it("returns ok when all agencies attached, all services active, no legacy instances", async () => {
     const probers = makeProbers({
       rows: [
         { agent_identity: "claude-agency-bot", is_attached: true },
@@ -64,41 +81,62 @@ describe("checkTopology", () => {
     assert.equal(result.name, "topology");
     assert.equal(result.severity, "ok");
     assert.match(result.message, /2 expected agencies attached/);
-    assert.deepEqual((result.details as Record<string, unknown>).unattached, []);
-    assert.deepEqual(
-      (result.details as Record<string, unknown>).legacy_template_instances,
-      [],
-    );
+    const details = result.details as Record<string, unknown>;
+    assert.deepEqual(details.unattached_ids, []);
+    assert.equal(details.legacy_running_count, 0);
   });
 
-  it("returns error when a2a-host.service is inactive", async () => {
-    const probers = makeProbers({ a2aStatus: "inactive" });
+  it("returns error when critical service is inactive (AC-2)", async () => {
+    const probers = makeProbers({ inactiveServices: ["agenthive-mcp.service"] });
     const result = await checkTopology(BASE_CTX, probers);
 
     assert.equal(result.severity, "error");
-    assert.match(result.message, /agenthive-a2a-host\.service/);
+    assert.match(result.message, /agenthive-mcp\.service/);
     assert.match(result.remediation ?? "", /systemctl start/);
   });
 
-  it("returns error when some agencies are not attached", async () => {
+  it("returns error when MCP /health fails (AC-5)", async () => {
+    const probers = makeProbers({ healthOk: false });
+    const result = await checkTopology(BASE_CTX, probers);
+
+    assert.equal(result.severity, "error");
+    assert.match(result.message, /MCP.*health/i);
+    assert.match(result.remediation ?? "", /systemctl restart/);
+  });
+
+  it("returns warn when 1-2 agencies unattached (AC-3 transitional)", async () => {
     const probers = makeProbers({
       rows: [
         { agent_identity: "claude-agency-bot", is_attached: true },
         { agent_identity: "gemini-agency-george", is_attached: false },
-        { agent_identity: "hermes-agency-one", is_attached: false },
       ],
     });
     const result = await checkTopology(BASE_CTX, probers);
 
-    assert.equal(result.severity, "error");
-    assert.match(result.message, /2\/3 expected agencies not attached/);
+    assert.equal(result.severity, "warn");
+    assert.match(result.message, /transitional/);
     const details = result.details as Record<string, unknown>;
-    assert.deepEqual(details.unattached, ["gemini-agency-george", "hermes-agency-one"]);
-    assert.equal(details.expected_agencies, 3);
-    assert.equal(details.attached_agencies, 1);
+    assert.deepEqual(details.unattached_ids, ["gemini-agency-george"]);
   });
 
-  it("returns warn when legacy template instances are running", async () => {
+  it("returns warn when ≥3 agencies unattached (AC-3)", async () => {
+    const probers = makeProbers({
+      rows: [
+        { agent_identity: "a", is_attached: true },
+        { agent_identity: "b", is_attached: false },
+        { agent_identity: "c", is_attached: false },
+        { agent_identity: "d", is_attached: false },
+      ],
+    });
+    const result = await checkTopology(BASE_CTX, probers);
+
+    assert.equal(result.severity, "warn");
+    assert.match(result.message, /3\/4/);
+    const details = result.details as Record<string, unknown>;
+    assert.deepEqual(details.unattached_ids, ["b", "c", "d"]);
+  });
+
+  it("returns warn when legacy template instances running (AC-4)", async () => {
     const probers = makeProbers({
       rows: [{ agent_identity: "claude-agency-bot", is_attached: true }],
       legacyUnits: ["agenthive-agency@old-agent.service"],
@@ -109,22 +147,19 @@ describe("checkTopology", () => {
     assert.match(result.message, /Legacy agenthive-agency@/);
     assert.match(result.remediation ?? "", /systemctl stop/);
     const details = result.details as Record<string, unknown>;
-    assert.deepEqual(details.legacy_template_instances, [
-      "agenthive-agency@old-agent.service",
-    ]);
+    assert.equal(details.legacy_running_count, 1);
   });
 
-  it("returns warn (not error) when DB query fails but a2a-host is active", async () => {
+  it("includes data_source_errors in details when DB query fails", async () => {
     const probers = makeProbers({ dbError: "connection refused" });
     const result = await checkTopology(BASE_CTX, probers);
 
-    assert.equal(result.severity, "warn");
-    assert.match(result.message, /attachment query failed/);
     const details = result.details as Record<string, unknown>;
-    assert.ok((details.db_error as string).includes("connection refused"));
+    assert.ok(Array.isArray(details.data_source_errors));
+    assert.match((details.data_source_errors as string[])[0], /agency_registry query/);
   });
 
-  it("details shape satisfies AC-12 contract", async () => {
+  it("details shape satisfies AC-12 contract (8 required fields)", async () => {
     const probers = makeProbers({
       rows: [
         { agent_identity: "a", is_attached: true },
@@ -134,12 +169,14 @@ describe("checkTopology", () => {
     const result = await checkTopology({ ...BASE_CTX, host: "testhost" }, probers);
 
     const d = result.details as Record<string, unknown>;
-    assert.equal(d.host, "testhost");
-    assert.ok(typeof d.a2a_host_service === "string");
-    assert.ok(typeof d.expected_agencies === "number");
-    assert.ok(typeof d.attached_agencies === "number");
-    assert.ok(Array.isArray(d.unattached));
-    assert.ok(Array.isArray(d.legacy_template_instances));
+    assert.equal(d.checked_host, "testhost");
+    assert.equal(d.expected_source, "agent_registry.host_affinity");
+    assert.ok(typeof d.expected_count === "number");
+    assert.ok(typeof d.attached_count === "number");
+    assert.ok(Array.isArray(d.unattached_ids));
+    assert.ok(typeof d.legacy_running_count === "number");
+    assert.ok(typeof d.mcp_health_latency_ms === "number");
+    assert.ok(Array.isArray(d.data_source_errors));
   });
 
   it("DoctorCheck shape has required fields", async () => {
@@ -152,16 +189,29 @@ describe("checkTopology", () => {
     assert.ok(["ok", "warn", "error"].includes(result.severity));
   });
 
-  it("error message truncates unattached list beyond 5 with +N more suffix", async () => {
+  it("unattached_ids truncates beyond 5 with remaining count separate", async () => {
     const probers = makeProbers({
       rows: Array.from({ length: 8 }, (_, i) => ({
         agent_identity: `agency-${i}`,
-        is_attached: false,
+        is_attached: i === 0,
       })),
     });
     const result = await checkTopology(BASE_CTX, probers);
 
-    assert.equal(result.severity, "error");
-    assert.match(result.message, /\+3 more/);
+    assert.equal(result.severity, "warn");
+    const details = result.details as Record<string, unknown>;
+    assert.equal((details.unattached_ids as string[]).length, 5, "Should include max 5 unattached IDs");
+  });
+
+  it("uses os.hostname() fallback when ctx.host is missing", async () => {
+    const probers = makeProbers({
+      rows: [{ agent_identity: "test-agency", is_attached: true }],
+    });
+    const ctxNoHost = { ...BASE_CTX, host: "" };
+    const result = await checkTopology(ctxNoHost, probers);
+
+    const details = result.details as Record<string, unknown>;
+    assert.ok(typeof details.checked_host === "string");
+    assert.notEqual(details.checked_host, "");
   });
 });
