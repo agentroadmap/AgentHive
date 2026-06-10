@@ -2729,8 +2729,12 @@ export async function createMcpServer(
 	});
 
 	// P1129: Agency lifecycle tools — agency_start / agency_status
-	const { AgencyOpsHandler } = await import("./tools/ops/agency-ops.ts");
-	const agencyOps = new AgencyOpsHandler();
+	// (function API since 1a876799 — agency-ops.ts exports no class; a stale
+	// class-based registration block kept resurfacing through merges and
+	// crash-looped the MCP service with "AgencyOpsHandler is not a constructor")
+	const { handleAgencyStart, handleAgencyStatus } = await import(
+		"./tools/ops/agency-ops.ts"
+	);
 	server.addTool({
 		name: "agency_start",
 		description:
@@ -2740,16 +2744,15 @@ export async function createMcpServer(
 		inputSchema: {
 			type: "object",
 			properties: {
-				identity: {
+				agency_id: {
 					type: "string",
 					description: "Agency identity (agent_identity in agent_registry, e.g. 'george')",
 				},
 			},
-			required: ["identity"],
+			required: ["agency_id"],
 		},
 		handler: async (args: Record<string, unknown>) =>
-			agencyOps.agencyStart({ identity: String(args.identity) })
-				.then((r) => ({ content: [{ type: "text", text: JSON.stringify(r, null, 2) }] })),
+			handleAgencyStart({ agency_id: String(args.agency_id) }),
 	});
 	server.addTool({
 		name: "agency_status",
@@ -2759,16 +2762,16 @@ export async function createMcpServer(
 		inputSchema: {
 			type: "object",
 			properties: {
-				identity: {
+				agency_id: {
 					type: "string",
 					description: "Agency identity (agent_identity in agent_registry)",
 				},
 			},
-			required: ["identity"],
 		},
 		handler: async (args: Record<string, unknown>) =>
-			agencyOps.agencyStatus({ identity: String(args.identity) })
-				.then((r) => ({ content: [{ type: "text", text: JSON.stringify(r, null, 2) }] })),
+			handleAgencyStatus({
+				agency_id: args.agency_id ? String(args.agency_id) : undefined,
+			}),
 	});
 
 	// Start background maintenance tasks
