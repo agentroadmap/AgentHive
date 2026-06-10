@@ -400,12 +400,12 @@ export function registerConsolidatedTools(server: McpServer): void {
 				"`add_dependency`/`remove_dependency` use camelCase `fromProposalId`/`toProposalId`/`dependencyType` (string ids, not int). " +
 				"SUBMIT_REVIEW: reviewer identity field is `reviewer` on input (NOT `reviewer_identity`, `agent_identity`, or `identity` — those produce a PG FK not-null error). Response returns it as `reviewer_identity` (input/output field name asymmetry). `is_blocking: true` is persisted faithfully — pass it to mark the review as a hard blocker. " +
 				"ADD_DISCUSSION: visible in the board UI in preview mode via GET /api/proposals/{id}/notes — ProposalDetailsModal renders a Discussions section when entries exist. For formal gate verdicts with blocking flags and verdict enum, use `submit_review` instead. " +
-				"LIST (prop_list): free-text search is NOT supported here — use `proposal_search` action instead. Passing `search`/`q`/`title_contains` returns an explicit ❌ error naming the bad param. " +
+				"LIST (prop_list): `search` IS honored as a title ILIKE substring filter (title only, not body). `q`/`title_contains` are silently ignored. For full-text/body search use `proposal_search`. " +
 				"VERIFY_AC: each AC needs its own call (1-indexed item_number); ACs stay 'pending' until you explicitly call verify_ac with status='pass' — NOT inferred from tests passing or maturity advance. status enum is {pass, fail, blocked, waived}, NOT 'verified'. " +
 				"ADD_ACCEPTANCE_CRITERIA: pass `criteria: string[]` (array of full sentences), NOT individual title/description fields nor `acceptance_criteria` key. " +
 				"SUBMIT_REVIEW: reviewer identity field is `reviewer` on input (NOT reviewer_identity / agent_identity / identity). Response returns it as `reviewer_identity`. Pass `is_blocking: true` to mark a blocking review (now persisted correctly). " +
 				"ADD_DISCUSSION: entries persist in storage and are readable via MCP projections, but the board UI does NOT render discussion entries — use `submit_review` for findings that need to be visible to operators. " +
-				"PROP_LIST/LIST: free-text search params (search, q, title_contains) are NOT supported — use `proposal_search` for keyword search. " +
+				"PROP_LIST/LIST: `search` filters by title ILIKE (substring, title only); `q`/`title_contains` ignored; body/keyword search lives in `proposal_search`. " +
 				"Use action=list_actions to enumerate every action name.",
 			proposalRoutes,
 		),
