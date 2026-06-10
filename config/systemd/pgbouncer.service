@@ -1,0 +1,53 @@
+# PgBouncer systemd service template (P499)
+#
+# DEPLOYMENT INSTRUCTIONS:
+# 1. Copy this file to /etc/systemd/system/pgbouncer.service (or /usr/lib/systemd/system/)
+# 2. Reload systemd daemon: sudo systemctl daemon-reload
+# 3. Enable and start: sudo systemctl enable pgbouncer && sudo systemctl start pgbouncer
+# 4. Verify: sudo systemctl status pgbouncer
+# 5. View logs: journalctl -u pgbouncer -f
+#
+# REFERENCE: P499 Acceptance Criteria
+# - AC-11: Type=notify, WatchdogSec=30s, Restart=always, RestartSec=5s
+# - AC-13: Integration test kills PgBouncer and verifies recovery
+
+[Unit]
+Description=PgBouncer Connection Pool (P499 — AgentHive)
+Documentation=file:///data/code/AgentHive/docs/architecture/pgbouncer.md
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=postgres
+Group=postgres
+WorkingDirectory=/var/lib/pgbouncer
+
+# Command to start PgBouncer
+ExecStart=/usr/sbin/pgbouncer -R /etc/pgbouncer/pgbouncer.ini
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Watchdog for crash detection and auto-recovery (AC-11)
+WatchdogSec=30s
+# If no watchdog ping for 30s, systemd will restart the service
+
+# Restart policy (AC-11)
+Restart=always
+RestartSec=5s
+# Restart immediately after crash (5s delay to prevent rapid restart storm)
+
+# Resource limits
+LimitNOFILE=65535
+LimitNPROC=65535
+
+# Standard output and error
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pgbouncer
+
+# Security hardening (optional, can be removed for compatibility)
+# NoNewPrivileges=true
+# PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

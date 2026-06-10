@@ -471,6 +471,98 @@ Adjust if your workload differs from AgentHive.
 
 ---
 
+## Connection Budget Math (AC-20)
+
+**Goal:** Ensure that Postgres `max_connections` is not exceeded when scaling tenants.
+
+### Formula
+
+With N tenant databases and 5 processes per tenant (liaison + worker × 4), the total Postgres connections required is:
+
+```
+Total Connections = 5 × (pool_size_hiveCentral + pool_size_agenthive + pool_size_per_tenant × N)
+                  = 5 × (20 + 10 + 8 × N)
+                  = 5 × (30 + 8N)
+                  = 150 + 40N
+```
+
+Where:
+- `5` = number of processes per tenant (1 liaison + 4 workers)
+- `20` = `default_pool_size` for `hiveCentral` database (AC-7)
+- `10` = `default_pool_size` for `agenthive` database (AC-7)
+- `8` = `default_pool_size` per tenant database (AC-7)
+- `N` = number of active tenant databases
+
+### Capacity Planning
+
+Postgres default `max_connections = 100`. Recommended overhead: `max_connections = 200`.
+
+| N Tenants | Total Connections | Status | Postgres Limit |
+|-----------|-------------------|--------|-----------------|
+| 0 | 150 | ✅ Fits | 100+ |
+| 1 | 190 | ✅ Fits | 100+ |
+| 2 | 230 | ⚠️ Marginal | 200+ required |
+| 3 | 270 | ❌ Exceeds 200 | 300+ required |
+| 4 | 310 | ❌ Exceeds 200 | 400+ required |
+
+### Operational Rules
+
+1. **For N ≤ 2:** No action required. Default `max_connections = 100` is sufficient.
+
+2. **For N = 3:** Increase Postgres `max_connections` to 300 before provisioning the 3rd tenant.
+   ```bash
+   # In /etc/postgresql/*/main/postgresql.conf
+   max_connections = 300
+   
+   # Then reload:
+   sudo systemctl reload postgresql
+   ```
+
+3. **For N ≥ 4:** Increase Postgres `max_connections` to `150 + 40N + 50` (50-connection safety margin).
+   ```
+   max_connections = 150 + 40N + 50 = 200 + 40N
+   ```
+
+4. **Monitoring:** Track active connections via:
+   ```bash
+   psql -c "SELECT count(*) FROM pg_stat_activity;"
+   ```
+
+### PgBouncer + Postgres: Connection Multiplexing
+
+- **Without PgBouncer:** 400 concurrent app clients compete directly for ~100 Postgres connections (typical).
+  - High overhead; pool exhaustion risk under load.
+
+- **With PgBouncer (P499):** 400 app clients → PgBouncer → 20–40 Postgres connections.
+  - Multiplexing ratio = 400 / 30 ≈ 13:1 (dramatic reduction).
+  - Fits comfortably within `max_connections = 100–200`.
+
+### Example: 2-Tenant Deployment
+
+```
+Tenant 1: monkeyKing-audio (5 processes)
+  - Liaison + 4 workers = 5 connections to monkeyKing-audio DB
+  - Plus 20 to hiveCentral + 10 to agenthive = 35 connections
+
+Tenant 2: georgia-singer (5 processes)
+  - Liaison + 4 workers = 5 connections to georgia-singer DB
+  - Plus 20 to hiveCentral + 10 to agenthive = 35 connections
+
+Total: 35 + 35 = 70 connections
+Postgres max_connections = 100 (default sufficient)
+```
+
+### Scaling Beyond 4 Tenants
+
+If your deployment needs N > 4 tenants, consider:
+
+1. **Horizontal scaling:** Deploy a separate Postgres instance per tenant or tenant group.
+2. **Connection pooling per tenant:** Run a separate PgBouncer instance per tenant (advanced).
+3. **Application-level pooling:** Reuse connections more aggressively in application code.
+4. **Increase Postgres limits:** Scale to `max_connections = 400–1000` on high-resource hardware.
+
+---
+
 ## Migration Path (Zero-Downtime)
 
 1. **Prepare:** Deploy P499 code without enabling PgBouncer
