@@ -1,12 +1,15 @@
 /**
- * P1129 Phase C: agency_start and agency_status MCP handlers.
+ * agency_start and agency_status MCP handlers.
  *
- * agency_start  — verify registry + env file, start systemd unit, poll 30s for active
+ * agency_start  — DB-only activation. Per-agency systemd units are RETIRED
+ *                 (operator policy: the liaison is a cold-wake AI agent, not a
+ *                 service; the universal `agenthive-a2a-host` floor discovers
+ *                 registered agencies from the DB and attaches their LISTEN
+ *                 session — there is no per-agency `agenthive-agency@<id>` unit).
+ *                 This handler verifies registration and reports presence.
  * agency_status — query v_agency_status + agency_liaison_session for full snapshot
  */
 
-import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
 import { query } from "../../../../postgres/pool.ts";
 import type { CallToolResult } from "../../types.ts";
 
@@ -43,46 +46,32 @@ export async function handleAgencyStart(args: {
 		);
 	}
 
-	// 2. Verify systemd env file
-	const envFile = `/etc/agenthive/agency-${agency_id}.env`;
-	if (!existsSync(envFile)) {
-		return err(
-			"no_env_file",
-			`Env file ${envFile} not found. Create it with AGENCY_ID, MCP_URL, and model env vars before starting.`,
-			{ agency_id, env_file: envFile },
-		);
-	}
-
-	// 3. Start the systemd unit
-	const unitName = `agenthive-agency@${agency_id}.service`;
-	const startResult = spawnSync("sudo", ["systemctl", "start", unitName], { timeout: 15_000 });
-	if (startResult.status !== 0) {
-		const stderr = startResult.stderr?.toString().trim() ?? "";
-		return err(
-			"start_failed",
-			`systemctl start ${unitName} exited ${startResult.status}: ${stderr}`,
-			{ agency_id, unit: unitName },
-		);
-	}
-
-	// 4. Poll up to 30s for active
-	const deadline = Date.now() + 30_000;
-	let active = false;
-	while (Date.now() < deadline) {
-		const isActive = spawnSync("systemctl", ["is-active", "--quiet", unitName], { timeout: 5_000 });
-		if (isActive.status === 0) {
-			active = true;
-			break;
-		}
-		await new Promise((r) => setTimeout(r, 2_000));
-	}
+	// 2. Activation is DB-only. Per-agency systemd units (agenthive-agency@<id>)
+	//    are retired: the universal `agenthive-a2a-host` floor discovers any
+	//    registered agency from the DB on its next refresh (~60s) and attaches a
+	//    LISTEN session; the AI liaison is cold-wakeable, not a service. There is
+	//    nothing to `systemctl start` here.
+	const status = await query(
+		`SELECT status, presence_state, dispatchable, liveness_state, last_heartbeat_at
+		 FROM roadmap.v_agency_status
+		 WHERE agency_id = $1`,
+		[agency_id],
+	);
+	const s = status.rows[0] ?? null;
 
 	return ok({
 		agency_id,
-		unit: unitName,
+		registered: true,
 		started: true,
-		active,
-		note: active ? "Unit is active." : "Unit started but did not reach active within 30s — check journalctl.",
+		mechanism: "db-only",
+		dispatchable: s?.dispatchable ?? false,
+		presence_state: s?.presence_state ?? null,
+		liveness_state: s?.liveness_state ?? null,
+		last_heartbeat_at: s?.last_heartbeat_at ?? null,
+		note:
+			"Agency is registered. Dispatch is handled by the universal agenthive-a2a-host floor " +
+			"(DB-driven discovery, ~60s to attach a LISTEN session) — no per-agency systemd unit is " +
+			"started. If the agency needs an AI liaison, cold-wake it; do not install a service.",
 	});
 }
 

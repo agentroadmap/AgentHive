@@ -465,7 +465,7 @@ export const agencyStartSchema: JsonSchema = {
 			minLength: 1,
 			maxLength: 200,
 			description:
-				"Agency agent_identity string. Used as the systemd instance name: agenthive-agency@<identity>.service",
+				"Agency agent_identity string (DB registration key in agent_registry). Activation is DB-only — the universal agenthive-a2a-host floor discovers it; there is no per-agency systemd unit.",
 		},
 		worktree: {
 			type: "string",

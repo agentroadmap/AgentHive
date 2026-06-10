@@ -2738,9 +2738,10 @@ export async function createMcpServer(
 	server.addTool({
 		name: "agency_start",
 		description:
-			"P1129: Enable and start an agency's liaison systemd service. " +
-			"Verifies agent_type='agency' in agent_registry before touching systemd. " +
-			"Requires the mcp-server process user to have sudoers access to agenthive-agency@.service.",
+			"DB-only agency activation. Verifies the agency is registered in agent_registry " +
+			"and reports presence from v_agency_status. Per-agency systemd units are retired: " +
+			"dispatch is handled by the universal agenthive-a2a-host floor (DB-driven discovery), " +
+			"and the liaison is a cold-wake AI agent, not a service — nothing is installed or started.",
 		inputSchema: {
 			type: "object",
 			properties: {

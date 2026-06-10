@@ -889,7 +889,7 @@ export class PgProposalHandlers {
 						content: [
 							{
 								type: "text",
-								text: `Agency '${agentArg}' is registered but has no active liaison session. Start the agency runtime (scripts/start-agency.ts — invoked via agenthive-${agentArg.split("/")[0] ?? "claude"}-agency.service or equivalent) before claiming proposals; the runtime opens a liaison session and starts the offer_dispatch hub via P912 selfRegisterAgency.`,
+								text: `Agency '${agentArg}' is registered but has no active liaison session. Dispatch is handled by the universal agenthive-a2a-host floor (DB-driven discovery) — there is no per-agency service to start. If the agency needs an AI liaison to claim/coordinate, cold-wake it; the a2a-host floor attaches the LISTEN session and the offer_dispatch hub.`,
 							},
 						],
 					};
