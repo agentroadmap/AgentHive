@@ -15,6 +15,12 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { query } from "../../../../../postgres/pool.ts";
 import { PgAgentHandlers } from "../pg-handlers.ts";
 
+// This suite writes real rows (agency, agent_registry, host_model_policy) and
+// imports the unguarded src/postgres pool, so it must be explicitly opted in —
+// see P2323 discussion #9731 (live-DB pollution caught 2026-06-10).
+const LIVE = process.env.AGENTHIVE_ALLOW_LIVE_DB === "1";
+const describeLive = describe.skipIf(!LIVE);
+
 const TEST_AGENCY_ID = "test-agency-p1372";
 const TEST_AGENCY_ID_2 = "test-agency-p1372-2";
 const ALT_AGENCY_ID = "alt-agency-p1372";
@@ -69,7 +75,7 @@ async function getAgencyRow(agencyId: string): Promise<any> {
 	return rows[0] || null;
 }
 
-describe("P1372: registerAgency handler", () => {
+describeLive("P1372: registerAgency handler", () => {
 	beforeEach(async () => {
 		await cleanupTest();
 		// Ensure test hosts exist in host_model_policy
