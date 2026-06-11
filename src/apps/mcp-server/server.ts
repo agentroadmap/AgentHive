@@ -2430,6 +2430,127 @@ export async function createMcpServer(
 		handler: wrapJson((a) => agencyHandlers.handleMcpQuirksRegister(a)),
 	});
 
+	// P1385: MCP agency work transport — long-poll subscribe, submit result, heartbeat
+	const workTransportHandlers = await import("./tools/agency/work-transport-handlers.ts");
+
+	server.addTool({
+		name: "agency_subscribe",
+		description:
+			"Remote agency long-polls for next available claimed work offer. " +
+			"Returns offer payload (dispatch_id, claim_token, etc.) or empty on timeout. " +
+			"Implements sleep+poll loop (2s interval, 30s max timeout). " +
+			"Capabilities server-sourced from agent_capability table (no client privilege escalation). " +
+			"Bearer token checked when MCP_AGENCY_AUTH=on; Authorization header format: 'Bearer <token>'.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				agency_identity: {
+					type: "string",
+					description: "Agent identity (e.g., 'cc-mac-a')",
+				},
+				timeout_seconds: {
+					type: "number",
+					description: "Max poll duration in seconds (capped at 30)",
+				},
+				lease_seconds: {
+					type: "number",
+					description: "Lease TTL for claimed offer (default 60)",
+				},
+				authorization: {
+					type: "string",
+					description: "Bearer token (format: 'Bearer <token>'); checked when MCP_AGENCY_AUTH=on",
+				},
+			},
+			required: ["agency_identity"],
+		},
+		handler: wrapJson((a) => workTransportHandlers.handleAgencySubscribe(a)),
+	});
+
+	server.addTool({
+		name: "agency_submit_result",
+		description:
+			"Remote executor submits work result: writes agent_runs row, releases lease. " +
+			"Required: dispatch_id, claim_token, status (completed|failed), duration_ms. " +
+			"Idempotent: if dispatch already delivered/failed, returns existing agent_runs id. " +
+			"Bearer token checked when MCP_AGENCY_AUTH=on.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				dispatch_id: {
+					type: "number",
+					description: "ID returned from agency_subscribe",
+				},
+				claim_token: {
+					type: "string",
+					description: "UUID from agency_subscribe; must match to release",
+				},
+				status: {
+					type: "string",
+					enum: ["completed", "failed"],
+					description: "Work outcome",
+				},
+				duration_ms: {
+					type: "number",
+					description: "Execution time in milliseconds",
+				},
+				tokens_in: {
+					type: "number",
+					description: "Input tokens (optional)",
+				},
+				tokens_out: {
+					type: "number",
+					description: "Output tokens (optional)",
+				},
+				cost_usd: {
+					type: "number",
+					description: "Cost in USD (optional)",
+				},
+				output_summary: {
+					type: "string",
+					description: "Result summary (JSON string or plain text)",
+				},
+				authorization: {
+					type: "string",
+					description: "Bearer token; checked when MCP_AGENCY_AUTH=on",
+				},
+			},
+			required: ["dispatch_id", "claim_token", "status", "duration_ms"],
+		},
+		handler: wrapJson((a) => workTransportHandlers.handleAgencySubmitResult(a)),
+	});
+
+	server.addTool({
+		name: "agency_heartbeat",
+		description:
+			"Extend lease expiry during long-running work to prevent requeue. " +
+			"Required: dispatch_id, claim_token from agency_subscribe. " +
+			"Must call every lease_seconds/2 (e.g., every 20s with 60s lease). " +
+			"Bearer token checked when MCP_AGENCY_AUTH=on.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				dispatch_id: {
+					type: "number",
+					description: "ID from agency_subscribe",
+				},
+				claim_token: {
+					type: "string",
+					description: "UUID from agency_subscribe",
+				},
+				lease_seconds: {
+					type: "number",
+					description: "Extension duration (default 60)",
+				},
+				authorization: {
+					type: "string",
+					description: "Bearer token; checked when MCP_AGENCY_AUTH=on",
+				},
+			},
+			required: ["dispatch_id", "claim_token"],
+		},
+		handler: wrapJson((a) => workTransportHandlers.handleAgencyHeartbeat(a)),
+	});
+
 	server.addTool({
 		name: "request_lease_renewal",
 		description:
