@@ -126,4 +126,33 @@ describe("P2324 ad-hoc task_request (no proposal_id)", () => {
 		const reply = calls.find((c) => c.name === "insertReply");
 		assert.equal(reply!.args.messageType, "task_error");
 	});
+
+	it("AC-4: monitorTaskDispatch is called for ad-hoc tasks to surface completion", async () => {
+		process.env.AGENTHIVE_ADHOC_PROPOSAL_ID = "2326";
+		const calls: Call[] = [];
+		await handleTypedTaskRequest(
+			makeMsg({
+				correlation_id: "test-corr-ac4",
+			}),
+			"gemini",
+			"gemini",
+			makeHelpers(calls),
+		);
+
+		// Verify monitorTaskDispatch was called with correct args
+		const monitor = calls.find((c) => c.name === "monitor");
+		assert.ok(monitor, "monitorTaskDispatch must be called");
+		assert.equal(monitor!.args.identity, "gemini", "liaison identity passed");
+		assert.equal(monitor!.args.requestor, "agenthive/agency-orchestrator", "original requestor passed");
+		assert.equal(monitor!.args.originalMessageId, 4242, "original message ID preserved");
+		assert.equal(monitor!.args.correlationId, "test-corr-ac4", "correlation_id preserved");
+		assert.equal(monitor!.args.dispatchId, 999, "dispatch ID from bridge result");
+
+		// monitorTaskDispatch polls squad_dispatch and sends task_result or task_error
+		// replies back to the requestor when the dispatch completes. This is verified
+		// in the actual liaison-agent runtime tests. Here we verify the contract:
+		// - monitorTaskDispatch is async and runs in the background (void call)
+		// - it receives the original message context (identity, requestor, message ID, correlationId)
+		// - it has access to dispatchId to monitor via squad_dispatch table
+	});
 });

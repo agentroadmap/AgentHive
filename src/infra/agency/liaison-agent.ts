@@ -686,6 +686,13 @@ export async function monitorTaskDispatch(args: {
 		const statusKey = `${row.offer_status}:${row.dispatch_status}:${row.worker_identity ?? ""}`;
 		if (statusKey !== lastStatus) {
 			lastStatus = statusKey;
+			const isTerminal = terminalOfferStatus(row.offer_status, row.dispatch_status);
+			const isSuccess = row.offer_status === "delivered" || row.dispatch_status === "completed";
+			const messageType = isTerminal
+				? isSuccess
+					? "task_result"
+					: "task_error"
+				: "task_status";
 			await insertReply({
 				fromAgent: args.identity,
 				toAgent: args.requestor,
@@ -693,12 +700,7 @@ export async function monitorTaskDispatch(args: {
 					`Dispatch ${args.dispatchId} status: offer=${row.offer_status}, ` +
 					`dispatch=${row.dispatch_status}` +
 					(row.worker_identity ? `, worker=${row.worker_identity}` : ""),
-				messageType: terminalOfferStatus(row.offer_status, row.dispatch_status)
-					? row.offer_status === "delivered" ||
-						row.dispatch_status === "completed"
-						? "task_status"
-						: "task_error"
-					: "task_status",
+				messageType,
 				correlationId: args.correlationId,
 				replyTo: args.originalMessageId,
 			});
