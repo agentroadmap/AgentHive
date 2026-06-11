@@ -94,12 +94,21 @@ class MockQueryStore {
 		if (sql.includes("UPDATE roadmap_proposal.proposal")) {
 			// P740 (HF-C): UPDATE statements that bump maturity should also
 			// record the new value so subsequent SELECT maturity sees it.
-			//   UPDATE ... SET maturity = $2, modified_at = NOW() ... WHERE id = $3
+			// P778: Handle obsoleted_reason in setMaturityObsolete:
+			//   UPDATE ... SET maturity = 'obsolete', obsoleted_reason = $2, ... WHERE id = $3
 			if (sql.includes("SET maturity")) {
-				const newMaturity = params[1];
-				const id = params[2];
-				const proposal = this.proposals.get(id);
-				if (proposal) proposal.maturity = newMaturity;
+				if (sql.includes("obsoleted_reason")) {
+					// setMaturityObsolete case: maturity is always 'obsolete', id is param 2
+					const id = params[2];
+					const proposal = this.proposals.get(id);
+					if (proposal) proposal.maturity = "obsolete";
+				} else {
+					// Regular setMaturity case: id is param 2
+					const newMaturity = params[1];
+					const id = params[2];
+					const proposal = this.proposals.get(id);
+					if (proposal) proposal.maturity = newMaturity;
+				}
 			}
 			return { rows: [] as T[] };
 		}
@@ -431,6 +440,155 @@ describe("GateEvaluatorAgent", () => {
 			}
 		});
 	});
+
+	describe("P778 AC-8 & AC-9: Closure verdicts (wontfix, discard, replace, escalate, nonissue)", () => {
+		it("applies reject closure verdict: sets maturity=obsolete, status unchanged", async () => {
+			// Setup: proposal at DRAFT with mature maturity
+			mockStore.dependencies.set(1, []);
+			mockStore.acceptanceCriteria.set(1, []);
+			mockStore.proposals.set(1, {
+				id: 1,
+				display_id: "P123",
+				title: "Test",
+				status: "DRAFT",
+				workflow_name: "Standard RFC",
+				maturity: "mature",
+			});
+
+			const agent = new GateEvaluatorAgent(
+				mockStore.query.bind(mockStore) as any,
+				1,
+				"D1",
+				mockTransition as any,
+			);
+
+			const proposal: ProposalBrief = {
+				id: 1,
+				display_id: "P123",
+				title: "Test",
+				status: "DRAFT",
+			};
+
+			const gate: GateBrief = {
+				name: "D1",
+				from_state: "DRAFT",
+				to_state: "REVIEW",
+				requires_ac: false,
+			};
+
+			// Manually apply a reject verdict (closure verdict)
+			const decision: GateDecision = {
+				verdict: "reject",
+				reason: "Not ready for review",
+			};
+
+			await agent["applyVerdict"](proposal, gate, decision);
+
+			// Verify maturity was set to obsolete
+			const proposalAfter = mockStore.proposals.get(1);
+			assert.strictEqual(proposalAfter?.maturity, "obsolete", "Maturity should be obsolete");
+			// Verify status was NOT changed
+			assert.strictEqual(proposalAfter?.status, "DRAFT", "Status should remain unchanged");
+		});
+
+		it("applies wontfix closure verdict: sets maturity=obsolete", async () => {
+			mockStore.dependencies.set(1, []);
+			mockStore.acceptanceCriteria.set(1, []);
+			mockStore.proposals.set(1, {
+				id: 1,
+				display_id: "P456",
+				title: "Test2",
+				status: "REVIEW",
+				workflow_name: "Standard RFC",
+				maturity: "mature",
+			});
+
+			const agent = new GateEvaluatorAgent(
+				mockStore.query.bind(mockStore) as any,
+				1,
+				"D2",
+				mockTransition as any,
+			);
+
+			const proposal: ProposalBrief = {
+				id: 1,
+				display_id: "P456",
+				title: "Test2",
+				status: "REVIEW",
+			};
+
+			const gate: GateBrief = {
+				name: "D2",
+				from_state: "REVIEW",
+				to_state: "DEVELOP",
+				requires_ac: false,
+			};
+
+			const decision: GateDecision = {
+				verdict: "wontfix",
+				reason: "Superseded by P789",
+			};
+
+			await agent["applyVerdict"](proposal, gate, decision);
+
+			// Verify maturity is obsolete
+			const proposalAfter = mockStore.proposals.get(1);
+			assert.strictEqual(proposalAfter?.maturity, "obsolete", "Maturity should be obsolete");
+			// Verify status unchanged
+			assert.strictEqual(proposalAfter?.status, "REVIEW", "Status should remain REVIEW");
+		});
+
+		it("records closure verdict in gate_decision_log", async () => {
+			mockStore.dependencies.set(1, []);
+			mockStore.acceptanceCriteria.set(1, []);
+			mockStore.proposals.set(1, {
+				id: 1,
+				display_id: "P999",
+				title: "Test4",
+				status: "DRAFT",
+				workflow_name: "Standard RFC",
+				maturity: "mature",
+			});
+
+			const agent = new GateEvaluatorAgent(
+				mockStore.query.bind(mockStore) as any,
+				1,
+				"D1",
+			);
+
+			const proposal: ProposalBrief = {
+				id: 1,
+				display_id: "P999",
+				title: "Test4",
+				status: "DRAFT",
+			};
+
+			const gate: GateBrief = {
+				name: "D1",
+				from_state: "DRAFT",
+				to_state: "REVIEW",
+				requires_ac: false,
+			};
+
+			// Manually invoke recordGateDecision for a closure verdict
+			const decision: GateDecision = {
+				verdict: "replace",
+				reason: "Replaced by P888",
+			};
+
+			await agent["recordGateDecision"](proposal, gate, decision);
+
+			// Verify decision was logged
+			assert.strictEqual(
+				mockStore.decisions.length,
+				1,
+				"Should record one decision",
+			);
+			const logged = mockStore.decisions[0];
+			assert.strictEqual(logged.verdict, "replace", "Verdict should be 'replace'");
+			assert.strictEqual(logged.gate, "D1", "Gate should be D1");
+		});
+	});
 });
 
 describe("P206 Acceptance Criteria", () => {
@@ -501,4 +659,5 @@ describe("P206 Acceptance Criteria", () => {
 		assert.strictEqual(recorded.verdict, "approve");
 		assert.strictEqual(recorded.gate, "D1");
 	});
+
 });

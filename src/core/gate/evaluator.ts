@@ -15,7 +15,17 @@ import type { query } from "../../infra/postgres/pool.ts";
 
 export type GateEvaluatorMode = "auto" | "ai-agent" | "quorum";
 
-export type GateVerdict = "approve" | "reject" | "pending" | "hold" | "abstain";
+export type GateVerdict =
+	| "approve"
+	| "reject"
+	| "pending"
+	| "hold"
+	| "abstain"
+	| "wontfix"
+	| "discard"
+	| "replace"
+	| "escalate"
+	| "nonissue";
 
 /**
  * Structured detail attached to non-transition gate decisions.
