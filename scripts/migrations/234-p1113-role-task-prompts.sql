@@ -311,4 +311,11 @@ INSERT INTO roadmap.agent_role_profile (
   NOW(),
   NOW()
 )
-ON CONFLICT DO NOTHING;
+-- Conflict target = uq_agent_role_profile_global (partial unique index).
+-- Existing rows keep their curated prompt_template; only NULL prompts are
+-- filled from the seed. New (stage, maturity, role) combos insert fresh.
+ON CONFLICT (workflow_template_id, stage, maturity, role)
+  WHERE scope = 'global' AND project_id IS NULL
+  DO UPDATE SET
+    prompt_template = COALESCE(roadmap.agent_role_profile.prompt_template, EXCLUDED.prompt_template),
+    updated_at = now();
