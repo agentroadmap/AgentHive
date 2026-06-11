@@ -163,14 +163,6 @@ export class FeatureFlagService {
 			keepAlive: true,
 		});
 
-    client.on("error", () => {
-      this.listeningChannels.delete("feature_flag_changed");
-    });
-
-    await client.query("LISTEN feature_flag_changed");
-    // Keep client connection alive for the lifetime of the service
-  }
-
 		client.on("notification", (msg) => {
 			try {
 				if (msg.channel === "feature_flag_changed" && msg.payload) {
