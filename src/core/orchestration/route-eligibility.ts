@@ -3,7 +3,7 @@
  *
  * Consolidated route selection enforcing five independent filter dimensions:
  * 1. Host policy (hivecentral.host_model_policy)
- * 2. Project policy (roadmap.project_route_policy)
+ * 2. Project policy (control_model.project_route_policy)
  * 3. Agency policy (roadmap.agency_route_policy)
  * 4. Role/task-category (requires spawn_workers for architecture/review)
  * 5. Token budget (roadmap_efficiency.route_token_budget with lazy hourly reset)
@@ -141,7 +141,7 @@ async function filterHostPolicy(
 
 /**
  * P747 AC-3: Project policy filter.
- * Reads roadmap.project_route_policy and eliminates routes with is_allowed=false.
+ * Reads control_model.project_route_policy and eliminates routes with is_allowed=false.
  * Returns list of eliminated route IDs with reason_code 'project_policy_denied'.
  */
 async function filterProjectPolicy(
@@ -156,7 +156,7 @@ async function filterProjectPolicy(
 
   const sql = `
     SELECT prp.route_id, prp.is_allowed, prp.deny_reason
-    FROM roadmap.project_route_policy prp
+    FROM control_model.project_route_policy prp
     WHERE prp.project_id = $1::bigint
       AND prp.route_id = ANY($2::bigint[])
       AND prp.is_allowed = false
