@@ -13,6 +13,7 @@ import {
 	type LaneMode,
 } from "../lib/lanes";
 import { maturityBarColors } from "../lib/maturity-colors";
+import parseTags from "../utils/parseTags";
 
 interface BoardProps {
 	proposals: Proposal[];
@@ -228,12 +229,12 @@ const Board: React.FC<BoardProps> = ({
 													</div>
 													{proposal.tags && (
 														<div className="mt-1.5 flex flex-wrap gap-1">
-															{proposal.tags.split(",").map((tag) => (
+															{Object.keys(parseTags(proposal.tags)).map((tag) => (
 																<span
-																	key={tag.trim()}
+																	key={tag}
 																	className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded"
 																>
-																	{tag.trim()}
+																	{tag}
 																</span>
 															))}
 														</div>

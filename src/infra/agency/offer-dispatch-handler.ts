@@ -40,6 +40,7 @@ import {
 	evaluateSubscriptionPolicy,
 	declareThrottle,
 } from "./subscription-policy.ts";
+import { recordSpawnUsage } from "./record-spawn-usage.ts";
 
 const obs = new ObservabilityWriter("agency:offer-dispatch-handler");
 
@@ -493,6 +494,33 @@ async function runSpawn(args: {
 		});
 	} catch {
 		// ignore — guard is best-effort
+	}
+
+	// P1018: Record token usage and cost from the spawn result.
+	// This extracts provider-specific usage data, calculates cost, and
+	// writes to agent_budget_ledger + agent_runs.tokens_in/out.
+	// Non-fatal: failures here don't block offer completion.
+	if (result?.agentRunId) {
+		void recordSpawnUsage({
+			agentRunId: result.agentRunId,
+			proposalId,
+			agencyIdentity: agencyId,
+			modelUsed: payload.route_hint,
+			provider: payload.route_hint,
+			durationMs: result.durationMs,
+			spawnResult: result,
+			stage: payload.role,
+			proposalStatus: null, // Populated at-write-time from DB if needed
+			gateIdentity: null, // Populated if running in gate context
+			agentRole: null, // Populated if role-based bucketing needed
+			status: succeeded ? "completed" : "failed",
+			exec,
+		}).catch((err) => {
+			logger.warn(
+				`[OfferDispatchHandler] ${agencyId}: recordSpawnUsage failed for run ${result.agentRunId}:`,
+				err instanceof Error ? err.message : err,
+			);
+		});
 	}
 
 	const succeeded =

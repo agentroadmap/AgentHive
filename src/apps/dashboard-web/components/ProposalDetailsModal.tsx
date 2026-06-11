@@ -13,6 +13,7 @@ import {
 	type ProposalExportBundle,
 } from "../../../shared/proposal-markdown-export";
 import { formatStoredUtcDateForDisplay, parseStoredUtcDate } from "../utils/date-display";
+import parseTags from "../utils/parseTags";
 import AcceptanceCriteriaEditor from "./AcceptanceCriteriaEditor";
 import ChipInput from "./ChipInput";
 import DependencyInput from "./DependencyInput";
@@ -1045,6 +1046,101 @@ const ProposalDetailsModalComponent: React.FC<Props> = ({
 			{error && (
 				<div className="mb-3 text-sm text-red-600 dark:text-red-400">
 					{error}
+				</div>
+			)}
+
+			{/* Circuit-breaker pause callout */}
+			{proposal?.gatePausedBy === "circuit_breaker" && (
+				<div className="mb-4 flex items-start gap-3 px-4 py-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+					<svg
+						className="w-5 h-5 flex-shrink-0 text-red-600 dark:text-red-400 mt-0.5"
+						fill="currentColor"
+						viewBox="0 0 24 24"
+						aria-hidden="true"
+						focusable="false"
+					>
+						<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+					</svg>
+					<div className="flex-1">
+						<div className="font-medium text-red-800 dark:text-red-200">
+							Paused by circuit breaker
+						</div>
+						{proposal?.gatePausedAt && (
+							<div className="text-sm text-red-700 dark:text-red-300 mt-1">
+								Paused at{" "}
+								{formatStoredUtcDateForDisplay(proposal.gatePausedAt)}
+								{proposal?.gatePausedReason && (
+									<>: {proposal.gatePausedReason}</>
+								)}
+							</div>
+						)}
+						{mode === "preview" && !isFromOtherBranch && (
+							<button
+								type="button"
+								onClick={async () => {
+									try {
+										await apiClient.updateProposal(proposal.id, {
+											gateScannerPaused: false,
+										});
+										onSaved?.();
+									} catch (err) {
+										console.error("Failed to unpause:", err);
+									}
+								}}
+								disabled={saving}
+								className="mt-2 px-3 py-1.5 text-sm font-medium text-white bg-red-600 dark:bg-red-700 hover:bg-red-700 dark:hover:bg-red-800 disabled:opacity-50 disabled:cursor-not-allowed rounded transition-colors"
+							>
+								Unpause and resume
+							</button>
+						)}
+					</div>
+				</div>
+			)}
+
+			{/* Schema drift callout */}
+			{(parseTags(proposal?.tags)?.schema_drift === true ||
+				parseTags(proposal?.tags)?.origin_unknown === true) && (
+				<div className="mb-4 flex items-start gap-3 px-4 py-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg">
+					<svg
+						className="w-5 h-5 flex-shrink-0 text-amber-600 dark:text-amber-400 mt-0.5"
+						fill="none"
+						stroke="currentColor"
+						viewBox="0 0 24 24"
+						aria-hidden="true"
+						focusable="false"
+					>
+						<path
+							strokeLinecap="round"
+							strokeLinejoin="round"
+							strokeWidth={2}
+							d="M12 9v2m0 4v2m0 0a9 9 0 11-18 0 9 9 0 0118 0z"
+						/>
+					</svg>
+					<div className="flex-1">
+						{parseTags(proposal?.tags)?.origin_unknown === true ? (
+							<div className="text-amber-800 dark:text-amber-200">
+								<div className="font-medium">
+									Origin could not be traced; needs operator triage
+								</div>
+							</div>
+						) : (
+							<div className="text-amber-800 dark:text-amber-200">
+								<div className="font-medium">Schema drift detected</div>
+								{proposal?.parentProposalId && (
+									<button
+										type="button"
+										onClick={() => {
+											// Parent link handling
+											// This would navigate to parent proposal details
+										}}
+										className="mt-2 text-amber-700 dark:text-amber-300 hover:underline text-sm font-medium"
+									>
+										View parent ({proposal.parentProposalId})
+									</button>
+								)}
+							</div>
+						)}
+					</div>
 				</div>
 			)}
 

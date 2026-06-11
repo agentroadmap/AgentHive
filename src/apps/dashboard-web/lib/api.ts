@@ -885,6 +885,33 @@ export class ApiClient {
 		);
 		return result.events ?? [];
 	}
+
+	// P705 Phase 4: Mark notification as seen
+	async markNotificationSeen(notificationId: string): Promise<{
+		success: boolean;
+		notification: {
+			id: string;
+			severity: string;
+			title: string;
+			message: string;
+			created_at: string;
+			seen: boolean;
+		};
+	}> {
+		return this.fetchJson<{
+			success: boolean;
+			notification: {
+				id: string;
+				severity: string;
+				title: string;
+				message: string;
+				created_at: string;
+				seen: boolean;
+			};
+		}>(`${API_BASE}/notifications/${encodeURIComponent(notificationId)}/seen`, {
+			method: "PATCH",
+		});
+	}
 }
 
 export const apiClient = new ApiClient();

@@ -36,10 +36,11 @@ async function ensureTable(): Promise<void> {
 			kind        text NOT NULL,
 			proposal_id bigint,
 			title       text NOT NULL,
+			message     text NOT NULL,
 			body        text NOT NULL,
 			payload     jsonb NOT NULL DEFAULT '{}'::jsonb,
 			created_at  timestamptz NOT NULL DEFAULT now(),
-			seen_at     timestamptz
+			seen        boolean NOT NULL DEFAULT false
 		)
 	`);
 	tableEnsured = true;
@@ -52,8 +53,8 @@ export const inAppTransport: NotificationTransport = {
 			await ensureTable();
 			await query(
 				`INSERT INTO roadmap.notification_inbox
-				 (queue_id, route_id, severity, kind, proposal_id, title, body, payload)
-				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+				 (queue_id, route_id, severity, kind, proposal_id, title, message, body, payload)
+				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)`,
 				[
 					envelope.queueId,
 					route.id,
@@ -61,6 +62,7 @@ export const inAppTransport: NotificationTransport = {
 					envelope.kind,
 					envelope.proposalId,
 					envelope.title,
+					envelope.body,
 					envelope.body,
 					JSON.stringify(envelope.payload),
 				],

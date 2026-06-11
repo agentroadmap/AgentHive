@@ -5,6 +5,7 @@ import {
 	formatStoredUtcDateForCompactDisplay,
 	parseStoredUtcDate,
 } from "../utils/date-display";
+import parseTags from "../utils/parseTags";
 
 interface ProposalsPageProps {
 	proposals?: Proposal[];
@@ -68,6 +69,8 @@ const ProposalsPage: React.FC<ProposalsPageProps> = ({
 	const [statusFilter, setStatusFilter] = useState("");
 	const [priorityFilter, setPriorityFilter] = useState("");
 	const [typeFilter, setTypeFilter] = useState("");
+	const [schemaDriftFilter, setSchemaDriftFilter] = useState(false);
+	const [pausedFilter, setPausedFilter] = useState(false);
 	const [sortColumn, setSortColumn] = useState<SortColumn>("id");
 	const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 	const [currentPage, setCurrentPage] = useState(1);
@@ -126,6 +129,14 @@ const ProposalsPage: React.FC<ProposalsPageProps> = ({
 			result = result.filter((p) => p.proposalType === typeFilter);
 		}
 
+		if (schemaDriftFilter) {
+			result = result.filter((p) => parseTags(p.tags)?.schema_drift === true);
+		}
+
+		if (pausedFilter) {
+			result = result.filter((p) => p.gatePausedBy === "circuit_breaker");
+		}
+
 		return [...result].sort((a, b) => {
 			let comparison = 0;
 			switch (sortColumn) {
@@ -163,6 +174,8 @@ const ProposalsPage: React.FC<ProposalsPageProps> = ({
 		statusFilter,
 		priorityFilter,
 		typeFilter,
+		schemaDriftFilter,
+		pausedFilter,
 		sortColumn,
 		sortDirection,
 	]);
@@ -189,6 +202,11 @@ const ProposalsPage: React.FC<ProposalsPageProps> = ({
 		return <span>{sortDirection === "asc" ? "↑" : "↓"}</span>;
 	};
 
+	// Count circuit-breaker paused proposals
+	const pausedCount = proposals.filter(
+		(p) => p.gatePausedBy === "circuit_breaker",
+	).length;
+
 	return (
 		<div className="space-y-4">
 			<div className="flex items-center justify-between">
@@ -196,6 +214,20 @@ const ProposalsPage: React.FC<ProposalsPageProps> = ({
 					Proposals ({filteredProposals.length})
 				</h1>
 			</div>
+
+			{/* Circuit-breaker banner */}
+			{pausedCount > 0 && (
+				<div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+					<button
+						type="button"
+						onClick={() => setPausedFilter(!pausedFilter)}
+						className="text-red-800 dark:text-red-200 font-medium text-sm hover:underline"
+					>
+						{pausedCount} proposal{pausedCount !== 1 ? "s" : ""} paused by circuit
+						breaker
+					</button>
+				</div>
+			)}
 
 			{/* Filters */}
 			<div className="flex flex-wrap items-center gap-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
@@ -242,7 +274,23 @@ const ProposalsPage: React.FC<ProposalsPageProps> = ({
 						))}
 					</select>
 				)}
-				{(filter || statusFilter || priorityFilter || typeFilter) && (
+				<button
+					type="button"
+					onClick={() => setSchemaDriftFilter(!schemaDriftFilter)}
+					className={`px-3 py-1.5 text-sm rounded border font-medium transition-colors ${
+						schemaDriftFilter
+							? "bg-amber-50 dark:bg-amber-900/20 border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-200"
+							: "bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600"
+					}`}
+				>
+					⚠ Schema drift
+				</button>
+				{(filter ||
+					statusFilter ||
+					priorityFilter ||
+					typeFilter ||
+					schemaDriftFilter ||
+					pausedFilter) && (
 					<button
 						type="button"
 						onClick={() => {
@@ -250,6 +298,8 @@ const ProposalsPage: React.FC<ProposalsPageProps> = ({
 							setStatusFilter("");
 							setPriorityFilter("");
 							setTypeFilter("");
+							setSchemaDriftFilter(false);
+							setPausedFilter(false);
 						}}
 						className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
 					>
@@ -357,8 +407,31 @@ const ProposalsPage: React.FC<ProposalsPageProps> = ({
 									<td className="px-4 py-3 font-mono text-xs text-gray-600 dark:text-gray-400">
 										{proposal.id}
 									</td>
-									<td className="px-4 py-3 text-gray-900 dark:text-gray-100 max-w-xs truncate">
-										{proposal.title}
+									<td className="px-4 py-3 text-gray-900 dark:text-gray-100 max-w-xs">
+										<div className="flex items-center gap-2">
+											<span className="truncate">{proposal.title}</span>
+											{parseTags(proposal.tags)?.schema_drift === true && (
+												<button
+													type="button"
+													onClick={(e) => {
+														e.stopPropagation();
+														onProposalClick?.(
+															proposal.parentProposalId
+																? proposals.find(
+																		(p) =>
+																			p.id ===
+																			proposal.parentProposalId,
+																	) || proposal
+																: proposal,
+														);
+													}}
+													className="flex-shrink-0 px-2 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded text-xs font-medium hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors"
+													title="Schema drift detected"
+												>
+													⚠ drift
+												</button>
+											)}
+										</div>
 									</td>
 									<td className="px-4 py-3">
 										<span

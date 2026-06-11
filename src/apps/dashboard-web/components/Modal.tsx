@@ -59,7 +59,7 @@ const Modal: React.FC<ModalProps> = ({
 			}}
 		>
 			<div
-				className={`bg-white dark:bg-gray-800 sm:rounded-lg shadow-2xl ${maxWidthClass} w-full max-h-full sm:max-h-[94vh] overflow-y-auto transition-colors duration-200`}
+				className={`bg-white dark:bg-gray-800 sm:rounded-lg shadow-2xl ${maxWidthClass} w-full max-h-full sm:max-h-[94dvh] overflow-y-auto transition-colors duration-200`}
 				style={{
 					touchAction: "pan-y",
 					overscrollBehavior: "contain",
@@ -68,7 +68,12 @@ const Modal: React.FC<ModalProps> = ({
 				aria-modal="true"
 				aria-labelledby="modal-title"
 			>
-				<div className="sticky top-0 z-10 flex items-center justify-between gap-2 px-3 sm:px-6 pt-3 sm:pt-4 pb-2 sm:pb-3 border-b border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-800/95 backdrop-blur supports-[backdrop-filter]:bg-white/75 supports-[backdrop-filter]:dark:bg-gray-800/75">
+				<div
+					className="sticky top-0 z-10 flex items-center justify-between gap-2 px-3 sm:px-6 pb-2 sm:pb-3 border-b border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-800/95 backdrop-blur supports-[backdrop-filter]:bg-white/75 supports-[backdrop-filter]:dark:bg-gray-800/75"
+					style={{
+						paddingTop: "max(0.75rem, max(0.75rem, env(safe-area-inset-top)))",
+					}}
+				>
 					<h2
 						id="modal-title"
 						className="text-base font-semibold text-gray-900 dark:text-gray-100 min-w-0 flex-1 truncate"

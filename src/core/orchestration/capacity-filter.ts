@@ -39,7 +39,7 @@ export async function computeCapacityScoreMultiplier(
 ): Promise<{ multiplier: number; score: CapacityScore }> {
   // Query agency_capacity for this (provider, model, agency_id) tuple
   const { rows } = await query(
-    `SELECT action:throttle_action, p_skip, headroom_pct, reset_at
+    `SELECT throttle_action, p_skip, headroom_pct, reset_at
      FROM roadmap_workforce.agency_capacity
      WHERE provider = $1 AND model = $2 AND agency_id = $3`,
     [provider, model, agencyId]
@@ -116,9 +116,15 @@ export async function logThrottleDecision(
   // The resolver must not wait on this
   query(
     `INSERT INTO roadmap.message_ledger (
-      message_type, metadata, project_id, created_at
-     ) VALUES ('throttle_decision', $1, $2, now())`,
-    [JSON.stringify(metadata), projectId]
+      from_agent, channel, message_type, metadata, project_id
+     ) VALUES ($1, $2, $3, $4, $5)`,
+    [
+      'system:orchestrator',
+      'system:capacity-throttle',
+      'throttle_decision',
+      JSON.stringify(metadata),
+      projectId || 1, // Default to control-plane project if not specified
+    ]
   ).catch((err) => {
     console.warn('[P1365] Failed to log throttle decision:', err);
   });
@@ -159,4 +165,76 @@ export async function filterByCapacity(
   }
 
   return results;
+}
+
+/**
+ * P1365-AC4/AC8: Check if an agency is hard-throttled for a given provider/model.
+ * Returns { isHardThrottled, score } for use in spawn path decision-making.
+ * Emits audit log entry when soft/hard actions are applied.
+ * P1365-AC9: Also applies soft-throttle cooldown to model_routes for P1359 coexistence.
+ *
+ * Integration point: agent-spawner.ts post-route-resolution, pre-spawn.
+ */
+export async function checkAgencyCapacity(
+  agencyIdentity: string | null | undefined,
+  provider: string,
+  model: string,
+  projectId: number | undefined
+): Promise<{ isHardThrottled: boolean; score: CapacityScore }> {
+  if (!agencyIdentity) {
+    return {
+      isHardThrottled: false,
+      score: {
+        action: 'none',
+        p_skip: 0,
+        headroom_pct: null,
+        reset_at: null,
+      },
+    };
+  }
+
+  try {
+    const { multiplier, score } = await computeCapacityScoreMultiplier(
+      agencyIdentity,
+      provider,
+      model
+    );
+
+    const isHardThrottled = multiplier === 0;
+
+    // Emit audit log for non-none actions (soft or hard throttle)
+    if (score.action !== 'none') {
+      await logThrottleDecision(
+        agencyIdentity,
+        provider,
+        model,
+        score,
+        projectId ? String(projectId) : null
+      );
+    }
+
+    // P1365-AC9: Apply soft-throttle cooldown to model_routes for P1359 coexistence
+    // Soft-throttled agencies should cause the route to be deprioritized
+    if (score.action === 'soft') {
+      const { setSoftThrottleCooldown } = await import('./provider-cooldown.ts');
+      await setSoftThrottleCooldown(provider, model, score.headroom_pct);
+    }
+
+    return { isHardThrottled, score };
+  } catch (err) {
+    console.error(
+      `[P1365] Failed to check capacity for agency ${agencyIdentity} on ${provider}/${model}:`,
+      err
+    );
+    // Fail open: assume healthy if capacity check fails
+    return {
+      isHardThrottled: false,
+      score: {
+        action: 'unknown',
+        p_skip: 0,
+        headroom_pct: null,
+        reset_at: null,
+      },
+    };
+  }
 }

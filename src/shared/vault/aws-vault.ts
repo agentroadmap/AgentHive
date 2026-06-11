@@ -24,6 +24,10 @@
 import type { VaultAdapter, SecretRef } from "./types.ts";
 import { VaultError } from "./types.ts";
 
+// Optional dependency: resolved at runtime only. The indirection keeps tsc from
+// requiring @aws-sdk/client-secrets-manager to be installed.
+const AWS_SDK_MODULE = "@aws-sdk/client-secrets-manager";
+
 export interface AwsVaultOptions {
 	/** AWS region, e.g. "us-east-1" */
 	region: string;
@@ -60,9 +64,7 @@ class AwsVaultImpl implements VaultAdapter {
 	private async getClient(): Promise<unknown> {
 		if (this.client) return this.client;
 		try {
-			const { SecretsManagerClient } = await import(
-				"@aws-sdk/client-secrets-manager"
-			);
+			const { SecretsManagerClient } = await import(AWS_SDK_MODULE as string);
 			this.client = new SecretsManagerClient({ region: this.region });
 			return this.client;
 		} catch {
@@ -74,9 +76,7 @@ class AwsVaultImpl implements VaultAdapter {
 		const secretName = this.extractName(ref, "read");
 		const client = await this.getClient();
 		try {
-			const { GetSecretValueCommand } = await import(
-				"@aws-sdk/client-secrets-manager"
-			);
+			const { GetSecretValueCommand } = await import(AWS_SDK_MODULE as string);
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			const result = await (client as any).send(
 				new GetSecretValueCommand({ SecretId: secretName }),
@@ -103,9 +103,7 @@ class AwsVaultImpl implements VaultAdapter {
 		const secretName = this.extractName(ref, "write");
 		const client = await this.getClient();
 		try {
-			const { PutSecretValueCommand } = await import(
-				"@aws-sdk/client-secrets-manager"
-			);
+			const { PutSecretValueCommand } = await import(AWS_SDK_MODULE as string);
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			await (client as any).send(
 				new PutSecretValueCommand({
@@ -131,9 +129,7 @@ class AwsVaultImpl implements VaultAdapter {
 		const secretName = this.extractName(ref, "exists");
 		const client = await this.getClient();
 		try {
-			const { DescribeSecretCommand } = await import(
-				"@aws-sdk/client-secrets-manager"
-			);
+			const { DescribeSecretCommand } = await import(AWS_SDK_MODULE as string);
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			await (client as any).send(
 				new DescribeSecretCommand({ SecretId: secretName }),
