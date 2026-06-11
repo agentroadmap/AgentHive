@@ -619,7 +619,10 @@ export async function runUnifiedView(
 						        sd.proposal_id,
 						        p.display_id AS current_proposal,
 						        p.title      AS current_title,
-						        sd.dispatch_role
+						        sd.dispatch_role,
+						        ac.headroom_pct,
+						        ac.throttle_action,
+						        ac.reset_at
 						 FROM roadmap_workforce.agent_registry ar
 						 LEFT JOIN roadmap.agency a
 						   ON a.display_name = ar.agent_identity
@@ -632,6 +635,9 @@ export async function runUnifiedView(
 						   ORDER BY assigned_at DESC LIMIT 1
 						 ) sd ON true
 						 LEFT JOIN roadmap_proposal.proposal p ON p.id = sd.proposal_id
+						 LEFT JOIN roadmap_workforce.agency_capacity ac
+						   ON ac.provider = ar.preferred_provider
+						   AND ac.agency_id = ar.agent_identity
 						 WHERE ar.status = 'active'
 						   AND ar.agent_type = 'agency'
 						   AND ar.preferred_provider IS NOT NULL
@@ -690,6 +696,13 @@ export async function runUnifiedView(
 							isThrottled       ? "throttled"
 							: isOfflinePresence ? "offline"
 							:                    "active";
+						// P1365-AC6: Extract capacity data
+						const capacityResetMs = row.reset_at
+							? new Date(row.reset_at).getTime()
+							: null;
+						const capacityHeadroom = row.headroom_pct !== null && row.headroom_pct !== undefined
+							? parseFloat(row.headroom_pct)
+							: null;
 						return {
 							id: row.display_name,
 							name: row.display_name,
@@ -702,6 +715,10 @@ export async function runUnifiedView(
 								: undefined,
 							statusMessage: row.presence_state ?? "",
 							lastSeen: row.last_heartbeat_at ? new Date(row.last_heartbeat_at).getTime() : Date.now(),
+							// P1365-AC6: Capacity fields
+							capacityHeadroomPct: capacityHeadroom,
+							capacityThrottleAction: row.throttle_action ?? null,
+							capacityResetAt: capacityResetMs,
 						};
 					});
 

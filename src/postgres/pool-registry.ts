@@ -15,6 +15,7 @@
 import { Client, Pool } from "pg";
 import { PoolAccessDenied } from "../infra/postgres/pool";
 import { agentContextStorage } from "../shared/identity/agent-context";
+import { getVault as getSharedVault } from "../shared/vault/index.ts";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -153,7 +154,8 @@ export interface VaultInterface {
 }
 
 // Default vault: resolves DSN from process.env by ref name.
-// Replace via setVault() when P496 (real vault) lands.
+// This is the fallback for refs that don't match any vault:// scheme or when
+// no vault backend is configured.
 const envVault: VaultInterface = {
 	async read(ref: string): Promise<string> {
 		const val = process.env[ref];
@@ -167,13 +169,47 @@ const envVault: VaultInterface = {
 	},
 };
 
-let _vault: VaultInterface = envVault;
+let _vault: VaultInterface | null = null;
 
 export function setVault(v: VaultInterface): void {
 	_vault = v;
 }
 
+/**
+ * Bridge adapter: routes vault:// refs to the shared vault chooser, falls back
+ * to envVault for plain environment variable names.
+ *
+ * This pattern ensures:
+ * - vault:// refs (vault://file/, vault://hcv/, vault://aws/) are routed to adapters
+ * - Plain refs like "AUDIOBOOK_DSN" are read from process.env (backward compatible)
+ * - Errors on vault:// refs are fatal; errors on plain refs fall through to envVault
+ *
+ * P515 AC-6: Provides graceful degradation when vault adapters are unavailable —
+ * plain env var refs continue to work, vault:// refs that require a configured
+ * backend fail with clear errors.
+ */
+function createBridgeAdapter(sharedVault: VaultInterface): VaultInterface {
+	return {
+		async read(ref: string): Promise<string> {
+			// Route vault:// scheme refs to the shared vault chooser
+			if (ref.startsWith("vault://")) {
+				return sharedVault.read(ref);
+			}
+			// Plain env var name fallback
+			return envVault.read(ref);
+		},
+	};
+}
+
+/**
+ * Returns the configured vault, lazily initializing on first call.
+ * Lazy init ensures vault environment variables (AGENTHIVE_VAULT_KIND,
+ * AGENTHIVE_HCV_ADDR, etc.) are read at pool-resolution time, not module-load.
+ */
 function getVault(): VaultInterface {
+	if (!_vault) {
+		_vault = createBridgeAdapter(getSharedVault());
+	}
 	return _vault;
 }
 

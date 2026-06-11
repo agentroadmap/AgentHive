@@ -271,11 +271,20 @@ export class OfferProvider {
 		// child runs in legacy "blind" mode with only the task prompt.
 		const briefingId = asString(meta.briefing_id) ?? undefined;
 
-		// Generate ephemeral worker identity for this dispatch
-		const workerIdentity = `${this.agentIdentity}/worker-${dispatch_id}`;
+		// P1068 AC-8: Generate structured worker identity with format <agency_slug>/<provider>/<role>
+		// Agency slug is the core identity (without worker suffix)
+		// Provider comes from the claimed route
+		// Role is the dispatch_role from the work offer
+		const agencySlug = this.agentIdentity.includes("/")
+			? this.agentIdentity.split("/").slice(0, -1).join("/")  // Remove worker suffix if present
+			: this.agentIdentity;
+
+		const provider = claim.route_provider || "unknown";
+		const role = dispatch_role || "unspecified";
+		const workerIdentity = `${agencySlug}/${provider}/${role}`;
 
 		this.logger.log(
-			`[OfferProvider] Claimed dispatch ${dispatch_id} (${dispatch_role}) for proposal ${proposal_id} — worker: ${workerIdentity}${claim.route_provider ? ` route: ${claim.route_provider}` : ""}`,
+			`[OfferProvider AC-8] Claimed dispatch ${dispatch_id} (${dispatch_role}) for proposal ${proposal_id} — worker: ${workerIdentity}`,
 		);
 
 		// Register worker in agent_registry

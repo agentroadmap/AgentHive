@@ -138,11 +138,11 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 	}
 
 	async dispatch(claim: ClaimedOffer): Promise<void> {
-		// P1386 Layer 1: skip spawn entirely when architect has no design work.
+		// P1386 AC-5 Layer 1: skip spawn entirely when a role's early-exit predicate matches.
 		// Predicate is evaluated mechanically via SQL function and writes a
 		// synthetic agent_runs row + completes the offer with status='success'.
 		// Failure of the precondition query falls through to normal dispatch.
-		if (await this.tryArchitectEarlyExit(claim)) {
+		if (await this.tryRoleEarlyExit(claim)) {
 			return;
 		}
 
@@ -256,40 +256,65 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 	}
 
 	/**
-	 * P1386 AC-2 (Layer 1): pre-spawn early-exit for the architect role when
-	 * the proposal has no design work outstanding.
+	 * P1386 AC-2 & AC-5 (Layer 1): pre-spawn early-exit when a role's precondition is met.
 	 *
-	 * Evaluates `roadmap_proposal.v_architect_early_exit(proposal_id)` (defined
-	 * in migration 140). If true, writes a synthetic agent_runs completion row
+	 * Looks up role in roadmap_proposal.role_early_exit_predicate; if found, evaluates
+	 * the predicate function. If true, writes a synthetic agent_runs completion row
 	 * and completes the offer with status='success' — no agency dispatch, no
 	 * 5-min idle spawn, no SIGTERM, no pause-counter increment.
 	 *
 	 * Returns true when the dispatcher should NOT continue to pickAgency.
 	 *
 	 * Failure modes (all fail-open to normal dispatch):
+	 *   - role not in predicate table → false (no early-exit for this role)
 	 *   - predicate query errors (e.g. function not yet migrated) → false
 	 *   - agent_runs telemetry write errors → logged, offer still completed
 	 *
 	 * Telemetry: each early-exit writes one agent_runs row with
-	 * status='completed', activity='early-exit', output_summary='early-exit:
-	 * no design work', duration_ms=0. Operators can count savings via
-	 *   SELECT count(*) FROM agent_runs WHERE activity='early-exit'.
+	 * status='completed', activity='early-exit', output_summary='early-exit: <reason>',
+	 * duration_ms=0. Operators can count savings via
+	 *   SELECT count(*) FROM agent_runs WHERE output_summary LIKE 'early-exit:%'.
+	 *
+	 * AC-5 (generalization): This method is role-agnostic and reads the predicate
+	 * name from the mapping table, allowing other roles (e.g., skeptic-beta) to
+	 * define their own early-exit predicates without code changes here.
 	 */
-	private async tryArchitectEarlyExit(claim: ClaimedOffer): Promise<boolean> {
-		if (claim.role.toLowerCase() !== "architect") {
+	private async tryRoleEarlyExit(claim: ClaimedOffer): Promise<boolean> {
+		let predicateName: string | null = null;
+		try {
+			const { rows } = await query<{ predicate_name: string | null }>(
+				`SELECT predicate_name FROM roadmap_proposal.role_early_exit_predicate
+				 WHERE role = $1`,
+				[claim.role.toLowerCase()],
+			);
+			predicateName = rows[0]?.predicate_name ?? null;
+		} catch (err) {
+			this.logger.warn(
+				`[OfferDispatch] P1386 AC-5 predicate lookup failed for role=${claim.role}, falling through to normal dispatch:`,
+				err instanceof Error ? err.message : err,
+			);
+			return false;
+		}
+
+		if (!predicateName) {
 			return false;
 		}
 
 		let earlyExitEligible = false;
+		let exitReason = "unknown";
 		try {
+			// Dynamically invoke the predicate function (e.g., roadmap_proposal.v_architect_early_exit)
 			const { rows } = await query<{ ok: boolean }>(
-				`SELECT roadmap_proposal.v_architect_early_exit($1) AS ok`,
+				`SELECT ${predicateName}($1) AS ok`,
 				[claim.proposalId],
 			);
 			earlyExitEligible = rows[0]?.ok === true;
+			if (earlyExitEligible) {
+				exitReason = `${claim.role} precondition met`;
+			}
 		} catch (err) {
 			this.logger.warn(
-				`[OfferDispatch] P1386 precondition query failed for proposal=${claim.proposalId}, falling through to normal dispatch:`,
+				`[OfferDispatch] P1386 AC-5 predicate evaluation failed for role=${claim.role}, proposal=${claim.proposalId}, falling through to normal dispatch:`,
 				err instanceof Error ? err.message : err,
 			);
 			return false;
@@ -315,14 +340,14 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 				`UPDATE agent_runs
 				    SET status         = 'completed',
 				        duration_ms    = 0,
-				        output_summary = 'early-exit: no design work',
+				        output_summary = $1,
 				        completed_at   = now()
-				  WHERE id = $1`,
-				[agentRunId],
+				  WHERE id = $2`,
+				[`early-exit: ${exitReason}`, agentRunId],
 			);
 		} catch (err) {
 			this.logger.error(
-				`[OfferDispatch] P1386 telemetry write failed for proposal=${claim.proposalId} (continuing with offer completion):`,
+				`[OfferDispatch] P1386 AC-5 telemetry write failed for proposal=${claim.proposalId} (continuing with offer completion):`,
 				err instanceof Error ? err.message : err,
 			);
 		}
@@ -333,7 +358,7 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 		);
 
 		this.logger.log(
-			`[OfferDispatch] P1386 early-exit: architect on proposal=${claim.proposalId} has no design work; offer=${claim.offerId} completed as no-op (agent_run=${agentRunId ?? "skipped"})`,
+			`[OfferDispatch] P1386 AC-5 early-exit: ${claim.role} on proposal=${claim.proposalId} (${exitReason}); offer=${claim.offerId} completed as no-op (agent_run=${agentRunId ?? "skipped"})`,
 		);
 
 		return true;
