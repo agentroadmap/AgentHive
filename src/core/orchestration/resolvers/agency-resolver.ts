@@ -44,6 +44,38 @@ export interface AgencyCandidate {
 	lastSeenAt: Date | null;
 	maxInFlight: number;
 	inFlightCount: number;
+	/** P1351 AC-6: agency chain for nested agencies [parent_id, ..., leaf_id] */
+	agencyChain?: string[];
+}
+
+/**
+ * P1351 AC-6: Build the agency chain from leaf to root by walking parent_agency_id.
+ * Returns [parent_id, ..., leaf_id] for nested agencies, or [agency_id] for root agencies.
+ */
+export async function buildAgencyChain(agencyId: string): Promise<string[]> {
+	const chain: string[] = [];
+	let currentId: string | null = agencyId;
+
+	// Walk up the parent chain (max 100 levels to prevent infinite loops)
+	for (let depth = 0; depth < 100 && currentId; depth++) {
+		const { rows } = await query<{
+			agency_id: string;
+			parent_agency_id: string | null;
+		}>(
+			`SELECT agency_id, parent_agency_id FROM roadmap.agency WHERE agency_id = $1`,
+			[currentId],
+		);
+
+		if (!rows.length) break;
+
+		const row = rows[0];
+		chain.unshift(row.agency_id); // prepend to build top-down order
+
+		if (!row.parent_agency_id) break; // reached root
+		currentId = row.parent_agency_id;
+	}
+
+	return chain.length > 0 ? chain : [agencyId];
 }
 
 /**
@@ -55,6 +87,8 @@ export interface AgencyCandidate {
  * V3-C8 (P1440): Supports capability matching — filters agencies by required_capabilities.
  * If requiredCapabilities is provided, only returns agencies whose capabilities
  * are a SUPERSET of the required set. On no match, emits an escalation with evidence.
+ *
+ * P1351 AC-6: Includes agency_chain (parent..leaf) in the returned candidate.
  *
  * TODO P1365-AC4/AC8: Integrate capacity filtering
  * - LEFT JOIN roadmap_workforce.agency_capacity on (provider, model, agency_id)
@@ -134,6 +168,9 @@ export async function resolveAgency(
 		}
 	}
 
+	// P1351 AC-6: build agency chain for nested agencies
+	const agencyChain = await buildAgencyChain(row.agency_identity);
+
 	return {
 		id: BigInt(row.id),
 		agencyId: BigInt(row.agency_id),
@@ -144,6 +181,7 @@ export async function resolveAgency(
 		lastSeenAt: row.last_seen_at,
 		maxInFlight: row.max_in_flight,
 		inFlightCount: Number(row.in_flight_count),
+		agencyChain,
 	};
 }
 
