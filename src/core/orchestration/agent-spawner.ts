@@ -2232,7 +2232,7 @@ function runProcess(
 		let cleanupMcpTimeout: (() => void) | null = null;
 		if (opts?.agentRunId && opts?.worktree && env.MCP_URL) {
 			const mcpConnectTimeout = Number(
-				env.AGENTHIVE_MCP_CONNECT_TIMEOUT_MS ?? "90000",
+				process.env.AGENTHIVE_MCP_CONNECT_TIMEOUT_MS ?? "90000",
 			);
 			console.error(
 				`[AgentSpawner] P1730: MCP connect timeout enabled: ${mcpConnectTimeout}ms`,
