@@ -9,6 +9,7 @@ import { resolveContext } from "./common/context.ts";
 import { registerDoctor } from "./commands/doctor.ts";
 import { registerContext } from "./commands/context-cmd.ts";
 import { registerSla } from "./commands/sla.ts";
+import { registerCost } from "./commands/cost.ts";
 import { getCliSchema, RECIPES, CLI_VERSION } from "./schema.ts";
 import { EXIT } from "./common/exit-codes.ts";
 
@@ -110,6 +111,8 @@ registerDoctor(program, getContext);
 registerContext(program, getContext);
 // P081: SLA health check
 registerSla(program, getContext);
+// P1018: Cost breakdown by proposal and stage
+registerCost(program);
 
 // Parse args early to detect --schema / --recipes before Commander tries to route.
 const rawArgs = process.argv.slice(2);
