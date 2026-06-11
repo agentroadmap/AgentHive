@@ -1453,17 +1453,70 @@ export async function spawnWithRetry(
 		}
 		const cooldownReason = lastResult.stderr?.slice(0, 500) || lastResult.stdout?.slice(0, 500) || "quota_exhausted";
 
-		try {
-			if (exitClass.quotaErrorProvider === "claude") {
-				// P1682: claude CLI subscription limit is account-wide — cool the whole
-				// `claude` CLI route family (routes sharing one OAuth account), not just
-				// the single (provider,model) that happened to be picked this spawn.
-				await setCliFamilyCooldown("claude", cooldownMinutes, cooldownReason);
-			} else {
-				await setModelCooldown(provider, modelName, cooldownMinutes, cooldownReason);
+		// P1682 AC-4 & AC-9: Decision fork — hold vs cooldown based on reset duration
+		// Read thresholds from env (AC-6); defaults chosen for rapid re-probe vs over-wait
+		const HOLD_WINDOW_MAX_SEC = Number(
+			process.env.AGENTHIVE_HOLD_WINDOW_MAX_SEC ?? 1800,
+		); // default 30min
+		const CLAUDE_CLI_DEFAULT_COOLDOWN_SEC = Number(
+			process.env.AGENTHIVE_CLAUDE_CLI_DEFAULT_COOLDOWN_SEC ?? 3600,
+		); // default 1h
+		const LONG_LIMIT_COOLDOWN_SEC = Number(
+			process.env.AGENTHIVE_LONG_LIMIT_COOLDOWN_SEC ?? 86400,
+		); // default 24h
+
+		// Measure the time until reset
+		const deltaMs = (exitClass.resetAt?.getTime() ?? Date.now() + CLAUDE_CLI_DEFAULT_COOLDOWN_SEC * 1000) - Date.now();
+		const deltaSec = Math.ceil(deltaMs / 1000);
+
+		// AC-9: If reset is unparseable or beyond HOLD_WINDOW, use provider-level cooldown
+		if (deltaSec > HOLD_WINDOW_MAX_SEC || !exitClass.resetAt) {
+			// Long reset or unparseable: set provider-level cooldown (not hold)
+			const longCooldownMinutes = Math.min(
+				MAX_COOLDOWN_MINUTES,
+				Math.ceil(LONG_LIMIT_COOLDOWN_SEC / 60),
+			);
+			try {
+				if (exitClass.quotaErrorProvider === "claude") {
+					await setCliFamilyCooldown(
+						"claude",
+						longCooldownMinutes,
+						`${cooldownReason} [long_reset_exceeded_hold_window]`,
+					);
+				} else {
+					await setModelCooldown(
+						provider,
+						modelName,
+						longCooldownMinutes,
+						`${cooldownReason} [long_reset_exceeded_hold_window]`,
+					);
+				}
+			} catch (err) {
+				console.error(
+					`[P1682] Failed to set long-reset cooldown for ${provider}/${modelName}:`,
+					err,
+				);
 			}
-		} catch (err) {
-			console.error(`[P1359] Failed to set model cooldown for ${provider}/${modelName}:`, err);
+			// Return failure; do NOT call recordProviderHardLimit or fn_return_work_offer
+			return lastResult;
+		}
+
+		// AC-4 & AC-5: Short reset (<= HOLD_WINDOW) — place in hold state if we have a reset time
+		if (exitClass.quotaErrorProvider === "claude" && exitClass.resetAt) {
+			try {
+				// For claude CLI: also set route cooldown so new spawns don't immediately fail again
+				await setCliFamilyCooldown("claude", cooldownMinutes, cooldownReason);
+			} catch (err) {
+				console.error(`[P1682] Failed to set model cooldown for claude:`, err);
+			}
+			// Note: recordProviderHardLimit() is called in offer-dispatch-handler.ts
+			// after the spawn is claimed (not here). We just set the route cooldown.
+		} else {
+			try {
+				await setModelCooldown(provider, modelName, cooldownMinutes, cooldownReason);
+			} catch (err) {
+				console.error(`[P1359] Failed to set model cooldown for ${provider}/${modelName}:`, err);
+			}
 		}
 
 		// Re-resolve route applying Layer 6 cooldown filter

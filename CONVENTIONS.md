@@ -1390,6 +1390,34 @@ All PostgreSQL connection parameters **must** be read through `ConfigResolver`, 
 
 This is enforced automatically — violations will fail the CI check.
 
+## 20. Duration-Aware Usage-Limit Handling (P1682)
+
+When a provider signals a usage/quota limit has been reached, the framework places the dispatch in a **hold state** rather than failing it immediately. This allows the dispatch to be automatically re-attempted after a cooldown period expires.
+
+### Environment Variables
+
+| Variable | Type | Default | Purpose |
+| :--- | :---: | ---: | :--- |
+| `AGENTHIVE_HOLD_WINDOW_MAX_SEC` | integer | `1800` | Maximum duration (seconds) a dispatch can remain held at provider limit before automatic wake. After this window expires, the dispatch is eligible for redispatch even if the provider signal suggests a longer cooldown. Safety valve to prevent indefinite holds. |
+| `AGENTHIVE_CLAUDE_CLI_DEFAULT_COOLDOWN_SEC` | integer | `3600` | Default cooldown duration (seconds) applied when the claude CLI provider signals a usage limit. Typically one hour; overridable per provider via `provider_cooldown_map` in `src/core/orchestration/agent-spawner.ts`. |
+| `AGENTHIVE_LONG_LIMIT_COOLDOWN_SEC` | integer | `86400` | Extended cooldown duration (seconds) for long-term limits or hard quota exhaustion (e.g., daily/weekly/monthly caps). Typically 24 hours; allows the provider's quota window to reset. |
+
+### Behavior
+
+1. **Hold placement** (`recordProviderHardLimit`): When a dispatch fails due to provider quota limit, the framework sets `paused_at_provider_limit = true` and records `metadata.resume_eligible_at = now() + cooldown_seconds`.
+2. **Capacity exclusion** (AC-8): Held dispatches do NOT count toward `max_in_flight` capacity. The in-flight query filters: `AND (paused_at_provider_limit = false OR paused_at_provider_limit IS NULL)`.
+3. **Automatic wake** (`reap-stale-rows.ts`): A background sweep periodically checks if `resume_eligible_at` has expired and clears `paused_at_provider_limit = false` to re-enable the dispatch for claiming.
+4. **Dispatch reaper exemption**: The stale-dispatch reaper (which deletes very old dispatches) excludes held rows: `AND paused_at_provider_limit IS NOT TRUE`.
+
+### AC-5 Verification (Wake-to-Redispatch Path)
+
+The integration test verifies the complete wake cycle:
+- Dispatch is held with `paused_at_provider_limit = true` and `resume_eligible_at` set
+- After cooldown expires, the reaper clears `paused_at_provider_limit = false`
+- The dispatch becomes claimable again and can be dispatched to a fresh attempt
+
+---
+
 ## §model-capability-scores — AC-10 (P1006)
 
 All entries in `roadmap_workforce.model_capability_profile` score each capability dimension on a 0–5 integer scale:
