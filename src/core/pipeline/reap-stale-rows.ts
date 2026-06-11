@@ -26,6 +26,7 @@ export interface ReapResult {
 	pokeAttemptsPruned: number;
 	lifecycleLogPruned: number;
 	scratchDirs: number;
+	holdWakesCleared: number;
 }
 
 const LEASE_STALE_MIN = 10;
@@ -57,6 +58,7 @@ export async function reapStaleRows(
 		pokeAttemptsPruned: 0,
 		lifecycleLogPruned: 0,
 		scratchDirs: 0,
+		holdWakesCleared: 0,
 	};
 
 	// P404: two-phase boot scan — dry-run first (audit log), then real reap.
@@ -144,6 +146,7 @@ export async function reapStaleRows(
 			   AND assigned_at IS NOT NULL
 			   AND assigned_at < now() - ($1 || ' min')::interval
 			   AND completed_at IS NULL
+			   AND paused_at_provider_limit IS NOT TRUE
 			   AND NOT EXISTS (
 			     SELECT 1 FROM roadmap.liaison_poke_attempt lpa
 			     WHERE lpa.agency_id = sd.agent_identity
@@ -176,6 +179,26 @@ export async function reapStaleRows(
 	} catch (err) {
 		logger.warn(
 			`[${tag}] blocked dispatch reap failed: ${err instanceof Error ? err.message : String(err)}`,
+		);
+	}
+
+	// P1682 AC-5: Wake sweep — clear paused_at_provider_limit for holds that have expired
+	// Held dispatches have paused_at_provider_limit=true and metadata.resume_eligible_at set.
+	// When resume_eligible_at <= now(), the hold window has passed and dispatch can proceed.
+	try {
+		const r = await pool.query(
+			`UPDATE roadmap_workforce.squad_dispatch
+			 SET paused_at_provider_limit = false,
+			     metadata = COALESCE(metadata,'{}'::jsonb) || jsonb_build_object('hold_woken_at', to_jsonb(now()::text))
+			 WHERE paused_at_provider_limit = true
+			   AND (metadata->>'resume_eligible_at')::timestamp WITH TIME ZONE <= now()
+			   AND dispatch_status IN ('claimed','assigned','active')
+			 RETURNING id`,
+		);
+		result.holdWakesCleared = r.rowCount ?? 0;
+	} catch (err) {
+		logger.warn(
+			`[${tag}] P1682 AC-5 hold wake sweep failed: ${err instanceof Error ? err.message : String(err)}`,
 		);
 	}
 
@@ -263,10 +286,11 @@ export async function reapStaleRows(
 		result.sequencesRealigned ||
 		result.pokeAttemptsPruned ||
 		result.lifecycleLogPruned ||
-		result.scratchDirs
+		result.scratchDirs ||
+		result.holdWakesCleared
 	) {
 		logger.log(
-			`[${tag}] reaped: ${result.leases} lease(s), ${result.dispatches} dispatch(es), ${result.zombieRunsTimedOut} zombie run(s), ${result.sequencesRealigned} sequence(s) realigned, ${result.pokeAttemptsPruned} poke_attempt(s) pruned, ${result.lifecycleLogPruned} lifecycle_log row(s) pruned, ${result.scratchDirs} scratch dir(s) reaped`,
+			`[${tag}] reaped: ${result.leases} lease(s), ${result.dispatches} dispatch(es), ${result.zombieRunsTimedOut} zombie run(s), ${result.sequencesRealigned} sequence(s) realigned, ${result.pokeAttemptsPruned} poke_attempt(s) pruned, ${result.lifecycleLogPruned} lifecycle_log row(s) pruned, ${result.scratchDirs} scratch dir(s) reaped, ${result.holdWakesCleared} hold(s) woken`,
 		);
 	} else {
 		logger.log(`[${tag}] no stale rows`);

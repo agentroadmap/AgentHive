@@ -40,8 +40,10 @@ import { ObservabilityWriter } from "../../core/observability/observability-writ
 import {
 	evaluateSubscriptionPolicy,
 	declareThrottle,
+	recordProviderHardLimit,
 } from "./subscription-policy.ts";
 import { recordSpawnUsage } from "./record-spawn-usage.ts";
+import { classifyExit, detectProviderQuotaSignal } from "../../core/orchestration/agent-spawner.ts";
 
 const obs = new ObservabilityWriter("agency:offer-dispatch-handler");
 
@@ -632,19 +634,63 @@ async function runSpawn(args: {
 		});
 	}
 
-	try {
-		await exec(
-			`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, $4)`,
-			[dispatchId, agencyId, claimToken, status],
-		);
-		logger.log(
-			`[OfferDispatchHandler] ${agencyId}: offer=${payload.offer_id} ${status} (exit=${result?.exitCode ?? "n/a"})`,
-		);
-	} catch (completionErr) {
-		logger.error(
-			`[OfferDispatchHandler] ${agencyId}: fn_complete_work_offer failed for offer ${payload.offer_id} — lease will time out and reaper will requeue:`,
-			completionErr instanceof Error ? completionErr.message : completionErr,
-		);
+	// P1682 AC-4: Detect rate_limited exit and decide hold vs provider cooldown
+	// If the spawn failed with a quota signal, classify the exit and measure the reset duration
+	let holdPlaced = false;
+	if (!succeeded && result) {
+		const exitClass = classifyExit(result.stdout, result.stderr, result.exitCode);
+		if (exitClass.outcome === "rate_limited" && exitClass.resetAt && exitClass.quotaErrorProvider) {
+			const HOLD_WINDOW_MAX_SEC = Number(
+				process.env.AGENTHIVE_HOLD_WINDOW_MAX_SEC ?? 1800,
+			); // default 30min
+			const deltaMs = exitClass.resetAt.getTime() - Date.now();
+			const deltaSec = Math.ceil(deltaMs / 1000);
+
+			// AC-4 & AC-5: Short reset (<= HOLD_WINDOW_MAX_SEC) — place in hold state
+			// AC-8: Held dispatch is NOT marked failed, NOT increments failure_count
+			if (deltaSec <= HOLD_WINDOW_MAX_SEC) {
+				try {
+					await recordProviderHardLimit(agencyId, dispatchId, exitClass.resetAt, exec);
+					holdPlaced = true;
+					logger.log(
+						`[OfferDispatchHandler] ${agencyId}: P1682 AC-4 hold placed — paused_at_provider_limit=true, resume_eligible_at=${exitClass.resetAt.toISOString()}, deltaSec=${deltaSec}`,
+					);
+					// AC-8: Skip fn_complete_work_offer for held dispatches — lease remains
+					// active and will be cleared by wake sweep when resume_eligible_at expires
+				} catch (err) {
+					logger.error(
+						`[OfferDispatchHandler] ${agencyId}: recordProviderHardLimit failed for offer=${payload.offer_id}:`,
+						err instanceof Error ? err.message : err,
+					);
+					// Fall through to fn_complete_work_offer with "failed" status on error
+				}
+			} else {
+				// Long reset (>= HOLD_WINDOW_MAX_SEC) — route/provider cooldown already set in spawnWithRetry
+				logger.log(
+					`[OfferDispatchHandler] ${agencyId}: P1682 AC-9 long reset — deltaSec=${deltaSec} exceeds HOLD_WINDOW_MAX_SEC=${HOLD_WINDOW_MAX_SEC}, cooldown already applied`,
+				);
+			}
+		}
+	}
+
+	// Only call fn_complete_work_offer if we did NOT place a hold
+	// Held dispatches remain in 'claimed' state with paused_at_provider_limit=true
+	// and will be woken by the reaper when resume_eligible_at expires
+	if (!holdPlaced) {
+		try {
+			await exec(
+				`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, $4)`,
+				[dispatchId, agencyId, claimToken, status],
+			);
+			logger.log(
+				`[OfferDispatchHandler] ${agencyId}: offer=${payload.offer_id} ${status} (exit=${result?.exitCode ?? "n/a"})`,
+			);
+		} catch (completionErr) {
+			logger.error(
+				`[OfferDispatchHandler] ${agencyId}: fn_complete_work_offer failed for offer ${payload.offer_id} — lease will time out and reaper will requeue:`,
+				completionErr instanceof Error ? completionErr.message : completionErr,
+			);
+		}
 	}
 
 	// P908-D: close the lifecycle span now that fn_complete_work_offer has run.
