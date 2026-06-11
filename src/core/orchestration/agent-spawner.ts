@@ -69,6 +69,12 @@ import {
 	buildContextPackage,
 	type PackageType,
 } from "../../infra/agency/context_builder.ts";
+import {
+	wrapMcpInitTimeout,
+	getMcpInitDiagnostics,
+	getMcpInitDiagnosisReport,
+	type McpInitTiming,
+} from "./mcp-init-wrapper.ts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -1776,6 +1782,10 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		processEnv,
 		timeoutMs,
 		stdin,
+		{
+			agentRunId,
+			worktree,
+		},
 	).finally(() => {
 		// Best-effort immediate reap; the 15-min cron sweep covers SIGKILL/crash cases.
 		reapScratch(scratchUuid).catch((err: unknown) => {
@@ -2085,6 +2095,7 @@ function runProcess(
 	env: Record<string, string>,
 	timeoutMs: number,
 	stdin?: string,
+	opts?: { agentRunId?: string; worktree?: string },
 ): Promise<ProcessResult> {
 	return new Promise((resolve) => {
 		const [cmd, ...args] = argv;
@@ -2116,6 +2127,23 @@ function runProcess(
 		child.stderr?.on("data", (d: Buffer) => {
 			stderr += d.toString();
 		});
+
+		// P1730 AC-1: instrument MCP init with separate timeout
+		let cleanupMcpTimeout: (() => void) | null = null;
+		if (opts?.agentRunId && opts?.worktree && env.MCP_URL) {
+			const mcpConnectTimeout = Number(
+				env.AGENTHIVE_MCP_CONNECT_TIMEOUT_MS ?? "90000",
+			);
+			console.error(
+				`[AgentSpawner] P1730: MCP connect timeout enabled: ${mcpConnectTimeout}ms`,
+			);
+			cleanupMcpTimeout = wrapMcpInitTimeout(
+				child,
+				opts.agentRunId,
+				opts.worktree,
+				mcpConnectTimeout,
+			);
+		}
 
 		if (stdin !== undefined) {
 			child.stdin?.end(stdin);
@@ -2150,6 +2178,7 @@ function runProcess(
 		const cleanup = () => {
 			clearTimeout(timer);
 			if (killTimer) clearTimeout(killTimer);
+			if (cleanupMcpTimeout) cleanupMcpTimeout();
 			// liveChildren removal is handled by the once("close"/"error") listeners
 			// registered by trackLiveChild(); no manual delete needed here.
 		};
@@ -2275,3 +2304,19 @@ export function softSortProviderHealthCandidates<T extends { route_provider: str
 	}
 	return [...rows].sort((a, b) => rank(a) - rank(b));
 }
+
+// ─── P1730: MCP Init Diagnostics (AC-1) ────────────────────────────────────────
+
+/**
+ * Export MCP init diagnostics for AC-1 diagnosis reporting.
+ * Used by operators to understand whether MCP init contention is the bottleneck.
+ */
+export function getMcpInitDiagnosticsReport(): string {
+	return getMcpInitDiagnosisReport();
+}
+
+export function getMcpInitPerformanceSnapshot() {
+	return getMcpInitDiagnostics();
+}
+
+export type { McpInitTiming } from "./mcp-init-wrapper.ts";
