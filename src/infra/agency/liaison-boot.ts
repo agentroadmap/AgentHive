@@ -29,6 +29,9 @@ import {
   clearThrottleIfExpired,
   getCapacityEnvelope,
 } from "./subscription-quota.ts";
+import { initializeContextAtBoot, refreshContextOnInterval } from "./liaison-context.ts";
+import { config } from "../runtime/index.ts";
+import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 
 export interface AgencyConfig {
   agency_id: string;
@@ -139,6 +142,13 @@ export async function bootLiaison(
     supersede_stale_session: true,
   });
 
+  // P1370 AC-7: Initialize liaison context at boot (before fn_pulse online).
+  // Best-effort: if it fails, we continue; the liaison can still work with best-guess routing.
+  // Uses project_id=1 as default; will be refined when project_id is available in config.
+  await initializeContextAtBoot(config.agency_id, 1).catch((err) => {
+    console.error(`[liaison-boot] context init failed (non-fatal): ${err instanceof Error ? err.message : err}`);
+  });
+
   // Start bidirectional message hub — listens for uplink messages from subagents
   // and handles downlink directives and cross-project hiveCentral broadcasts.
   const hub = startLiaisonHub(config.agency_id);
@@ -146,6 +156,7 @@ export async function bootLiaison(
 
   let running = true;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let contextRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
   const scheduleNext = () => {
     if (!running) return;
@@ -188,6 +199,36 @@ export async function bootLiaison(
 
   scheduleNext();
 
+  // P1370 AC-8: Set up periodic context refresh on interval.
+  // Uses LIAISON_CONTEXT_REFRESH_MS flag (default 60s).
+  try {
+    const refreshMs = await config.get(FlagKeys.LIAISON_CONTEXT_REFRESH_MS);
+    contextRefreshTimer = setInterval(
+      () => {
+        refreshContextOnInterval(config.agency_id, 1).catch((err) => {
+          console.error(
+            `[liaison-boot] context refresh failed: ${err instanceof Error ? err.message : err}`
+          );
+        });
+      },
+      refreshMs
+    );
+  } catch (err) {
+    console.warn(
+      `[liaison-boot] failed to read LIAISON_CONTEXT_REFRESH_MS flag: ${err instanceof Error ? err.message : err}. Using default 60s.`
+    );
+    contextRefreshTimer = setInterval(
+      () => {
+        refreshContextOnInterval(config.agency_id, 1).catch((err) => {
+          console.error(
+            `[liaison-boot] context refresh failed: ${err instanceof Error ? err.message : err}`
+          );
+        });
+      },
+      60_000
+    );
+  }
+
   const shutdown = async (
     reason: "normal" | "crash" | "operator" | "throttle" = "normal"
   ) => {
@@ -195,6 +236,10 @@ export async function bootLiaison(
     if (timer !== null) {
       clearTimeout(timer);
       timer = null;
+    }
+    if (contextRefreshTimer !== null) {
+      clearInterval(contextRefreshTimer);
+      contextRefreshTimer = null;
     }
     hub.stop();
     // P1104: mark presence offline before closing the session

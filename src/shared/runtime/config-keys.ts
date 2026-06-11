@@ -809,6 +809,28 @@ export const FlagKeys = {
 	} satisfies ConfigKey<number>,
 
 
+	// ─── Liaison runtime context refresh (P1370) ────────────────────────────────
+	// Seeded by a P1370 migration. Operator changes via SQL UPDATE core.runtime_flag SET value_jsonb=...
+	// Live-reload via runtime_config_changed NOTIFY (no restart).
+
+	LIAISON_CONTEXT_REFRESH_MS: {
+		name: "LIAISON_CONTEXT_REFRESH_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const parsed = Number(JSON.parse(v));
+			if (!Number.isFinite(parsed) || parsed < 1000 || parsed > 600_000) {
+				throw new Error(`Invalid LIAISON_CONTEXT_REFRESH_MS: ${v}. Must be between 1000 and 600000 ms`);
+			}
+			return parsed;
+		},
+		required: false,
+		defaultValue: 60_000,
+		description: "Liaison context re-hydration interval (ms). Valid range: 1000-600000 (1s-10m)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies ConfigKey<number>,
+
 	// ─── Orchestrator runtime-tunable flags (P1144) ───────────────────────────
 
 	ORCHESTRATOR_SCAN_BATCH_LIMIT: {
