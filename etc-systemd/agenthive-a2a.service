@@ -8,7 +8,7 @@ Requires=agenthive-mcp.service
 Type=simple
 User=gary
 Group=gary
-WorkingDirectory=/data/code/AgentHive
+WorkingDirectory=/data/code/AgentHive-live
 EnvironmentFile=/etc/agenthive/env
 Environment=NODE_ENV=production
 Environment=PATH=/home/gary/.nvm/versions/node/v24.14.0/bin:/usr/local/bin:/usr/bin:/bin

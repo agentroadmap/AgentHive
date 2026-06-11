@@ -6,7 +6,7 @@ After=network.target
 Type=simple
 User=agenthive
 Group=agenthive
-WorkingDirectory=/data/code/AgentHive
+WorkingDirectory=/data/code/AgentHive-live
 EnvironmentFile=/etc/agenthive/env
 Environment=HOME=/home/agenthive
 Environment=NODE_ENV=production
