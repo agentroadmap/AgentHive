@@ -3,11 +3,16 @@
  *
  * Tests that escalation failure counts are durable across pool (host) restarts,
  * and that the POISON_PILL_DEAD_LETTER threshold is reached via DB accumulation.
+ *
+ * Suite writes real rows to the live agenthive DB, cleaned up in teardown.
+ * Skipped unless AGENTHIVE_ALLOW_LIVE_DB=1 to keep the default suite hermetic.
  */
 
 import test, { describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { getPool, type Pool } from '../../src/infra/postgres/pool.js';
+
+const LIVE = process.env.AGENTHIVE_ALLOW_LIVE_DB === "1";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -51,7 +56,7 @@ async function cleanupMessage(db: Pool, messageId: bigint): Promise<void> {
 
 // ─── AC1: Schema presence ────────────────────────────────────────────────────
 
-describe('AC1: escalation_failure_count column exists with correct defaults', () => {
+describe('AC1: escalation_failure_count column exists with correct defaults', { skip: !LIVE }, () => {
 	test('column is integer with default 0', async () => {
 		const db = getPool();
 		const { rows } = await db.query<{
@@ -75,7 +80,7 @@ describe('AC1: escalation_failure_count column exists with correct defaults', ()
 
 // ─── AC2: Success path resets counter to 0 ──────────────────────────────────
 
-describe('AC2: successful escalation delivery resets failure counter to 0', () => {
+describe('AC2: successful escalation delivery resets failure counter to 0', { skip: !LIVE }, () => {
 	let db: Pool;
 	let messageId: bigint;
 
@@ -111,7 +116,7 @@ describe('AC2: successful escalation delivery resets failure counter to 0', () =
 
 // ─── AC3: Core P900 scenario — cross-pool accumulation ──────────────────────
 
-describe('AC3: failure count accumulates across independent Pool instances (no shared memory)', () => {
+describe('AC3: failure count accumulates across independent Pool instances (no shared memory)', { skip: !LIVE }, () => {
 	let poolA: Pool;
 	let poolB: Pool;
 	let messageId: bigint;
@@ -182,7 +187,7 @@ describe('AC3: failure count accumulates across independent Pool instances (no s
 
 // ─── AC4: Below-threshold failure resets escalated_at for retry ─────────────
 
-describe('AC4: sub-threshold failure resets escalated_at to NULL so CTE re-selects', () => {
+describe('AC4: sub-threshold failure resets escalated_at to NULL so CTE re-selects', { skip: !LIVE }, () => {
 	let db: Pool;
 	let messageId: bigint;
 
@@ -230,7 +235,7 @@ describe('AC4: sub-threshold failure resets escalated_at to NULL so CTE re-selec
 
 // ─── AC5: At-threshold — escalated_at stays set (CTE never retries) ─────────
 
-describe('AC5: at ESCALATION_RETRY_LIMIT, escalated_at stays set so CTE never retries', () => {
+describe('AC5: at ESCALATION_RETRY_LIMIT, escalated_at stays set so CTE never retries', { skip: !LIVE }, () => {
 	let db: Pool;
 	let messageId: bigint;
 
