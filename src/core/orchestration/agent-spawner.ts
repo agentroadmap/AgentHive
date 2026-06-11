@@ -1814,19 +1814,23 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		},
 	});
 
-	// P1967 AC-3: Check OAuth token expiry if present in processEnv
+	// P1967 AC-3: Check OAuth token expiry if present in processEnv (best-effort)
 	if (processEnv.CLAUDE_CODE_OAUTH_TOKEN && route.agentProvider === "claude") {
-		// Token provisioning date from runtime flag (set by operator at token setup)
-		const provisionedAt = await runtimeConfig.get(
-			FlagKeys.CLAUDE_OAUTH_TOKEN_PROVISIONED_AT_MS,
-		) as number | undefined;
-		if (provisionedAt) {
-			const { checkOAuthTokenExpiry } = await import(
-				"../../core/runtime/oauth-token-monitor.ts"
-			);
-			checkOAuthTokenExpiry(provisionedAt, 30, {
-				warn: (msg: string) => console.warn(`[AgentSpawner] ${msg}`),
-			});
+		try {
+			const provisionedAtKey = (FlagKeys as Record<string, unknown>)["CLAUDE_OAUTH_TOKEN_PROVISIONED_AT_MS"];
+			if (provisionedAtKey) {
+				const provisionedAt = await config.getOptional(provisionedAtKey as never) as number | undefined;
+				if (provisionedAt) {
+					const { checkOAuthTokenExpiry } = await import(
+						"../../core/runtime/oauth-token-monitor.ts"
+					);
+					checkOAuthTokenExpiry(provisionedAt, 30, {
+						warn: (msg: string) => console.warn(`[AgentSpawner] ${msg}`),
+					});
+				}
+			}
+		} catch {
+			// non-fatal: token expiry check is advisory only
 		}
 	}
 
