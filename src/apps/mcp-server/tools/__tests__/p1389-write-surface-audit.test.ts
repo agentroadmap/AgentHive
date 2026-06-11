@@ -1,230 +1,167 @@
 /**
- * P1389 Audit: MCP Write Surface Parameter Fidelity
+ * P1389: MCP write-surface parameter fidelity — regression tests for the
+ * silent-drop fixes, exercised through the REAL handlers (not placeholders).
  *
- * Tests the four known silent-drop cases and validates round-trip persistence
- * for all declared parameters across write surfaces.
+ * Covered fixes:
+ * - prop_claim.message → claimLease persists {claim_message} in
+ *   proposal_lease.metadata (migration 235)
+ * - cubic_recycle.resetCode → false preserves phase/status, default resets
+ * - list_reviews SELECT now projects is_blocking (write already worked)
+ * - add_discussion author default to 'system' is PRESERVED (documented
+ *   default for system-issued callers — P1389 review rejected converting it
+ *   to a hard error)
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { query } from "../../../postgres/pool.ts";
+import { query } from "../../../../postgres/pool.ts";
+import { claimLease } from "../../../../infra/postgres/proposal-storage-v2.ts";
+import { listReviews, addDiscussion } from "../rfc/pg-handlers.ts";
+import { PgCubicHandlers } from "../cubic/pg-handlers.ts";
 
 const LIVE = process.env.AGENTHIVE_ALLOW_LIVE_DB === "1";
 
-describe.skipIf(!LIVE)("P1389: MCP Write Surface Parameter Fidelity", () => {
+describe.skipIf(!LIVE)("P1389: MCP write-surface parameter fidelity", () => {
 	let testProposalId: number;
-	let testAgentIdentity: string;
+	const STAMP = `p1389-audit-${Date.now()}`;
 
 	beforeAll(async () => {
-		// Create test proposal for all audits
-		testAgentIdentity = "p1389-audit-test-" + Date.now();
 		const { rows } = await query<{ id: number }>(
 			`INSERT INTO roadmap_proposal.proposal
-			 (display_id, title, status, type, maturity, project_id)
-			 VALUES ($1, $2, 'Draft', 'feature', 'new', 1)
+			 (display_id, title, status, type, maturity, project_id, audit)
+			 VALUES ($1, $2, 'DRAFT', 'feature', 'new', 1, '[]'::jsonb)
 			 RETURNING id`,
-			[`P1389-TEST-${Date.now()}`, "P1389 Test Proposal"],
+			[`P1389T${Date.now() % 100000}`, `P1389 fidelity test ${STAMP}`],
 		);
 		testProposalId = rows[0].id;
 	});
 
 	afterAll(async () => {
-		// Cleanup test proposal
-		if (testProposalId) {
-			await query(
-				"DELETE FROM roadmap_proposal.proposal WHERE id = $1",
-				[testProposalId],
-			);
-		}
+		if (!testProposalId) return;
+		await query(`DELETE FROM roadmap_proposal.proposal_lease WHERE proposal_id = $1`, [testProposalId]);
+		await query(`DELETE FROM roadmap_proposal.proposal_reviews WHERE proposal_id = $1`, [testProposalId]);
+		await query(`DELETE FROM roadmap_proposal.proposal_discussions WHERE proposal_id = $1`, [testProposalId]);
+		await query(`DELETE FROM roadmap_proposal.proposal WHERE id = $1`, [testProposalId]);
 	});
 
-	describe("AC-5 Regression Tests: Four Known Bugs", () => {
-		it("BUG-1: prop_claim persists message field", async () => {
-			// Schema declares message field with maxLength 500
-			// This field should either be persisted in proposal_lease.metadata
-			// or return a validation error
+	it("BUG-1: claimLease persists claim message in proposal_lease.metadata", async () => {
+		const ok = await claimLease(
+			testProposalId,
+			"system",
+			new Date(Date.now() + 60_000),
+			"claim rationale survives round-trip",
+		);
+		expect(ok).toBe(true);
 
-			// For now, we just verify the field is accepted without error
-			// Real verification would require MCP tool call via server
-			expect(testProposalId).toBeGreaterThan(0);
-		});
+		const { rows } = await query<{ metadata: { claim_message?: string } | null }>(
+			`SELECT metadata FROM roadmap_proposal.proposal_lease
+			 WHERE proposal_id = $1 AND agent_identity = $2
+			 ORDER BY id DESC LIMIT 1`,
+			[testProposalId, "system"],
+		);
+		expect(rows[0]?.metadata?.claim_message).toBe("claim rationale survives round-trip");
+	});
 
-		it("BUG-2: cubic_recycle honors resetCode parameter", async () => {
-			// Create a test cubic
-			const { rows: cubicRows } = await query<{ cubic_id: string }>(
-				`INSERT INTO roadmap.cubics
-				 (cubic_id, name, phase, status, owner_identity, project_id)
-				 VALUES ($1, 'test-cubic', 'active', 'locked', $2, 1)
-				 RETURNING cubic_id`,
-				["p1389-test-cubic-" + Date.now(), testAgentIdentity],
+	it("BUG-1b: claimLease without message still claims (metadata NULL)", async () => {
+		// release BUG-1's active lease first — one active lease per proposal
+		await query(
+			`UPDATE roadmap_proposal.proposal_lease
+			 SET released_at = now(), release_reason = 'work_delivered'
+			 WHERE proposal_id = $1 AND released_at IS NULL`,
+			[testProposalId],
+		);
+		const ok = await claimLease(testProposalId, "system", new Date(Date.now() + 60_000));
+		expect(ok).toBe(true);
+		const { rows } = await query<{ metadata: unknown }>(
+			`SELECT metadata FROM roadmap_proposal.proposal_lease
+			 WHERE proposal_id = $1 AND agent_identity = $2
+			 ORDER BY id DESC LIMIT 1`,
+			[testProposalId, "system"],
+		);
+		expect(rows[0]?.metadata ?? null).toBeNull();
+	});
+
+	it("BUG-2: cubic_recycle resetCode=false preserves phase/status", async () => {
+		const cubicId = `${STAMP}-cubic`;
+		await query(
+			`INSERT INTO roadmap.cubics (cubic_id, phase, status) VALUES ($1, 'build', 'active')`,
+			[cubicId],
+		);
+		try {
+			const handlers = new PgCubicHandlers();
+			const res = await handlers.recycleCubic({ cubicId, resetCode: false });
+			expect(res.isError).not.toBe(true);
+			const { rows } = await query<{ phase: string; status: string; metadata: { recycled?: boolean } }>(
+				`SELECT phase, status, metadata FROM roadmap.cubics WHERE cubic_id = $1`,
+				[cubicId],
 			);
-			const cubicId = cubicRows[0].cubic_id;
+			expect(rows[0].phase).toBe("build");
+			expect(rows[0].status).toBe("active");
+			expect(rows[0].metadata?.recycled).toBe(true);
 
-			// After fix: resetCode should control whether phase/status are reset
-			// This is currently unimplemented — verify the field is read
-			const { rows: preRecycle } = await query(
+			const res2 = await handlers.recycleCubic({ cubicId });
+			expect(res2.isError).not.toBe(true);
+			const { rows: after } = await query<{ phase: string; status: string }>(
 				`SELECT phase, status FROM roadmap.cubics WHERE cubic_id = $1`,
 				[cubicId],
 			);
-			expect(preRecycle[0].phase).toBe("active");
-
-			// Cleanup
-			await query("DELETE FROM roadmap.cubics WHERE cubic_id = $1", [cubicId]);
-		});
-
-		it("BUG-3: list_reviews includes is_blocking field", async () => {
-			// Submit a review with is_blocking=true
-			const { rows: reviewRows } = await query<{
-				reviewer_identity: string;
-				is_blocking: boolean;
-			}>(
-				`INSERT INTO roadmap_proposal.proposal_reviews
-				 (proposal_id, reviewer_identity, verdict, is_blocking)
-				 VALUES ($1, $2, 'approve', true)
-				 RETURNING reviewer_identity, is_blocking`,
-				[testProposalId, "p1389-test-reviewer"],
-			);
-			expect(reviewRows[0].is_blocking).toBe(true);
-
-			// Now SELECT via the list_reviews query and verify is_blocking is present
-			const { rows: selectRows } = await query<{
-				is_blocking?: boolean;
-			}>(
-				`SELECT reviewer_identity, verdict, notes, findings, reviewed_at
-				 FROM roadmap_proposal.proposal_reviews WHERE proposal_id = $1`,
-				[testProposalId],
-			);
-			// Currently fails: is_blocking is missing from the SELECT
-			// expect(selectRows[0].is_blocking).toBeDefined();
-
-			// Cleanup
-			await query(
-				"DELETE FROM roadmap_proposal.proposal_reviews WHERE proposal_id = $1",
-				[testProposalId],
-			);
-		});
-
-		it("BUG-4: add_discussion honors author field without defaulting", async () => {
-			// Pass an explicit author identity
-			const explicitAuthor = "p1389-test-author";
-			const { rows: discussionRows } = await query<{
-				author_identity: string;
-			}>(
-				`INSERT INTO roadmap_proposal.proposal_discussions
-				 (proposal_id, author_identity, body, context_prefix, project_id)
-				 VALUES ($1, $2, 'Test discussion', 'test:', 1)
-				 RETURNING author_identity`,
-				[testProposalId, explicitAuthor],
-			);
-			expect(discussionRows[0].author_identity).toBe(explicitAuthor);
-
-			// Now test the case where author is omitted (handler defaults to 'system')
-			// This requires MCP tool invocation to properly test
-
-			// Cleanup
-			await query(
-				`DELETE FROM roadmap_proposal.proposal_discussions
-				 WHERE proposal_id = $1 AND author_identity = $2`,
-				[testProposalId, explicitAuthor],
-			);
-		});
+			expect(after[0].phase).toBe("design");
+			expect(after[0].status).toBe("idle");
+		} finally {
+			await query(`DELETE FROM roadmap.cubics WHERE cubic_id = $1`, [cubicId]);
+		}
 	});
 
-	describe("AC-8: set_maturity persists reason field", () => {
-		it("set_maturity.reason persists for all maturity transitions", async () => {
-			const testReason = "test-reason-" + Date.now();
-
-			// Per proposal_discussions.context_prefix, audit trail uses decision: prefix
-			const { rows: auditRows } = await query<{
-				maturity: string;
-			}>(
-				`SELECT maturity FROM roadmap_proposal.proposal WHERE id = $1`,
-				[testProposalId],
-			);
-			expect(auditRows[0]).toBeDefined();
-
-			// Verify that if we call pg.setMaturity with reason, it gets stored
-			// This would be in the audit ledger or proposal_discussions
-			// For now, just confirm the function accepts the reason parameter
-		});
+	it("BUG-3: list_reviews projects is_blocking", async () => {
+		// reviewer_identity has an FK to agent_registry — use a registered identity.
+		const { rows: reg } = await query<{ agent_identity: string }>(
+			`SELECT agent_identity FROM roadmap.agent_registry WHERE status = 'active' LIMIT 1`,
+		);
+		const reviewer = reg[0].agent_identity;
+		await query(
+			`INSERT INTO roadmap_proposal.proposal_reviews
+			 (proposal_id, reviewer_identity, verdict, is_blocking)
+			 VALUES ($1, $2, 'request_changes', true)`,
+			[testProposalId, reviewer],
+		);
+		const res = await listReviews({ proposal_id: String(testProposalId) });
+		const text = (res.content[0] as { text: string }).text;
+		expect(text).toContain("is_blocking");
 	});
 
-	describe("AC-7: prop_list search parameter honored", () => {
-		it("prop_list search filters by title ILIKE", async () => {
-			// Create a proposal with a distinctive title
-			const distinctTitle = "DISTINCTIVE_P1389_AUDIT_TITLE_" + Date.now();
-			const { rows: propRows } = await query<{ id: number }>(
-				`INSERT INTO roadmap_proposal.proposal
-				 (display_id, title, status, type, maturity, project_id)
-				 VALUES ($1, $2, 'Draft', 'feature', 'new', 1)
-				 RETURNING id`,
-				[`P1389-SEARCH-${Date.now()}`, distinctTitle],
-			);
-			const searchTestId = propRows[0].id;
-
-			// Query with search filter
-			const { rows: searchResults } = await query<{ id: number }>(
-				`SELECT id FROM roadmap_proposal.proposal
-				 WHERE title ILIKE $1 AND id = $2`,
-				[`%${distinctTitle}%`, searchTestId],
-			);
-			expect(searchResults.length).toBe(1);
-			expect(searchResults[0].id).toBe(searchTestId);
-
-			// Cleanup
-			await query(
-				"DELETE FROM roadmap_proposal.proposal WHERE id = $1",
-				[searchTestId],
-			);
+	it("add_discussion: omitted author defaults to 'system' (documented default, not a drop)", async () => {
+		const res = await addDiscussion({
+			proposal_id: String(testProposalId),
+			author: "",
+			content: `author-default check ${STAMP}`,
 		});
+		expect(res.isError).not.toBe(true);
+		const { rows } = await query<{ author_identity: string }>(
+			`SELECT author_identity FROM roadmap_proposal.proposal_discussions
+			 WHERE proposal_id = $1 ORDER BY id DESC LIMIT 1`,
+			[testProposalId],
+		);
+		expect(rows[0].author_identity).toBe("system");
 	});
 
-	describe("AC-10: Four Bugs Regression Tests", () => {
-		it("prop_claim message field regression", async () => {
-			// Placeholder: real test requires MCP tool invocation
-			expect(true).toBe(true);
+	it("add_discussion: explicit author is honored verbatim", async () => {
+		// author_identity has an FK to agent_registry — use a registered
+		// identity distinct from 'system' to prove no silent defaulting.
+		const { rows: reg } = await query<{ agent_identity: string }>(
+			`SELECT agent_identity FROM roadmap.agent_registry
+			 WHERE status = 'active' AND agent_identity <> 'system' LIMIT 1`,
+		);
+		const author = reg[0].agent_identity;
+		const res = await addDiscussion({
+			proposal_id: String(testProposalId),
+			author,
+			content: `explicit author check ${STAMP}`,
 		});
-
-		it("cubic_recycle resetCode regression", async () => {
-			// Placeholder: real test requires checking resetCode behavior
-			expect(true).toBe(true);
-		});
-
-		it("submit_review is_blocking regression", async () => {
-			// Verify is_blocking is persisted
-			const { rows } = await query<{ is_blocking: boolean }>(
-				`INSERT INTO roadmap_proposal.proposal_reviews
-				 (proposal_id, reviewer_identity, verdict, is_blocking)
-				 VALUES ($1, $2, 'request_changes', true)
-				 RETURNING is_blocking`,
-				[testProposalId, "p1389-is-blocking-test"],
-			);
-			expect(rows[0].is_blocking).toBe(true);
-
-			// Cleanup
-			await query(
-				"DELETE FROM roadmap_proposal.proposal_reviews WHERE proposal_id = $1",
-				[testProposalId],
-			);
-		});
-
-		it("add_discussion author identity regression", async () => {
-			// Verify author is persisted when provided
-			const author = "p1389-author-regression-test";
-			const { rows } = await query<{ author_identity: string }>(
-				`INSERT INTO roadmap_proposal.proposal_discussions
-				 (proposal_id, author_identity, body, context_prefix, project_id)
-				 VALUES ($1, $2, 'Regression test', 'test:', 1)
-				 RETURNING author_identity`,
-				[testProposalId, author],
-			);
-			expect(rows[0].author_identity).toBe(author);
-
-			// Cleanup
-			await query(
-				`DELETE FROM roadmap_proposal.proposal_discussions
-				 WHERE proposal_id = $1 AND author_identity = $2`,
-				[testProposalId, author],
-			);
-		});
+		expect(res.isError).not.toBe(true);
+		const { rows } = await query<{ author_identity: string }>(
+			`SELECT author_identity FROM roadmap_proposal.proposal_discussions
+			 WHERE proposal_id = $1 ORDER BY id DESC LIMIT 1`,
+			[testProposalId],
+		);
+		expect(rows[0].author_identity).toBe(author);
 	});
 });
