@@ -25,6 +25,7 @@ import {
 	type SpawnUsage,
 } from "./cli-usage-adapter.ts";
 import { ObservabilityWriter } from "../../core/observability/observability-writer.ts";
+import { checkExtractionFailureAlarm } from "./extraction-failure-alarm.ts";
 
 const obs = new ObservabilityWriter("agency:spawn-usage");
 
@@ -202,6 +203,21 @@ export async function recordSpawnUsage(
 			}
 
 			await exec("COMMIT");
+
+			// Step 5: Check extraction failure alarm (non-fatal, runs after transaction)
+			const extractionSuccess = tokensIn !== null && tokensOut !== null;
+			void checkExtractionFailureAlarm({
+				provider: input.provider,
+				agentRunId: input.agentRunId,
+				extractionSuccess,
+				exec,
+			}).catch((err) => {
+				obs.log({
+					level: "warn",
+					message: `Extraction failure alarm check failed for run=${input.agentRunId}`,
+					error: err instanceof Error ? err.message : String(err),
+				});
+			});
 
 			return {
 				success: true,
