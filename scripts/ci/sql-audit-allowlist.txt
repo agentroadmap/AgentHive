@@ -54,3 +54,43 @@ cubic
 
 # acceptance_criteria table (note: proposal_acceptance_criteria exists)
 acceptance_criteria
+
+# role_early_exit_predicate table (roadmap_proposal schema) - P1445 WIP
+role_early_exit_predicate
+
+# model_provider_health table (roadmap_workforce schema) - provider health tracking WIP
+model_provider_health
+
+# tool_invocation_log table (roadmap schema) - tool call instrumentation WIP
+tool_invocation_log
+
+# control_audit table (roadmap schema) - WIP; control_audit.proposal_audit_log is different schema
+control_audit
+
+# proposal_audit_log table (control_audit schema) - proposal audit trail WIP
+proposal_audit_log
+
+# tenant_backup_policy table (roadmap schema) - multi-tenant backup policy WIP
+tenant_backup_policy
+
+# tenant_backup table (roadmap schema) - backup tracking WIP
+tenant_backup
+
+# discord_channel_mapping table (roadmap schema) - Discord bridge integration WIP
+discord_channel_mapping
+
+# discord_message_ack table (roadmap schema) - Discord message ACK tracking WIP
+discord_message_ack
+
+# test_table - test fixture for P677 AC-5 (migration-drop linkage test)
+test_table
+
+# proposals table (map-projection.ts) - SQLite schema, not PostgreSQL; audit tool is PG-only
+src/core/dag/map-projection.ts:proposals
+
+# md column in MCP schema documentation (mcp-server/tools/documents/index.ts) - not a real column, false positive
+src/apps/mcp-server/tools/documents/index.ts:md
+
+# host column in control_runtime.host table - valid table + column; audit regex has false negative on keyword
+src/apps/hive-cli/domains/stop/handlers/all.ts:host
+src/apps/hive-cli/domains/stop/handlers/host.ts:host
