@@ -5,6 +5,24 @@
 
 BEGIN;
 
+-- ─── Register system:proposal-feed agent ──────────────────────────────────────────
+
+-- Ensure the system agent exists for message_ledger FK constraint
+INSERT INTO roadmap_workforce.agent_registry (
+  agent_identity,
+  agent_type,
+  role,
+  status,
+  trust_tier
+) VALUES (
+  'system:proposal-feed',
+  'tool',
+  'system-event-feed',
+  'active',
+  'authority'
+)
+ON CONFLICT (agent_identity) DO NOTHING;
+
 -- ─── Function: fn_proposal_event_to_message_ledger ─────────────────────────────────
 
 -- Converts proposal_event rows (event_type IN lease_claimed, lease_released,
