@@ -1047,6 +1047,25 @@ export const FlagKeys = {
 		envOverride: false,
 	} satisfies ConfigKey<number>,
 
+	// P2709 AC-4: grace window after a gate hold/reject during which the
+	// state-monitor reeval must NOT auto-advance maturity (anti-flap).
+	PROPOSAL_STATE_MONITOR_GRACE_PERIOD_SEC: {
+		name: "PROPOSAL_STATE_MONITOR_GRACE_PERIOD_SEC",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 0) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 300,
+		description:
+			"State-monitor grace period (sec) after a gate hold/reject before maturity auto-advance is allowed (P2709)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
 	ORCHESTRATOR_HEARTBEAT_MS: {
 		name: "ORCHESTRATOR_HEARTBEAT_MS",
 		class: "flag" as const,
