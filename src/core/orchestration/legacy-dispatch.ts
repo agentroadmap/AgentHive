@@ -491,7 +491,7 @@ async function matchAgentsForState(state: string): Promise<MatchedAgent[]> {
 				score: scoreAgentForRole(a, slot),
 				activity: slot.activity,
 			}))
-			.filter((s) => s.score > 0) // must have at least some capability match
+			.filter((s) => s.score > 0 || slot.requiredCapabilities.length === 0) // empty requirements = any agent eligible
 			.sort((a, b) => b.score - a.score);
 
 		// Pick top N agents for this slot
