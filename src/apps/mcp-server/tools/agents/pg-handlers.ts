@@ -973,4 +973,250 @@ export class PgAgentHandlers {
 			return errorResult("Failed to register agency", err);
 		}
 	}
+
+	async getRoleDefinition(args: {
+		role_slug: string;
+	}): Promise<CallToolResult> {
+		try {
+			const roleSlug = args.role_slug?.trim();
+			if (!roleSlug) {
+				return errorResult(
+					"Missing role_slug",
+					new Error("role_slug is required"),
+				);
+			}
+
+			const capResult = await query<{
+				is_active: boolean;
+			}>(
+				"SELECT is_active FROM roadmap_proposal.capability_taxonomy WHERE role_slug = $1",
+				[roleSlug],
+			);
+
+			if (capResult.rows.length === 0) {
+				const activeResult = await query<{ role_slug: string }>(
+					"SELECT role_slug FROM roadmap_proposal.capability_taxonomy WHERE is_active = true ORDER BY role_slug LIMIT 10",
+					[],
+				);
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(
+								{
+									error: "role_not_found",
+									role_slug: roleSlug,
+									status: 404,
+									message: `Role '${roleSlug}' not found`,
+									active_roles_sample: activeResult.rows.map((r) => r.role_slug),
+									note: "Use role_slug format: domain/role-name",
+								},
+								null,
+								2,
+							),
+						},
+					],
+					isError: true,
+				};
+			}
+
+			const { is_active } = capResult.rows[0];
+
+			if (!is_active) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(
+								{
+									error: "role_inactive",
+									role_slug: roleSlug,
+									status: 410,
+									message: `Role '${roleSlug}' is inactive`,
+								},
+								null,
+								2,
+							),
+						},
+					],
+					isError: true,
+				};
+			}
+
+			const defResult = await query<{
+				role_slug: string;
+				content_md: string;
+				frontmatter?: Record<string, unknown>;
+				synced_at: string;
+				synced_sha: string;
+			}>(
+				"SELECT role_slug, content_md, frontmatter, synced_at, synced_sha FROM roadmap_proposal.role_definition WHERE role_slug = $1",
+				[roleSlug],
+			);
+
+			if (defResult.rows.length === 0) {
+				return errorResult(
+					"Role definition missing",
+					new Error(`Definition for '${roleSlug}' not found`),
+				);
+			}
+
+			const { content_md, frontmatter, synced_at, synced_sha } =
+				defResult.rows[0];
+
+			return {
+				content: [
+					{
+						type: "text",
+						text: JSON.stringify(
+							{
+								role_slug: roleSlug,
+								content_md,
+								frontmatter: frontmatter || {},
+								synced_at,
+								synced_sha,
+								is_active: true,
+								status: 200,
+							},
+							null,
+							2,
+						),
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to get role definition", err);
+		}
+	}
+
+	/**
+	 * P1068 AC-9: Report expertise mismatch for a dispatched work offer.
+	 *
+	 * When an agent discovers it cannot properly handle assigned work due to
+	 * expertise mismatch (e.g., assigned a code-review role but lacks the expertise),
+	 * it calls this to:
+	 * 1. Release the lease on the current dispatch
+	 * 2. Revert the proposal maturity to 'new' (restarts work assignment)
+	 * 3. Log the mismatch for operator visibility
+	 *
+	 * Arguments:
+	 *   - dispatch_id: ID of the work offer being returned
+	 *   - claim_token: Current claim token (lease validation)
+	 *   - reason: Explanation of the expertise mismatch
+	 */
+	async reportMismatch(args: {
+		dispatch_id: string | number;
+		claim_token: string;
+		reason: string;
+	}): Promise<CallToolResult> {
+		try {
+			const dispatchId = typeof args.dispatch_id === "string"
+				? parseInt(args.dispatch_id, 10)
+				: args.dispatch_id;
+			const claimToken = args.claim_token?.trim();
+			const reason = args.reason?.trim();
+
+			if (Number.isNaN(dispatchId) || !claimToken || !reason) {
+				return errorResult(
+					"Invalid report_mismatch arguments",
+					new Error(
+						"dispatch_id (number), claim_token (uuid), and reason (text) are required",
+					),
+				);
+			}
+
+			// Verify the dispatch exists and claim token matches
+			const dispatchResult = await query<{
+				proposal_id: bigint;
+				claim_token: string;
+				status: string;
+			}>(
+				`SELECT proposal_id, claim_token, status
+				 FROM roadmap_workforce.squad_dispatch
+				 WHERE id = $1`,
+				[dispatchId],
+			);
+
+			if (dispatchResult.rows.length === 0) {
+				return errorResult(
+					"Dispatch not found",
+					new Error(`dispatch_id ${dispatchId} not found`),
+				);
+			}
+
+			const { proposal_id, claim_token: storedToken, status } =
+				dispatchResult.rows[0];
+
+			if (storedToken !== claimToken) {
+				return errorResult(
+					"Claim token mismatch",
+					new Error("Supplied claim_token does not match dispatch lease token"),
+				);
+			}
+
+			if (status !== "active") {
+				return errorResult(
+					"Dispatch not active",
+					new Error(`Dispatch status is '${status}', expected 'active'`),
+				);
+			}
+
+			// P1068 AC-9: Release the lease and revert proposal maturity
+			await query(
+				`UPDATE roadmap_workforce.squad_dispatch
+				 SET status = 'returned',
+					 updated_at = now(),
+					 completion_notes = $1
+				 WHERE id = $2`,
+				[`Expertise mismatch reported: ${reason}`, dispatchId],
+			);
+
+			// Revert proposal maturity to 'new' so it can be reassigned
+			await query(
+				`UPDATE roadmap_proposal.proposal
+				 SET maturity = 'new',
+					 updated_at = now()
+				 WHERE id = $1`,
+				[proposal_id],
+			);
+
+			// Log the mismatch for operator visibility
+			await query(
+				`INSERT INTO control_audit.proposal_audit_log (proposal_id, action, actor, notes, created_at)
+				 VALUES ($1, 'expertise_mismatch_reported', $2, $3, now())`,
+				[proposal_id, "worker_self_report", reason],
+			).catch((err) => {
+				console.warn(
+					`[PgAgentHandlers AC-9] Failed to log mismatch audit: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			});
+
+			return {
+				content: [
+					{
+						type: "text",
+						text: JSON.stringify(
+							{
+								status: 200,
+								message: "Expertise mismatch reported and lease released",
+								dispatch_id: dispatchId,
+								proposal_id: Number(proposal_id),
+								action_taken: [
+									"dispatch status → returned",
+									"proposal maturity → new",
+									"audit log entry created",
+								],
+								reason,
+							},
+							null,
+							2,
+						),
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to report expertise mismatch", err);
+		}
+	}
 }

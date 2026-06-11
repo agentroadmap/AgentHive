@@ -50,13 +50,45 @@ export const agencyRegisterHandler: ToolHandler = async (args) => {
 
 	const row = result.rows[0];
 
-	// Insert capabilities into agent_capability (used by fn_claim_work_offer)
+	// P1068 AC-4: Validate and register roles from capability_taxonomy
+	// Extract agency_slug from identity (format: provider/agency-name or just agency-name)
+	const agencySlug = agentIdentity.includes("/")
+		? agentIdentity.split("/").slice(1).join("/")
+		: agentIdentity;
+
 	if (skills && skills.length > 0) {
+		// Validate that all role_slugs exist in capability_taxonomy and are active
+		const { rows: validRoles } = await query<{ role_slug: string }>(
+			`SELECT role_slug FROM roadmap_proposal.capability_taxonomy
+			 WHERE role_slug = ANY($1::text[]) AND is_active = true`,
+			[skills],
+		);
+
+		const validRoleSlugs = validRoles.map((r) => r.role_slug);
+		const invalidRoles = skills.filter((s) => !validRoleSlugs.includes(s));
+
+		if (invalidRoles.length > 0) {
+			console.warn(
+				`[agencyRegisterHandler] AC-4: invalid/inactive roles: ${invalidRoles.join(", ")}`,
+			);
+		}
+
+		// Insert only valid roles into agent_capability (P1068 role-identity registry)
+		if (validRoleSlugs.length > 0) {
+			await query(
+				`INSERT INTO roadmap_proposal.agent_capability (agency_slug, role_slug)
+				 SELECT $1, unnest($2::text[])
+				 ON CONFLICT (agency_slug, role_slug) DO NOTHING`,
+				[agencySlug, validRoleSlugs],
+			);
+		}
+
+		// Also maintain legacy agent_capability for fn_claim_work_offer compatibility
 		await query(
 			`INSERT INTO roadmap_workforce.agent_capability (agent_id, capability)
 			 SELECT $1, unnest($2::text[])
 			 ON CONFLICT DO NOTHING`,
-			[row.id, skills],
+			[row.id, validRoleSlugs],
 		);
 	}
 
@@ -79,7 +111,7 @@ export const agencyRegisterHandler: ToolHandler = async (args) => {
 		content: [
 			{
 				type: "text" as const,
-				text: `Agency registered: ${row.agent_identity} (${row.agent_type}, id=${row.id}) — caps: ${skills?.join(", ") || "none"}`,
+				text: `Agency registered: ${row.agent_identity} (${row.agent_type}, id=${row.id}) — roles: ${skills?.join(", ") || "none"}`,
 			},
 		],
 	};

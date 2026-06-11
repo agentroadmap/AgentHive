@@ -249,6 +249,8 @@ export interface SpawnRequest {
 	traceId?: string;
 	/** P604: parent span ID for child span linking */
 	parentSpanId?: string | null;
+	/** P1068 AC-3: required role slug (e.g., 'engineering/code-reviewer') for role-identity binding */
+	requiredRole?: string | null;
 }
 
 export interface SpawnResult {
@@ -978,13 +980,38 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 
 	let tierFilter = "";
 	let tierParamValue: string | null = requiredTier;
-	
+
 	if (role && (role.includes("frontier-review") || role.includes("audit"))) {
 		tierParamValue = "frontier";
 	}
 
 	if (tierParamValue) {
 		tierFilter = ` AND mr.tier = '${tierParamValue}'`;
+	}
+
+	// P1068 AC-5: Layer 7 — enforce agency preferred_provider as hard constraint
+	// If agency has preferred_provider set, only routes matching that provider are allowed
+	let preferredProviderFilter = "";
+	if (agencyIdentity) {
+		try {
+			const { rows: agencyRows } = await query<{ preferred_provider: string | null }>(
+				`SELECT preferred_provider FROM roadmap_workforce.agent_registry
+				 WHERE agent_identity = $1 AND status = 'active'`,
+				[agencyIdentity],
+			);
+			const preferredProvider = agencyRows[0]?.preferred_provider;
+			if (preferredProvider) {
+				preferredProviderFilter = ` AND mr.route_provider = '${preferredProvider}'`;
+				console.log(
+					`[AgentSpawner AC-5] Layer 7 applied: agency '${agencyIdentity}' enforced provider='${preferredProvider}'`,
+				);
+			}
+		} catch (err) {
+			console.warn(
+				`[AgentSpawner AC-5] failed to resolve preferred_provider for '${agencyIdentity}':`,
+				err instanceof Error ? err.message : err,
+			);
+		}
 	}
 
 	// P771/P773/P1435: shared params for all route queries: $3=host, $4=projectId, $5=agencyIdentity, $6=roleProfileId
@@ -996,7 +1023,7 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
           AND ${rolePolicyFilterSql(6, "mr")}
           AND ${budgetFilterSql(4, "mr")}
           AND ${cooldownFilterSql("mr")}
-          AND ${authDownFilterSql("mr")}${tierFilter}`;
+          AND ${authDownFilterSql("mr")}${tierFilter}${preferredProviderFilter}`;
 
 	const fetchRoute = (modelName: string) => {
 		// P742+P771: $3=host, $4=projectId, $5=agencyIdentity, $6=roleProfileId
@@ -1085,7 +1112,7 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
           AND ${agencyPolicyFilterSql(4, "mr")}
           AND ${rolePolicyFilterSql(5, "mr")}
           AND ${budgetFilterSql(3, "mr")}
-          AND ${cooldownFilterSql("mr")}${tierFilter}`;
+          AND ${cooldownFilterSql("mr")}${tierFilter}${preferredProviderFilter}`;
 	// P771: policy params without a leading modelName param (for default-selection queries)
 	const defaultPolicyParams = [AGENTHIVE_HOST, projectId, agencyIdentity, roleProfileId] as const;
 
@@ -1321,7 +1348,15 @@ export function renderClosingHint(input: {
 	stage: string;
 	proposalId: number | string;
 	workflowName?: string;
+	roleDefinitionMd?: string | null;
 }): string {
+	// P1068 AC-3: prepend role definition if provided
+	// Role spec becomes the first context layer (identity + discipline)
+	let prompt = input.contextPackage;
+	if (input.roleDefinitionMd) {
+		prompt = `${input.roleDefinitionMd}\n\n---\n\n${prompt}`;
+	}
+
 	// Terminal check using canonical state names from state-names.ts.
 	// If workflowName is provided, use isTerminal() from the registry.
 	// Otherwise, fall back to checking common terminal stage names.
@@ -1340,7 +1375,7 @@ export function renderClosingHint(input: {
 	const hint = terminal
 		? ""
 		: `\n\n## Completion\nWhen you finish, emit \`mcp_agent action="spawn_summary_emit"\` with outcome=success|partial|failure|timeout|escalated and a one-paragraph summary. DO NOT call \`set_maturity\` — only the gate-evaluator advances maturity, after parsing your stdout verdict (gate roles) or after the orchestrator's reconciler reads your spawn_summary (non-gate roles). Proposal id: ${input.proposalId}.`;
-	return `${input.contextPackage}\n\n## Task\n${input.task}${hint}`;
+	return `${prompt}\n\n## Task\n${input.task}${hint}`;
 }
 
 // ─── Core spawn logic ─────────────────────────────────────────────────────────
@@ -1649,12 +1684,36 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		} catch {
 			// Silently ignore query errors; renderClosingHint has fallback checks
 		}
+
+		// P1068 AC-3: Load role definition if requiredRole is specified
+		let roleDefinitionMd: string | null = null;
+		if (req.requiredRole) {
+			try {
+				const { rows } = await query<{ content_md: string }>(
+					`SELECT content_md FROM roadmap_proposal.role_definition WHERE role_slug = $1`,
+					[req.requiredRole],
+				);
+				roleDefinitionMd = rows[0]?.content_md ?? null;
+				if (!roleDefinitionMd) {
+					console.warn(
+						`[AgentSpawner] AC-3: role '${req.requiredRole}' not found in role_definition table`,
+					);
+				}
+			} catch (err) {
+				console.warn(
+					`[AgentSpawner] AC-3: failed to load role definition for '${req.requiredRole}':`,
+					err instanceof Error ? err.message : err,
+				);
+			}
+		}
+
 		assembledTask = renderClosingHint({
 			contextPackage,
 			task,
 			stage,
 			proposalId,
 			workflowName,
+			roleDefinitionMd,
 		});
 	}
 
