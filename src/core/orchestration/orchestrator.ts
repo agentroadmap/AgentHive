@@ -847,7 +847,9 @@ export class Orchestrator {
 				}
 
 				const primaryProfile = ctx.roleProfiles[0] ?? null;
-				const task = buildTaskPrompt(detail, mode, reasons);
+				// AC-11 (P1113): pass primary profile so buildTaskPrompt can prepend
+				// role-specific task_prompt when available.
+				const task = buildTaskPrompt(detail, mode, reasons, primaryProfile);
 
 				// P226: derive tier preference from proposal type + mode so the route
 				// resolver can prefer cheaper routes for routine work and frontier routes

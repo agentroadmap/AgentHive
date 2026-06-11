@@ -13,6 +13,7 @@
 
 import { query } from "../../infra/postgres/pool.ts";
 import { RfcStates } from "../workflow/state-names.ts";
+import type { RoleProfile } from "./role-resolver.ts";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -198,11 +199,18 @@ export function assessReadiness(detail: ProposalDetail): ReadinessResult {
  *
  * For gate mode: reviewer-style prompt focused on stage advancement decision.
  * For prep mode: preparation-agent prompt focused on filling the listed gaps.
+ *
+ * AC-9 (P1113): Optional 4th parameter `profile` allows role-specific task prompts.
+ * When profile is provided and profile.promptTemplate.task_prompt is a non-empty string:
+ *   - Resolve template vars against the proposal detail
+ *   - Prepend to the generic task with a blank-line separator
+ * When profile is null/undefined or has no task_prompt, produce the same output as before.
  */
 export function buildTaskPrompt(
 	detail: ProposalDetail,
 	mode: ReadinessMode,
 	reasons: string[],
+	profile?: RoleProfile | null,
 ): string {
 	const stage = normalizeStage(detail.status);
 	const readinessSummary =
@@ -210,23 +218,51 @@ export function buildTaskPrompt(
 			? `Blocking items: ${reasons.join(", ")}.`
 			: "Ready to gate.";
 
-	if (mode === "gate") {
+	const genericPrompt = (() => {
+		if (mode === "gate") {
+			return [
+				`You are the gate agent for ${detail.displayId} (${detail.title}).`,
+				`Current state: ${stage}.`,
+				readinessSummary,
+				"",
+				"Decide whether the proposal is ready to advance to the next stage. If not, return concrete missing work.",
+			].join("\n");
+		}
+
 		return [
-			`You are the gate agent for ${detail.displayId} (${detail.title}).`,
+			`You are the preparation agent for ${detail.displayId} (${detail.title}).`,
 			`Current state: ${stage}.`,
-			readinessSummary,
+			reasons.length > 0
+				? `Prepare the proposal by addressing: ${reasons.join(", ")}.`
+				: "Enhance the proposal until it is ready for the next gate.",
 			"",
-			"Decide whether the proposal is ready to advance to the next stage. If not, return concrete missing work.",
+			"Focus on research, clarity, acceptance criteria, and any missing evidence.",
 		].join("\n");
+	})();
+
+	// AC-10 (P1113): When profile is provided, check for role-specific task_prompt.
+	if (profile && profile.promptTemplate) {
+		const promptTemplate = profile.promptTemplate as Record<string, unknown>;
+		const taskPrompt = promptTemplate.task_prompt;
+		if (typeof taskPrompt === "string" && taskPrompt.length > 0) {
+			// AC-10: resolve template vars against proposal detail
+			const resolved = resolveTaskPromptVars(taskPrompt, detail);
+			// Prepend to generic prompt with blank-line separator
+			return `${resolved}\n\n${genericPrompt}`;
+		}
 	}
 
-	return [
-		`You are the preparation agent for ${detail.displayId} (${detail.title}).`,
-		`Current state: ${stage}.`,
-		reasons.length > 0
-			? `Prepare the proposal by addressing: ${reasons.join(", ")}.`
-			: "Enhance the proposal until it is ready for the next gate.",
-		"",
-		"Focus on research, clarity, acceptance criteria, and any missing evidence.",
-	].join("\n");
+	return genericPrompt;
+}
+
+/**
+ * Resolve template variables in a role-specific task prompt.
+ * Supported vars: {display_id}, {proposal_id}, {status}, {stage}
+ */
+function resolveTaskPromptVars(template: string, detail: ProposalDetail): string {
+	return template
+		.replace(/{display_id}/g, detail.displayId || "")
+		.replace(/{proposal_id}/g, String(detail.id || ""))
+		.replace(/{status}/g, detail.status || "")
+		.replace(/{stage}/g, normalizeStage(detail.status) || "");
 }

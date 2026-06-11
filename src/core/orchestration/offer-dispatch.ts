@@ -227,6 +227,9 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 			// P908-D: thread trace_id so offer-dispatch-handler can open the
 			// offer_completed lifecycle span correlated to this trace.
 			trace_id: extractTraceId(claim.metadata),
+			// P1113: forward full task string so agency handler can use it directly
+			// (instead of falling back to generic "Execute offer" text).
+			task: extractTask(claim.metadata),
 		};
 
 		await this.sendMessageFn({
