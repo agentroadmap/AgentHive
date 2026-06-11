@@ -6,7 +6,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/data/code/AgentHive
+WorkingDirectory=/data/code/AgentHive-live
 ExecStart=/usr/bin/env node --import jiti/register scripts/orchestrator.ts
 Restart=on-failure
 RestartSec=10
