@@ -4620,6 +4620,9 @@ export class RoadmapServer {
 	}
 
 	private async handleToggleRoute(req: Request, id: string): Promise<Response> {
+		const auth = await requireOperator(req, { action: "routes.toggle" });
+		if (auth.rejected) return auth.rejected;
+
 		try {
 			const numericId = parseInt(id, 10);
 			if (Number.isNaN(numericId))
