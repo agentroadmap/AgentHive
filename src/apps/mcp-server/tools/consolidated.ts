@@ -193,6 +193,9 @@ const proposalRoutes: RouteMap = {
 	reeval_budget_check: "reeval_budget_check",
 	reeval_flag_stale: "reeval_flag_stale",
 	reeval_flag_complete: "reeval_flag_complete",
+	// P1386: Early-exit no-op action
+	report_no_op: "prop_report_no_op",
+	prop_report_no_op: "prop_report_no_op",
 };
 
 const messageRoutes: RouteMap = {

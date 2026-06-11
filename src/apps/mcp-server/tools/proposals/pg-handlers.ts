@@ -1681,4 +1681,74 @@ export class PgProposalHandlers {
 			return errorResult("Failed to list role pauses", err);
 		}
 	}
+
+	/**
+	 * P1386 AC-4: Report no-op early-exit completion.
+	 *
+	 * Called by the architect agent when all early-exit preconditions are met:
+	 * all ACs pass/waived, design is substantive, and no open challenges remain.
+	 *
+	 * Releases the proposal lease cleanly and returns status='completed' with
+	 * reason='early_exit_no_op' to signal Layer 1 dispatch to finalize the offer.
+	 */
+	async reportNoOp(args: {
+		proposal_id?: string | number;
+		id?: string | number;
+		agent?: string;
+		agent_identity?: string;
+	}): Promise<CallToolResult> {
+		try {
+			const proposalId = args.proposal_id ?? args.id;
+			const agentIdentity = args.agent ?? args.agent_identity;
+
+			if (!proposalId) {
+				return errorResult("Missing required parameter", "proposal_id or id");
+			}
+
+			const pId = typeof proposalId === "string"
+				? parseInt(proposalId.replace(/^P/, ""), 10)
+				: Number(proposalId);
+
+			if (isNaN(pId)) {
+				return errorResult("Invalid proposal_id", proposalId);
+			}
+
+			// Get the proposal to verify it exists
+			const propResult = await query<ProposalRow>(
+				"SELECT id, status, maturity FROM roadmap_proposal.proposal WHERE id = $1",
+				[pId]
+			);
+
+			if (propResult.rows.length === 0) {
+				return errorResult("Proposal not found", `Proposal ${proposalId}`);
+			}
+
+			const proposal = propResult.rows[0];
+
+			// Release the lease if an agent was specified
+			if (agentIdentity) {
+				await query(
+					`UPDATE roadmap_proposal.proposal_lease
+					 SET released_at = NOW(), release_reason = 'early_exit_no_op'
+					 WHERE proposal_id = $1 AND holder = $2 AND released_at IS NULL`,
+					[pId, agentIdentity]
+				);
+			}
+
+			return {
+				content: [{
+					type: "text",
+					text: JSON.stringify({
+						status: "completed",
+						reason: "early_exit_no_op",
+						proposal_id: pId,
+						proposal_status: proposal.status,
+						message: "Proposal early-exit recorded: all preconditions met, no design work needed.",
+					}, null, 2),
+				}],
+			};
+		} catch (err) {
+			return errorResult("Failed to report no-op", err);
+		}
+	}
 }

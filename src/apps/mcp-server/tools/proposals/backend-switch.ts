@@ -667,4 +667,35 @@ export function registerProposalTools(
 		},
 		handler: (args: any) => handlers.getProposalProjection(args),
 	});
+
+	// P1386 AC-4: report_no_op — early-exit completion signal
+	server.addTool({
+		name: "prop_report_no_op",
+		description:
+			"P1386: Signal early-exit completion when all architect preconditions are met. " +
+			"Releases the proposal lease and records the early-exit reason. " +
+			"Called by architect agent via mcp_proposal action=report_no_op when all ACs pass, design is substantive, and no open challenges remain.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				proposal_id: {
+					type: ["string", "number"],
+					description: "Proposal display_id (P123) or numeric id",
+				},
+				id: {
+					type: ["string", "number"],
+					description: "Alias for proposal_id",
+				},
+				agent: {
+					type: "string",
+					description: "Agent identity releasing the lease",
+				},
+				agent_identity: {
+					type: "string",
+					description: "Alias for agent",
+				},
+			},
+		},
+		handler: (args: any) => handlers.reportNoOp(args),
+	});
 }
