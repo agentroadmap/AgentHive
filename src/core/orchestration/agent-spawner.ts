@@ -2309,6 +2309,12 @@ function runProcess(
 		});
 		child.stderr?.on("data", (d: Buffer) => {
 			stderr += d.toString();
+			// Any stderr means Claude has started and MCP init is done (or in progress).
+			// Disarm MCP init timeout so long-running tasks aren't killed before first stdout.
+			if (cleanupMcpTimeout) {
+				cleanupMcpTimeout();
+				cleanupMcpTimeout = null;
+			}
 		});
 
 		if (stdin !== undefined) {
