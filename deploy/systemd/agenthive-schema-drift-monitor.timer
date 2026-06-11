@@ -1,0 +1,12 @@
+[Unit]
+Description=AgentHive Schema Drift Monitor Timer
+Documentation=https://gitlab.local/agenthive
+
+[Timer]
+# AC-1: Run every 15 minutes, on the :00 and :15 second marks
+OnCalendar=*:0/15
+Persistent=true
+Unit=agenthive-schema-drift-monitor.service
+
+[Install]
+WantedBy=timers.target
