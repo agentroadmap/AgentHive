@@ -22,7 +22,6 @@ import type { Command } from "commander";
 import * as fs from "fs";
 import * as path from "path";
 import { getProjectDb } from "../../../shared/runtime/config.ts";
-import { logger } from "../../../shared/runtime/logger.ts";
 
 export const command = "cost";
 export const description = "Query per-proposal cost breakdown by stage";
@@ -105,7 +104,7 @@ export async function handler(args: CostCommandArgs): Promise<void> {
 		: `P${idMatch[1]}`;
 
 	try {
-		const db = getProjectDb("agenthive");
+		const db = await getProjectDb("agenthive");
 
 		// Fetch the proposal to verify it exists
 		const propResult = await db.query(
