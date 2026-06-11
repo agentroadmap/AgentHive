@@ -1246,22 +1246,62 @@ export async function getOpenChangeRequirements(
 
 // ─── Discussions ────────────────────────────────────────────────────────────
 
+// Aliases agents try instead of `content`, in coercion priority order. The
+// set matches submit_review's accepted synonyms so the two tools accept the
+// same vocabulary (P3001: `note` was missing, so the handler silently
+// inserted body='' and still returned a success ID).
+const DISCUSSION_CONTENT_ALIASES = [
+	"discussion",
+	"text",
+	"body",
+	"message",
+	"note",
+	"notes",
+	"comment",
+	"summary",
+	"review",
+] as const;
+
+export function coerceDiscussionContent(
+	args: Record<string, unknown>,
+): string {
+	if (typeof args.content === "string" && args.content.trim()) {
+		return args.content;
+	}
+	for (const alias of DISCUSSION_CONTENT_ALIASES) {
+		const v = args[alias];
+		if (typeof v === "string" && v.trim()) return v;
+	}
+	return "";
+}
+
 export async function addDiscussion(args: {
 	proposal_id: string;
 	author: string;
 	content: string;
 	// Common aliases agents try. Coerce to `content` before validation so
-	// `discussion: "..."` or `text: "..."` doesn't strand the agent.
-	discussion?: string;
-	text?: string;
-	body?: string;
-	message?: string;
+	// `note: "..."` or `text: "..."` doesn't strand the agent — see
+	// DISCUSSION_CONTENT_ALIASES.
+	[alias: string]: unknown;
 	parent_id?: number;
 	context_prefix?: string;
 }): Promise<CallToolResult> {
-	if (!args.content) {
-		args.content =
-			args.discussion ?? args.text ?? args.body ?? args.message ?? "";
+	args.content = coerceDiscussionContent(args);
+	if (!args.content.trim()) {
+		// P3001 AC-2: never insert an empty body behind a success ID. Tell the
+		// caller exactly which params are accepted instead.
+		return {
+			isError: true,
+			content: [
+				{
+					type: "text",
+					text:
+						"add_discussion rejected: no non-empty discussion text found. " +
+						`Pass it as \`content\` (canonical) or one of: ${DISCUSSION_CONTENT_ALIASES.join(", ")}. ` +
+						"Nothing was inserted.",
+				},
+			],
+		};
 	}
 	if (!args.author) {
 		// Default authoring identity so cubic/gate agents don't bounce on a
@@ -1280,7 +1320,7 @@ export async function addDiscussion(args: {
 
 		const { rows } = await query(
 			`INSERT INTO roadmap_proposal.proposal_discussions (proposal_id, author_identity, body, parent_id, context_prefix)
-       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+       VALUES ($1, $2, $3, $4, $5) RETURNING id, LENGTH(body) AS body_len`,
 			[
 				proposalId,
 				args.author,
@@ -1290,11 +1330,30 @@ export async function addDiscussion(args: {
 			],
 		);
 
+		// P3001 AC-2: verify the body actually persisted. If anything between
+		// here and the table strips it (trigger, rule, column default), surface
+		// an error instead of a success ID.
+		const bodyLen = Number(rows[0].body_len ?? 0);
+		if (bodyLen === 0) {
+			return {
+				isError: true,
+				content: [
+					{
+						type: "text",
+						text:
+							`add_discussion FAILED to persist body: row #${rows[0].id} was created but ` +
+							`LENGTH(body)=0 (input was ${args.content.length} chars). ` +
+							"Do not treat this discussion as recorded.",
+					},
+				],
+			};
+		}
+
 		return {
 			content: [
 				{
 					type: "text",
-					text: `✅ Discussion #${rows[0].id} added to ${args.proposal_id}`,
+					text: `✅ Discussion #${rows[0].id} added to ${args.proposal_id} (${bodyLen} chars)`,
 				},
 			],
 		};
@@ -1762,13 +1821,23 @@ export class RfcWorkflowHandlers {
 		// Discussions
 		this.server.addTool({
 			name: "add_discussion",
-			description: "Add a discussion comment to a proposal",
+			description:
+				"Add a discussion comment to a proposal. " +
+				"Discussion text is passed as `content` (canonical) or any of: " +
+				"discussion/text/body/message/note/notes/comment/summary/review. " +
+				"Empty discussion text is rejected (no row inserted) — P3001.",
 			inputSchema: {
 				type: "object",
 				properties: {
 					proposal_id: { type: "string" },
 					author: { type: "string" },
 					content: { type: "string" },
+					note: { type: "string", description: "Alias for content" },
+					notes: { type: "string", description: "Alias for content" },
+					body: { type: "string", description: "Alias for content" },
+					text: { type: "string", description: "Alias for content" },
+					message: { type: "string", description: "Alias for content" },
+					comment: { type: "string", description: "Alias for content" },
 					parent_id: { type: "number" },
 					context_prefix: {
 						type: "string",
@@ -1784,7 +1853,11 @@ export class RfcWorkflowHandlers {
 						],
 					},
 				},
-				required: ["proposal_id", "author", "content"],
+				// `content` intentionally NOT in required: agents routinely pass an
+				// alias (note/notes/body/...) and the consolidated router does not
+				// schema-validate anyway — the handler rejects empty text itself
+				// with an actionable message (P3001).
+				required: ["proposal_id", "author"],
 			},
 			handler: (args: any) => addDiscussion(args),
 		});
