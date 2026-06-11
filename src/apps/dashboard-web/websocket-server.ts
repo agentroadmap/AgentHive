@@ -100,6 +100,26 @@ async function loadMessages(channel: string): Promise<Record<string, unknown>[]>
 	}));
 }
 
+// P720: Activity Feed — load recent proposal feed events
+async function loadActivityFeed(limit = 50): Promise<Record<string, unknown>[]> {
+	const rows = await query(
+		`SELECT id, from_agent, proposal_id, message_content, created_at, metadata
+		 FROM roadmap.message_ledger
+		 WHERE channel = 'system:proposal-feed'
+		 ORDER BY created_at DESC, id DESC
+		 LIMIT $1`,
+		[limit],
+	);
+	return rows.rows.map((r: any) => ({
+		id: r.id,
+		actor: r.from_agent,
+		proposal_id: r.proposal_id,
+		message: r.message_content,
+		timestamp: r.created_at,
+		event_type: r.metadata?.event_type ?? "unknown",
+	}));
+}
+
 // ─── Wire-format types ─────────────────────────────────────────────────────────
 
 type BoardMessage =
@@ -111,7 +131,10 @@ type BoardMessage =
 	| { type: "connected" | "subscribed"; message?: string; channel?: string }
 	| { type: "error"; message: string; code?: string }
 	// P081: SLA state change push
-	| { type: "sla_state"; state: string; prev_state: string | null; trigger: string; timestamp: string };
+	| { type: "sla_state"; state: string; prev_state: string | null; trigger: string; timestamp: string }
+	// P720: Activity feed events
+	| { type: "activity_feed_snapshot"; data: unknown[]; channel?: string }
+	| { type: "activity_feed_update"; data: unknown; channel?: string };
 
 type ClientMessage = {
 	type?: unknown;
@@ -126,13 +149,14 @@ function safeStringify(data: unknown): string {
 }
 
 async function buildSnapshot() {
-	const [proposals, agents, channels, messages] = await Promise.all([
+	const [proposals, agents, channels, messages, activityFeed] = await Promise.all([
 		loadProposals(),
 		loadAgents(),
 		loadChannels(),
 		loadMessages("public"),
+		loadActivityFeed(50), // P720: Include activity feed in snapshot
 	]);
-	return { proposals, agents, channels, messages };
+	return { proposals, agents, channels, messages, activityFeed };
 }
 
 async function sendSnapshot(ws: WebSocket): Promise<void> {
@@ -142,6 +166,7 @@ async function sendSnapshot(ws: WebSocket): Promise<void> {
 		{ type: "workforce_snapshot", data: snapshot.agents },
 		{ type: "channels", data: snapshot.channels },
 		{ type: "message_snapshot", data: snapshot.messages, channel: "public" },
+		{ type: "activity_feed_snapshot", data: snapshot.activityFeed, channel: "system:proposal-feed" }, // P720
 	];
 
 	for (const payload of payloads) {
@@ -169,6 +194,12 @@ async function broadcastSnapshot(): Promise<void> {
 		type: "message_snapshot",
 		data: snapshot.messages,
 		channel: "public",
+	});
+	// P720: Broadcast activity feed snapshot
+	broadcast({
+		type: "activity_feed_snapshot",
+		data: snapshot.activityFeed,
+		channel: "system:proposal-feed",
 	});
 }
 
@@ -327,6 +358,8 @@ export function startWebSocketServer(port = 3001): void {
 			await pgClient.query("LISTEN proposal_maturity_changed");
 			// P081: SLA state change notifications
 			await pgClient.query("LISTEN sla_state_change");
+			// P720: Activity feed real-time notifications
+			await pgClient.query("LISTEN new_message");
 			pgClient.on("notification", (msg) => {
 				if (msg.channel === "sla_state_change" && msg.payload) {
 					try {
@@ -345,6 +378,50 @@ export function startWebSocketServer(port = 3001): void {
 						});
 					} catch {
 						// Ignore malformed SLA payloads
+					}
+					return;
+				}
+				// P720: Handle activity feed updates in real-time
+				if (msg.channel === "new_message" && msg.payload) {
+					try {
+						const notifData = JSON.parse(msg.payload) as {
+							id?: string | number;
+							msg_id?: string | number;
+						};
+						const msgId = notifData.id ?? notifData.msg_id;
+						if (!msgId) return;
+
+						// Query the message to check if it's a system:proposal-feed event
+						void (async () => {
+							try {
+								const pool = getPool();
+								const result = await pool.query<ActivityFeedEvent>(
+									`SELECT id, channel, from_agent, message_content, proposal_id, created_at,
+									        metadata->>'event_type' as event_type
+									 FROM roadmap.message_ledger
+									 WHERE id = $1 AND channel = 'system:proposal-feed'`,
+									[msgId],
+								);
+								if (result.rows.length > 0) {
+									const event = result.rows[0];
+									broadcast({
+										type: "activity_feed_update",
+										event: {
+											id: event.id,
+											actor: event.from_agent,
+											proposal_id: event.proposal_id,
+											message: event.message_content,
+											timestamp: event.created_at,
+											event_type: event.event_type || "event",
+										},
+									});
+								}
+							} catch (err) {
+								console.error("[WS] Activity feed event query failed:", err);
+							}
+						})();
+					} catch {
+						// Ignore malformed new_message payloads
 					}
 					return;
 				}
