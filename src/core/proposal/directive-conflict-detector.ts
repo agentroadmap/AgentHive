@@ -59,11 +59,12 @@ export async function detectConflicts(
 	directiveId: string,
 	directiveTitle: string,
 	directiveSummary: string | null,
+	queryFn: typeof query = query,
 ): Promise<ConflictReport> {
 	const inputText = `${directiveTitle} ${directiveSummary ?? ""}`;
 	const inputKeywords = extractKeywords(inputText);
 
-	const { rows } = await query<{
+	const { rows } = await queryFn<{
 		id: string;
 		display_id: string | null;
 		title: string;
@@ -73,7 +74,7 @@ export async function detectConflicts(
 		   FROM roadmap_proposal.proposal
 		  WHERE type != 'directive'
 		    AND id::text != $1
-		    AND status NOT IN ('Complete', 'Deployed', 'Recycled', 'Rejected', 'Abandoned', 'Replaced')`,
+		    AND upper(status) NOT IN ('COMPLETE', 'DEPLOYED', 'RECYCLED', 'REJECTED', 'ABANDONED', 'REPLACED')`,
 		[directiveId],
 	);
 

@@ -81,48 +81,49 @@ describe("AC-1 & AC-2: Migration 064 SQL", () => {
 // ── AC-5: detectConflicts keyword overlap ────────────────────────────────────
 
 describe("AC-5: detectConflicts", async () => {
+	// Tests target the live core implementation (wired into prop_create via
+	// pg-handlers), with an injected query fn so no live DB is touched.
 	const { detectConflicts } = await import(
-		"../../src/apps/mcp-server/tools/proposals/directive-conflict-detector.ts"
+		"../../src/core/proposal/directive-conflict-detector.ts"
 	);
 
-	it("returns empty array when no tokens are long enough", async () => {
-		// Inject a no-op query function — short words produce no SQL params
-		const noopQuery = async () => ({ rows: [] });
-		const results = await detectConflicts("Hi Go", null, noopQuery as any);
-		assert.deepEqual(results, []);
-	});
-
-	it("returns empty array when query returns no rows", async () => {
+	it("returns no conflicts when query returns no rows", async () => {
 		const emptyQuery = async () => ({ rows: [] });
-		const results = await detectConflicts("Enable payment processing", "Handle billing", emptyQuery as any);
-		assert.deepEqual(results, []);
+		const report = await detectConflicts("99", "Enable payment processing", "Handle billing", emptyQuery as any);
+		assert.deepEqual(report.conflicts, []);
+		assert.equal(report.directive_id, "99");
 	});
 
-	it("returns conflict results shaped correctly when query returns rows", async () => {
+	it("flags only candidates above the 0.6 cosine threshold", async () => {
 		const stubQuery = async () => ({
 			rows: [
-				{ proposal_id: "42", display_id: "P042", title: "Enable payment processing module" },
+				{ id: "42", display_id: "P042", title: "Enable payment processing", summary: "Handle billing" },
+				{ id: "43", display_id: "P043", title: "Completely unrelated gardening notes", summary: null },
 			],
 		});
-		const results = await detectConflicts("Enable payment processing", "Handle billing", stubQuery as any);
-		assert.equal(results.length, 1);
-		assert.equal(results[0].proposalId, "42");
-		assert.equal(results[0].displayId, "P042");
-		assert.equal(results[0].title, "Enable payment processing module");
-		assert.ok(results[0].reason.includes("Enable payment processing"), "reason should mention new title");
+		const report = await detectConflicts("99", "Enable payment processing", "Handle billing", stubQuery as any);
+		assert.equal(report.conflicts.length, 1);
+		assert.equal(report.conflicts[0].proposal_id, "42");
+		assert.equal(report.conflicts[0].display_id, "P042");
+		assert.ok(report.conflicts[0].similarity_score > 0.6);
+		assert.equal(report.conflicts[0].requires_review, true);
 	});
 
-	it("deduplicates tokens before building LIKE clauses", async () => {
+	it("excludes the directive itself and terminal proposals case-insensitively", async () => {
 		let capturedSql = "";
 		const capturingQuery = async (sql: string) => {
 			capturedSql = sql;
 			return { rows: [] };
 		};
-		// "payment payment billing" — 'payment' should appear only once in LIKE clauses
-		await detectConflicts("payment payment billing", null, capturingQuery as any);
-		const likeCount = (capturedSql.match(/LIKE/g) ?? []).length;
-		// tokens: ['payment', 'billing'] = 2 unique tokens → 2 LIKE clauses
-		assert.equal(likeCount, 2);
+		await detectConflicts("99", "payment billing", null, capturingQuery as any);
+		assert.ok(capturedSql.includes("upper(status) NOT IN"), "terminal-state filter must be case-insensitive (P306 uppercased statuses)");
+		assert.ok(capturedSql.includes("!= 'directive'"));
+	});
+
+	it("counts extracted keywords (>3 chars, stop words removed)", async () => {
+		const emptyQuery = async () => ({ rows: [] });
+		const report = await detectConflicts("99", "the and for with payment", null, emptyQuery as any);
+		assert.equal(report.keyword_count, 1);
 	});
 });
 
