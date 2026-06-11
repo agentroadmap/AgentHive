@@ -144,6 +144,7 @@ async function fetchPeers(
             WHERE (sd.worker_identity = ar.agent_identity
                    OR sd.agent_identity = ar.agent_identity)
               AND sd.dispatch_status IN ('assigned','active','blocked','posted','claimed','running','retry_wait')
+              AND sd.offer_status NOT IN ('expired','failed','cancelled')
               AND sd.project_id = ar.project_id),
            0
          ) AS active_claim_count,
