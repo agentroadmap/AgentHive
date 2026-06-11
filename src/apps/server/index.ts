@@ -2094,6 +2094,42 @@ export class RoadmapServer {
 				.filter((item: { text: string }) => item.text.length > 0);
 		}
 
+		if ("gateScannerPaused" in updates && updates.gateScannerPaused === false) {
+			const isNumeric = /^\d+$/.test(proposalId);
+			const numId = proposalId.startsWith("P")
+				? parseInt(proposalId.slice(1), 10)
+				: (isNumeric ? parseInt(proposalId, 10) : null);
+			if (numId !== null && !Number.isNaN(numId)) {
+				try {
+					const { rows } = await query(
+						`SELECT gate_scanner_paused, gate_paused_by FROM roadmap_proposal.proposal WHERE id = $1`,
+						[numId]
+					);
+					const current = rows[0];
+					if (current && current.gate_scanner_paused) {
+						if (current.gate_paused_by !== "circuit_breaker") {
+							return Response.json(
+								{ error: "Cannot auto-clear: paused by non-circuit-breaker actor" },
+								{ status: 409 }
+							);
+						}
+						await query(
+							`UPDATE roadmap_proposal.proposal 
+							 SET gate_scanner_paused = false, 
+							     gate_paused_by = null,
+							     gate_paused_at = null,
+							     gate_paused_reason = null,
+							     modified_at = NOW()
+							 WHERE id = $1`,
+							[numId]
+						);
+					}
+				} catch (error) {
+					// Let fallback query/update handle or log errors
+				}
+			}
+		}
+
 		try {
 			const updatedProposal = await this.core.updateProposalFromInput(
 				proposalId,
