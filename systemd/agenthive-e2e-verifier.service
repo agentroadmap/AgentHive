@@ -1,0 +1,22 @@
+[Unit]
+Description=AgentHive E2E Verifier Service
+Documentation=https://roadmap.local/P671
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=agenthive
+WorkingDirectory=/data/code/AgentHive
+Environment="AGENTHIVE_REPO_ROOT=/data/code/AgentHive"
+Environment="E2E_VERIFIER_POLL_INTERVAL_MS=60000"
+Environment="E2E_VERIFIER_LEASE_DURATION_MIN=30"
+Environment="E2E_VERIFIER_BATCH_SIZE=5"
+ExecStart=bun run src/apps/e2e-verifier/index.ts
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agenthive-e2e-verifier
+
+[Install]
+WantedBy=multi-user.target
