@@ -1735,6 +1735,20 @@ export class PgProposalHandlers {
 	 * Releases the proposal lease cleanly and returns status='completed' with
 	 * reason='early_exit_no_op' to signal Layer 1 dispatch to finalize the offer.
 	 */
+	/**
+	 * P1386 AC-4: Report early-exit completion from architect agent (Layer 2).
+	 *
+	 * The architect agent calls this when all early-exit preconditions are met:
+	 * - All ACs pass/waived
+	 * - Design is substantive (>= 200 chars)
+	 * - No open design_gap discussions
+	 *
+	 * This MCP action writes telemetry to agent_runs (cost_usd=0, output_summary='early-exit:...')
+	 * and releases the proposal lease with reason='early_exit_no_op'.
+	 *
+	 * AC-6: telemetry is written here so that Layer 2 (agent-side precondition check)
+	 * can also record savings. Layer 1 (orchestrator dispatch) has its own telemetry path.
+	 */
 	async reportNoOp(args: {
 		proposal_id?: string | number;
 		id?: string | number;
@@ -1768,6 +1782,25 @@ export class PgProposalHandlers {
 			}
 
 			const proposal = propResult.rows[0];
+
+			// P1386 AC-6: Write telemetry to agent_runs before releasing lease
+			// This captures the early-exit completion for observability.
+			try {
+				await query(
+					`INSERT INTO agent_runs
+					 (proposal_id, display_id, agent_identity, stage, model_used,
+					  status, activity, started_at, completed_at, duration_ms, output_summary)
+					 VALUES ($1, 'early-exit', $2, 'architect', NULL,
+					  'completed', 'early-exit', now(), now(), 0, 'early-exit: architect preconditions met')`,
+					[pId, agentIdentity ?? 'architect']
+				);
+			} catch (telemetryErr) {
+				// Log but don't fail — lease release should still happen
+				console.warn(
+					`[reportNoOp] P1386 AC-6 telemetry write failed for proposal=${pId}:`,
+					telemetryErr instanceof Error ? telemetryErr.message : String(telemetryErr)
+				);
+			}
 
 			// Release the lease if an agent was specified
 			if (agentIdentity) {
