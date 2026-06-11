@@ -166,7 +166,7 @@ export async function checkExtractionFailureAlarm(
 			 ) VALUES ($1, now(), 1, now())
 			 ON CONFLICT (provider) DO UPDATE SET
 			   last_alarm_at = now(),
-			   alarm_count = alarm_count + 1,
+			   alarm_count = extraction_failure_alarm_cooldown.alarm_count + 1,
 			   updated_at = now()`,
 			[input.provider],
 		);
