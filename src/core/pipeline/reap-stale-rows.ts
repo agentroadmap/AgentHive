@@ -76,16 +76,57 @@ export async function reapStaleRows(
 		// release_reason values (cleanup of 3,806 oversized rows confirmed
 		// the source). Reaped leases map to 'lease_expired' (incomplete
 		// bucket → maturity='new').
-		const r = await pool.query(
-			`UPDATE roadmap_proposal.proposal_lease
-			 SET released_at=now(),
-			     release_reason='lease_expired'
-			 WHERE released_at IS NULL
-			   AND expires_at IS NOT NULL
-			   AND expires_at < now() - ($1 || ' min')::interval
-			 RETURNING id`,
-			[String(LEASE_STALE_MIN)],
-		);
+		//
+		// P671 AC-4, AC-5: For each reaped lease, insert a proposal_discussions entry
+		// with context_prefix='lease-overrun' and increment overrun_count on the proposal.
+		// If overrun_count >= 2, set oversized=TRUE.
+		const reaperQuery = `
+			WITH reaped_leases AS (
+				SELECT pl.id, pl.proposal_id, pl.agent_identity, pl.expires_at
+				FROM roadmap_proposal.proposal_lease pl
+				WHERE pl.released_at IS NULL
+				  AND pl.expires_at IS NOT NULL
+				  AND pl.expires_at < now() - ($1 || ' min')::interval
+			),
+			updated_leases AS (
+				UPDATE roadmap_proposal.proposal_lease
+				SET released_at = now(),
+					release_reason = 'lease_expired'
+				WHERE id IN (SELECT id FROM reaped_leases)
+				RETURNING id, proposal_id, agent_identity, expires_at
+			),
+			increment_overruns AS (
+				UPDATE roadmap_proposal.proposal p
+				SET overrun_count = overrun_count + 1
+				WHERE p.id IN (SELECT proposal_id FROM updated_leases)
+				RETURNING id, overrun_count
+			),
+			mark_oversized AS (
+				UPDATE roadmap_proposal.proposal p
+				SET oversized = TRUE
+				WHERE p.id IN (SELECT id FROM increment_overruns WHERE overrun_count >= 2)
+				RETURNING id
+			),
+			insert_discussions AS (
+				INSERT INTO roadmap_proposal.proposal_discussions
+					(proposal_id, author_identity, context_prefix, body, project_id)
+				SELECT
+					ul.proposal_id,
+					'system/reaper',
+					'lease-overrun',
+					json_build_object(
+						'lease_id', ul.id,
+						'agent_identity', ul.agent_identity,
+						'expires_at', ul.expires_at,
+						'reaped_at', now()
+					)::text,
+					1
+				FROM updated_leases ul
+				RETURNING id
+			)
+			SELECT COUNT(*) as reaped_count FROM updated_leases
+		`;
+		const r = await pool.query(reaperQuery, [String(LEASE_STALE_MIN)]);
 		result.leases = r.rowCount ?? 0;
 	} catch (err) {
 		logger.warn(

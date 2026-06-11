@@ -897,6 +897,30 @@ export class PgProposalHandlers {
 				}
 			}
 
+			// P671 AC-7: Check if proposal is oversized; only split-architect may claim it
+			const proposalCheckResult = await query<{ oversized: boolean }>(
+				`SELECT oversized FROM roadmap_proposal.proposal WHERE id = $1`,
+				[id],
+			);
+			if (proposalCheckResult.rows.length > 0 && proposalCheckResult.rows[0].oversized) {
+				// Check if claiming agent has split-architect role
+				const roleResult = await query<{ role: string }>(
+					`SELECT role FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
+					[agentArg],
+				);
+				const agentRole = roleResult.rows[0]?.role ?? 'developer';
+				if (agentRole !== 'split-architect') {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Proposal P${id} is tagged oversized after 2+ lease overruns. Only split-architect may claim it. Current agent role: ${agentRole}.`,
+							},
+						],
+					};
+				}
+			}
+
 			const activeLeases = (await pg.getActiveLeases(id)).filter(
 				(lease) => lease.lease_status === "active" || lease.lease_status === "open",
 			);
@@ -919,8 +943,26 @@ export class PgProposalHandlers {
 				}
 			}
 
-			const durationMinutes = args.durationMinutes ?? 120;
+			// P671 AC-13: default lease is 15 minutes (changed from 120)
+			const durationMinutes = args.durationMinutes ?? 15;
 			const expiresAt = new Date(Date.now() + durationMinutes * 60 * 1000);
+
+			// P671 AC-3: force-claim with duration > 30 minutes logs a warning decision entry
+			if (args.force && durationMinutes > 30 && agentArg !== 'e2e-verifier') {
+				await query(
+					`INSERT INTO roadmap_proposal.proposal_discussions
+					 (proposal_id, author_identity, context_prefix, body, project_id)
+					 VALUES ($1, $2, $3, $4, $5)`,
+					[
+						id,
+						'system/mcp-server',
+						'decision:',
+						`WARN: force-claim with duration ${durationMinutes}m exceeds 30m threshold. Operator override.`,
+						1, // default project_id
+					],
+				);
+			}
+
 			const claimed = await pg.claimLease(id, agentArg, expiresAt);
 			if (!claimed) {
 				return {
@@ -1019,7 +1061,8 @@ export class PgProposalHandlers {
 				};
 			}
 
-			const durationMinutes = args.durationMinutes ?? 120;
+			// P671 AC-14: default lease renewal is 15 minutes (changed from 120)
+			const durationMinutes = args.durationMinutes ?? 15;
 			const expiresAt = new Date(Date.now() + durationMinutes * 60 * 1000);
 			const renewed = await pg.renewLease(id, args.agent, expiresAt);
 			if (!renewed) {
