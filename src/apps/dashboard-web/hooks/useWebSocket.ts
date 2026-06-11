@@ -65,7 +65,11 @@ export interface Proposal {
 	obsoleted_reason?: string | null;
 	repositoryPath: string | null;
 	budgetLimitUsd: number;
-	tags: string | null;
+	tags: Record<string, unknown> | string | null;
+	gateScannerPaused?: boolean;
+	gatePausedBy?: string | null;
+	gatePausedAt?: string | null;
+	gatePausedReason?: string | null;
 	createdAt: string;
 	updatedAt: string;
 }
