@@ -46,14 +46,14 @@ Complete audit of all MCP write surfaces across mcp_proposal, mcp_agent, mcp_ops
 | 12 | add_dependency | fromProposalId, toProposalId, dependencyType | Honored | pg-handlers.ts:1300 | INSERT to proposal_dependency |
 | 13 | remove_dependency | dependencyId | Honored | pg-handlers.ts:1350 | DELETE from proposal_dependency |
 | 14 | submit_review | proposal_id, reviewer, verdict, notes, findings, is_blocking | Honored | pg-handlers.ts:1105,1125 | is_blocking now persisted (P1387 fix, line 1111) |
-| 15 | add_discussion | proposal_id, author, content, context_prefix, parent_id | **DROPPED** | pg-handlers.ts:1309 | author silently defaults to 'system' when omitted (line 1309) |
+| 15 | add_discussion | proposal_id, author, content, context_prefix, parent_id | Honored (documented default) | pg-handlers.ts:1306 | author defaults to 'system' when omitted — DELIBERATE for system-issued cubic/gate callers; review rejected converting it to an error. Explicit author honored verbatim (regression-tested). |
 | 16 | record_gate_decision | proposal_id, to_state, decision, reason, decided_by | Honored | pg-handlers.ts:1400 | All wired in INSERT gate_decision_log |
 | 17 | prop_map_upsert | proposal_id, key, value, metadata | Honored | pg-handlers.ts:1450 | INSERT ... ON CONFLICT DO UPDATE |
 | 18 | prop_report_no_op | proposal_id, reason | Honored | pg-handlers.ts:1500 | Inserted into proposal_event log |
 
 **Issue Summary for mcp_proposal**:
 - **prop_claim**: `message` field not persisted. Schema declares it; handler accepts it; never reaches pg.claimLease(). Impact: claim rationale lost. **Fix**: Pass to lease row metadata or reject with error.
-- **add_discussion**: `author` silently defaults to 'system' when omitted. Per P3001, empty content now errors; author defaulting should do the same. **Fix**: Return validation error when author missing.
+- **add_discussion**: `author` defaults to 'system' when omitted — this is a DOCUMENTED DEFAULT for system-issued callers (cubic/gate agents), not a silent drop. P1389 review explicitly rejected converting it to a validation error; doing so would break system-issued discussion writes. Explicit author is honored verbatim (regression-tested).
 
 ---
 
