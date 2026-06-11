@@ -26,7 +26,7 @@ export default function Layout({
 	onRefreshData,
 }: LayoutProps) {
 	return (
-		<div className="h-screen bg-gray-50 dark:bg-gray-900 flex overflow-hidden transition-colors duration-200">
+		<div className="h-dvh bg-gray-50 dark:bg-gray-900 flex overflow-hidden transition-colors duration-200">
 			<HealthIndicator />
 			<SideNavigation
 				proposals={proposals}
