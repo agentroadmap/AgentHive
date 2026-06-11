@@ -5509,6 +5509,8 @@ export class RoadmapServer {
 			// Query trace_span for current state and tool call counts
 			let slaState = 0; // default to 0 (down)
 			let toolCallCount = 0;
+			let rateLimitViolationsTotal = 0;
+			let rateLimitViolationsByReason: Record<string, number> = {};
 
 			try {
 				// Check if system is in normal state by counting recent spans
@@ -5526,8 +5528,33 @@ export class RoadmapServer {
 				slaState = 0;
 			}
 
+			// P1100 AC-11: Query rate limit violations for observability
+			try {
+				// Total rate limit violations across all senders and channels
+				const totalResult = await pool.query(`
+					SELECT COUNT(*) as count
+					FROM roadmap.msg_send_rate_limit_violation
+					WHERE violation_at > NOW() - INTERVAL '1 hour'
+				`);
+				rateLimitViolationsTotal = parseInt(totalResult.rows[0]?.count || "0", 10);
+
+				// Violations broken down by reason
+				const byReasonResult = await pool.query(`
+					SELECT reason, COUNT(*) as count
+					FROM roadmap.msg_send_rate_limit_violation
+					WHERE violation_at > NOW() - INTERVAL '1 hour'
+					GROUP BY reason
+				`);
+				for (const row of byReasonResult.rows) {
+					rateLimitViolationsByReason[row.reason] = parseInt(row.count || "0", 10);
+				}
+			} catch (err) {
+				console.warn("Error querying rate limit violations:", err);
+				// Non-fatal: metrics endpoint continues without rate limit data
+			}
+
 			// Build Prometheus text format response
-			const metrics = `# HELP agenthive_sla_state Current SLA state (1=normal, 0=down)
+			let metrics = `# HELP agenthive_sla_state Current SLA state (1=normal, 0=down)
 # TYPE agenthive_sla_state gauge
 agenthive_sla_state{state="normal"} ${slaState}
 
@@ -5535,6 +5562,20 @@ agenthive_sla_state{state="normal"} ${slaState}
 # TYPE agenthive_mcp_tool_calls_total counter
 agenthive_mcp_tool_calls_total ${toolCallCount}
 
+# HELP agenthive_msg_send_rate_limit_violations_total Total msg_send rate limit violations in last hour
+# TYPE agenthive_msg_send_rate_limit_violations_total counter
+agenthive_msg_send_rate_limit_violations_total ${rateLimitViolationsTotal}
+`;
+
+			// P1100 AC-11: Per-reason breakdown of rate limit violations
+			for (const [reason, count] of Object.entries(rateLimitViolationsByReason)) {
+				metrics += `# HELP agenthive_msg_send_rate_limit_violations_by_reason_total Rate limit violations by reason
+# TYPE agenthive_msg_send_rate_limit_violations_by_reason_total counter
+agenthive_msg_send_rate_limit_violations_by_reason_total{reason="${reason}"} ${count}
+`;
+			}
+
+			metrics += `
 # Note: install prom-client for full histogram support
 `;
 
