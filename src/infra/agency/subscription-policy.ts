@@ -703,7 +703,8 @@ export async function getCapacityEnvelope(
 		   FROM roadmap_workforce.squad_dispatch
 		  WHERE agent_identity = $1
 		    AND offer_status = 'claimed'
-		    AND completed_at IS NULL`,
+		    AND completed_at IS NULL
+		    AND (paused_at_provider_limit = false OR paused_at_provider_limit IS NULL)`,
 		[agencyId],
 	);
 	const in_flight_claims = Number(inFlightRows[0]?.cnt ?? 0);
