@@ -133,15 +133,13 @@ export async function postDeliveryWithAuth(
 
 	// Step 5: Build signing input — F1 (P1106): targetHostId is a delimited field
 	// in the signing scope to prevent cross-host replay. Format:
-	//   POST\n<path>\nX-AgentHive-Delivery-Id: <id>\n...\nX-AgentHive-Target-Host-Id: <host>\n<body>
+	//   POST\n<path>\n<target_host_id>\nX-AgentHive-Delivery-Id: <id>\n...\n<body>
 	const url = new URL(callbackUrl);
 	const pathAndSearch = url.pathname + (url.search || "");
 
-	const targetHostField = targetHostId
-		? `\nX-AgentHive-Target-Host-Id: ${targetHostId}`
-		: "";
+	const targetHostField = targetHostId ? `\n${targetHostId}` : "";
 
-	const signingInput = `POST\n${pathAndSearch}\nX-AgentHive-Delivery-Id: ${deliveryId}\nX-AgentHive-Timestamp: ${timestamp}\nX-AgentHive-Agent-Id: ${sendingAgentId}${targetHostField}\n${bodyJson}`;
+	const signingInput = `POST\n${pathAndSearch}${targetHostField}\nX-AgentHive-Delivery-Id: ${deliveryId}\nX-AgentHive-Timestamp: ${timestamp}\nX-AgentHive-Agent-Id: ${sendingAgentId}\n${bodyJson}`;
 
 	// Step 6: HMAC-SHA256 signature
 	const signature = crypto
@@ -319,9 +317,10 @@ async function auditSignatureFailure(
  * 5. Rebuild signing input identically to sender, using the actual request target
  * 6. crypto.timingSafeEqual comparison (NOT string ===)
  *
- * F1 (P1106): If X-AgentHive-Target-Host-Id header is present, it is included as a
- * delimited field in the reconstructed signing input. This binds the signature to a
- * specific target host and prevents cross-host replay attacks.
+ * F1 (P1106): targetHostId is included as a delimited field in the reconstructed signing input.
+ * This binds the signature to a specific target host and prevents cross-host replay attacks.
+ * targetHostId can be passed either as a parameter or extracted from X-AgentHive-Target-Host-Id header;
+ * parameter takes precedence (for test flexibility).
  *
  * @param rawBody - Exact HTTP request body (as string or Buffer)
  * @param headers - HTTP request headers (case-insensitive keys acceptable)
@@ -329,6 +328,7 @@ async function auditSignatureFailure(
  * @param pool - Postgres connection pool for dedup check
  * @param requestTarget - HTTP request target (path + query, e.g., '/webhook/msg?tenant=agenthive&v=1').
  *                        Must start with '/', no control chars, no absolute URLs. AC-1: This is required (no default).
+ * @param targetHostId - Optional target host identifier (AC-29: prevents cross-host replay when included in HMAC scope)
  *
  * @returns true if signature is valid and not a duplicate, false otherwise
  */
@@ -338,6 +338,7 @@ export async function verifyDeliverySignature(
 	signingSecret: string,
 	pool: Pool,
 	requestTarget?: string,
+	targetHostId?: string,
 ): Promise<boolean> {
 	try {
 		// Step 1: Extract headers (normalize keys to lowercase)
@@ -351,7 +352,8 @@ export async function verifyDeliverySignature(
 		const timestampStr = normalizedHeaders["x-agenthive-timestamp"] || "";
 		const agentId = normalizedHeaders["x-agenthive-agent-id"] || "";
 		// F1: include target_host_id in signing input reconstruction if present
-		const targetHostId = normalizedHeaders["x-agenthive-target-host-id"] || "";
+		// Parameter targetHostId takes precedence over header (for test flexibility and future flexibility)
+		const resolvedTargetHostId = targetHostId || normalizedHeaders["x-agenthive-target-host-id"] || "";
 
 		if (!signatureHeader || !deliveryId || !timestampStr || !agentId) {
 			return false;
@@ -391,11 +393,9 @@ export async function verifyDeliverySignature(
 		const bodyStr =
 			rawBody instanceof Buffer ? rawBody.toString("utf-8") : rawBody;
 
-		const targetHostField = targetHostId
-			? `\nX-AgentHive-Target-Host-Id: ${targetHostId}`
-			: "";
+		const targetHostField = resolvedTargetHostId ? `\n${resolvedTargetHostId}` : "";
 
-		const signingInput = `POST\n${pathAndSearch}\nX-AgentHive-Delivery-Id: ${deliveryId}\nX-AgentHive-Timestamp: ${timestamp}\nX-AgentHive-Agent-Id: ${agentId}${targetHostField}\n${bodyStr}`;
+		const signingInput = `POST\n${pathAndSearch}${targetHostField}\nX-AgentHive-Delivery-Id: ${deliveryId}\nX-AgentHive-Timestamp: ${timestamp}\nX-AgentHive-Agent-Id: ${agentId}\n${bodyStr}`;
 
 		// Step 6: Verify signature using constant-time comparison
 		const expectedSignature = crypto
