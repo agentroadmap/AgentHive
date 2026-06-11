@@ -14,6 +14,41 @@
  * Decision rule (per operator policy):
  *   resetSeconds <= SHORT_WINDOW_SECONDS → throttle route only (short window)
  *   resetSeconds  > SHORT_WINDOW_SECONDS → throttle route + pause agency (long window)
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * P465 AC-9: Finish-in-flight invariant
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * Throttle blocks NEW claims but allows in-flight runs to finish:
+ *
+ * 1. NEW CLAIM BLOCKED (at claim evaluation time):
+ *    - claimOne() in agency-claim-loop.ts calls evaluateSubscriptionPolicy()
+ *      BEFORE calling fn_claim_work_offer
+ *    - If refused: return null (no claim made) + declareThrottle()
+ *    - If allowed: proceed to fn_claim_work_offer and spawn
+ *
+ * 2. OFFER DISPATCH RETURNED (when offer arrives at handler):
+ *    - handleOfferDispatch() calls evaluateSubscriptionPolicy()
+ *      BEFORE spawning
+ *    - If refused: call fn_return_work_offer() + declareThrottle()
+ *      → offer goes back to pool for other agencies
+ *    - If allowed: proceed to spawn + renew + complete
+ *
+ * 3. IN-FLIGHT RUN CONTINUES (once claimed):
+ *    - Once an offer is claimed (fn_claim_work_offer succeeded), the claim
+ *      holds a dispatch_id and claim_token
+ *    - Lease renewal fires independently in runSpawn's renewalTimer loop
+ *      (line ~388 in offer-dispatch-handler.ts)
+ *    - declareThrottle() only touches agency.status and metadata;
+ *      it does NOT interrupt active leases or kill spawns
+ *    - fn_complete_work_offer() is called normally when spawn exits
+ *      (line ~554 in offer-dispatch-handler.ts)
+ *    - Result: in-flight run completes undisturbed
+ *
+ * This design avoids the failure mode where a half-done proposal is abandoned
+ * because the agency hit a soft margin during a long operation.
+ *
+ * See tests/p465-finish-in-flight.test.ts for verification.
  */
 
 import { SHORT_WINDOW_SECONDS } from "./usage-limit-detector.ts";
