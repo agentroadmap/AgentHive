@@ -16,6 +16,7 @@ import { query } from "../postgres/pool.js";
 import type { Pool } from "pg";
 import { MemoryService } from "../../memory/memory_service.ts";
 import { buildContextPackage, type PackageType } from "./context_builder.js";
+import type { AgentPersonality } from "../../core/identity/agent-registry/types.ts";
 
 export interface TaskContext {
   task_id: string;
@@ -79,6 +80,9 @@ export interface SpawnBriefing {
   // Provenance
   briefed_by: string;
   briefed_at: string;
+
+  // P1352: Agent personality (core truths, communication style, expertise matching)
+  personality?: AgentPersonality;
 
   // P194: project memory context injected at dispatch time
   project_context?: Record<string, Record<string, unknown>>;
@@ -205,6 +209,35 @@ export async function briefingAssemble(
     }
   }
 
+  // P1352 Step 5c: Load agent personality and semantic/episodic memory
+  let personality: AgentPersonality | undefined;
+  try {
+    const agentResult = await query(
+      `
+      SELECT personality
+      FROM roadmap_workforce.agent_registry
+      WHERE agent_identity = $1
+      `,
+      [briefed_by]
+    );
+
+    if (agentResult.rows.length > 0) {
+      personality = agentResult.rows[0].personality;
+    }
+
+    // Also load agent semantic memory for context injection
+    const agentSemantic = await memoryService.getAgentMemory(briefed_by, "semantic");
+    if (agentSemantic && Object.keys(agentSemantic).length > 0) {
+      inherited_memory.push({
+        key: `agent_memory:semantic`,
+        body: JSON.stringify(agentSemantic),
+      });
+    }
+  } catch {
+    // Non-fatal: personality or memory may not exist yet
+    // Proceed without personality injection
+  }
+
   // Step 6: Record briefing
   const briefing: SpawnBriefing = {
     briefing_id,
@@ -231,6 +264,7 @@ export async function briefingAssemble(
     briefed_by,
     briefed_at: new Date().toISOString(),
 
+    personality,
     project_context,
     cache_control,
   };
@@ -257,9 +291,10 @@ export async function briefingAssemble(
       rescue_team_channel,
       request_assistance_threshold,
       briefed_by,
+      personality,
       project_context,
       cache_control
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
     `,
     [
       briefing_id,
@@ -280,6 +315,7 @@ export async function briefingAssemble(
       task.rescue_team_channel || null,
       task.request_assistance_threshold || 3,
       briefed_by,
+      personality ? JSON.stringify(personality) : null,
       project_context ? JSON.stringify(project_context) : null,
       JSON.stringify(cache_control),
     ]
@@ -314,6 +350,7 @@ export async function briefingLoad(briefing_id: string): Promise<SpawnBriefing> 
       request_assistance_threshold,
       briefed_by,
       briefed_at,
+      personality,
       project_context,
       cache_control
     FROM roadmap.spawn_briefing
@@ -352,6 +389,7 @@ export async function briefingLoad(briefing_id: string): Promise<SpawnBriefing> 
     briefed_by: row.briefed_by,
     briefed_at: row.briefed_at,
 
+    personality: row.personality ?? undefined,
     project_context: row.project_context ?? undefined,
     cache_control: row.cache_control ?? undefined,
   };
