@@ -236,15 +236,15 @@ export async function hydrateLiaisonContext(
 			},
 
 			spending: {
-				spent_today_usd: self.spent_today_usd,
-				spent_week_usd: self.spent_week_usd,
-				cumulative_usd: self.cumulative_usd,
-				daily_cap_usd: self.daily_cap_usd,
+				spent_today_usd: Number(self.spent_today_usd ?? 0),
+				spent_week_usd: Number(self.spent_week_usd ?? 0),
+				cumulative_usd: Number(self.cumulative_usd ?? 0),
+				daily_cap_usd: self.daily_cap_usd != null ? Number(self.daily_cap_usd) : null,
 			},
 
 			capabilities: self.capabilities ?? [],
-			max_concurrent_claims: self.max_concurrent_claims,
-			active_claim_count: self.active_claim_count,
+			max_concurrent_claims: Number(self.max_concurrent_claims),
+			active_claim_count: Number(self.active_claim_count),
 
 			paused_proposal_roles: pausedRoles,
 			peers,
