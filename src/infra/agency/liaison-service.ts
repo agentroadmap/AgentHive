@@ -37,6 +37,12 @@ export interface LiaisonRegisterPayload {
 	 * (observed live 2026-06-10: reborn host booted "0 of 2 agencies online").
 	 */
 	supersede_stale_session?: boolean;
+	/**
+	 * P1351 AC-5: Optional parent agency ID. If provided, the registered agency
+	 * becomes a child of the specified parent. The parent must exist in roadmap.agency.
+	 * If omitted or null, the agency is registered as a root (no parent).
+	 */
+	parent_agency_id?: string | null;
 }
 
 export interface LiaisonHeartbeatPayload {
@@ -81,6 +87,7 @@ export async function liaisonRegister(
 		public_key,
 		metadata = {},
 		supersede_stale_session = false,
+		parent_agency_id,
 	} = payload;
 
 	if (!agency_id?.trim()) throw new Error("agency_id is required");
@@ -150,7 +157,8 @@ export async function liaisonRegister(
           capability_tags = $5,
           status       = 'active',
           status_reason = NULL,
-          metadata     = $6
+          metadata     = $6,
+          parent_agency_id = $7
       WHERE agency_id = $1
       RETURNING agency_id, status
     ),
@@ -171,6 +179,7 @@ export async function liaisonRegister(
 			host_id,
 			capabilities,
 			JSON.stringify({ ...metadata, capacity_envelope, public_key }),
+			parent_agency_id ?? null,
 		],
 	)) as {
 		rows: Array<{ session_id: string; agency_id: string; status: string }>;

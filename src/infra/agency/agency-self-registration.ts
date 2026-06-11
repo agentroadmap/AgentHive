@@ -76,6 +76,13 @@ export interface AgencySelfRegistrationOptions {
 	dormancySweepMs?: number;
 	/** Optional logger; defaults to console. */
 	logger?: Pick<Console, "log" | "warn" | "error">;
+	/**
+	 * P1351 AC-4: Optional parent agency identity. If provided, creates a parent-child
+	 * relationship where this agency becomes a child of the specified parent.
+	 * If omitted, the agency is registered as a root (no parent).
+	 * The parent must already exist in roadmap.agency.
+	 */
+	parentAgencyId?: string;
 }
 
 export interface AgencySelfRegistrationHandle {
@@ -245,6 +252,7 @@ export async function selfRegisterAgency(
 		// P921: detect unique-violation on idx_agency_session_one_active and throw
 		// the typed AgencyAlreadyActive. P913: pass the same client so the upsert
 		// + session insert participate in this transaction.
+		// P1351: pass optional parent_agency_id for nested agency support.
 		reg = await liaisonRegister(
 			{
 				agency_id: agencyId,
@@ -254,6 +262,7 @@ export async function selfRegisterAgency(
 				capabilities,
 				capacity_envelope: opts.capacityEnvelope,
 				metadata: { ...(opts.metadata ?? {}), pid: process.pid },
+				parent_agency_id: opts.parentAgencyId,
 			},
 			client,
 		);
