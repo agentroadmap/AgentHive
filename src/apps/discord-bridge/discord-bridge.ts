@@ -177,7 +177,8 @@ export class DiscordBridgeService {
 		if (!msg) return;
 
 		const ch = msg.channel ?? "";
-		if (ch !== "broadcast" && !ch.startsWith("team:")) return;
+		// P720: Allow broadcast, team:*, and system:proposal-feed channels
+		if (ch !== "broadcast" && !ch.startsWith("team:") && ch !== "system:proposal-feed") return;
 
 		const discordChannelId = this.channelMappings.get(ch);
 		if (!discordChannelId) return;

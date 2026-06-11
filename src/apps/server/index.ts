@@ -1233,6 +1233,8 @@ export class RoadmapServer {
 				return await this.handleGetBoardStages(req);
 			if (pathname === "/api/board/columns" && method === "GET")
 				return await this.handleGetBoardColumns(req);
+			if (pathname === "/api/board/live-feed" && method === "GET")
+				return await this.handleBoardLiveFeed(req);
 			if (pathname === "/api/arch-docs" && method === "GET")
 				return await this.handleGetArchDocs();
 
@@ -4654,6 +4656,108 @@ export class RoadmapServer {
 				status: 200,
 				headers: { "Content-Type": "application/json", "Cache-Control": "public, max-age=300" },
 			});
+		}
+	}
+
+	/**
+	 * GET /api/board/live-feed
+	 * P720 Activity Feed — Returns recent events from message_ledger WHERE channel=system:proposal-feed
+	 * Query params:
+	 *   ?proposal_id=<id>  — Filter by proposal_id
+	 *   ?agent_identity=<id> — Filter by from_agent
+	 *   ?limit=50          — Max events to return (default 50)
+	 *   ?cursor=<id>       — Pagination cursor (id of last seen event)
+	 *
+	 * Returns array of activity feed events in reverse-chronological order.
+	 * Latency target: <200ms at 10,000 event table size (AC-5).
+	 */
+	private async handleBoardLiveFeed(req: Request): Promise<Response> {
+		try {
+			const url = new URL(req.url);
+			const proposalId = url.searchParams.get("proposal_id")
+				? Number(url.searchParams.get("proposal_id"))
+				: undefined;
+			const agentIdentity = url.searchParams.get("agent_identity")
+				? String(url.searchParams.get("agent_identity")).trim()
+				: undefined;
+			const limit = Math.min(
+				url.searchParams.get("limit") ? Number(url.searchParams.get("limit")) : 50,
+				200, // Cap at 200 rows per request
+			);
+			const cursor = url.searchParams.get("cursor")
+				? Number(url.searchParams.get("cursor"))
+				: undefined;
+
+			// Build WHERE clause filters
+			const whereParts: string[] = ["channel = 'system:proposal-feed'"];
+			const params: (number | string | undefined)[] = [];
+
+			if (proposalId) {
+				whereParts.push(`proposal_id = $${params.length + 1}`);
+				params.push(proposalId);
+			}
+
+			if (agentIdentity) {
+				whereParts.push(`from_agent = $${params.length + 1}`);
+				params.push(agentIdentity);
+			}
+
+			if (cursor) {
+				whereParts.push(`id < $${params.length + 1}`);
+				params.push(cursor);
+			}
+
+			const whereClause = whereParts.join(" AND ");
+
+			// Query activity feed with indexed lookup
+			const { rows } = await query<{
+				id: number;
+				from_agent: string;
+				proposal_id: number | null;
+				message_content: string;
+				created_at: string;
+				metadata: Record<string, unknown>;
+			}>(
+				`SELECT id, from_agent, proposal_id, message_content, created_at, metadata
+				 FROM roadmap.message_ledger
+				 WHERE ${whereClause}
+				 ORDER BY created_at DESC, id DESC
+				 LIMIT $${params.length + 1}`,
+				[...params, limit],
+			);
+
+			// Format response with next cursor if available
+			const events = rows.map((row) => ({
+				id: row.id,
+				actor: row.from_agent,
+				proposal_id: row.proposal_id,
+				message: row.message_content,
+				timestamp: row.created_at,
+				event_type: row.metadata?.event_type ?? "unknown",
+			}));
+
+			const nextCursor = events.length >= limit ? events[events.length - 1]?.id : null;
+
+			return Response.json(
+				{
+					events,
+					cursor: nextCursor,
+					count: events.length,
+				},
+				{
+					status: 200,
+					headers: {
+						"Cache-Control": "no-cache, must-revalidate",
+						"Content-Type": "application/json",
+					},
+				},
+			);
+		} catch (error) {
+			console.error("[P720] board live-feed query failed:", (error as Error).message);
+			return Response.json(
+				{ error: "Failed to fetch activity feed", events: [] },
+				{ status: 500, headers: { "Content-Type": "application/json" } },
+			);
 		}
 	}
 
