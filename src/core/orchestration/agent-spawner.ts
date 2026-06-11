@@ -391,7 +391,7 @@ export function buildSpawnProcessEnv(input: {
 	const baseEnv: Record<string, string> = {
 		// Carry through essential PATH
 		PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
-		HOME: process.env.HOME ?? "/var/lib/agenthive",
+		HOME: input.agentEnv.HOME ?? process.env.HOME ?? "/var/lib/agenthive",
 		...(process.env.CODEX_HOME ? { CODEX_HOME: process.env.CODEX_HOME } : {}),
 		// Agent-specific DB credentials — agent env first, then process env
 		DATABASE_URL: input.agentEnv.DATABASE_URL ?? process.env.DATABASE_URL ?? "",
@@ -1862,7 +1862,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	let scratchUuid: string | null = null;
 	const worktreePath = join(worktreeRoot, worktree);
 	try {
-		const scratch = await provisionScratch({ agentRunId, agentIdentity });
+		const scratch = await provisionScratch(randomUUID(), agentRunId, agentIdentity);
 		scratchUuid = scratch.scratchUuid;
 		processEnv.AGENT_SCRATCH_DIR = scratch.scratchPath;
 		// AC-1: stamp scratch_path on the cubic that owns this worktree (non-fatal)
