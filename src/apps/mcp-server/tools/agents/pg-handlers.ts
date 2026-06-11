@@ -973,4 +973,120 @@ export class PgAgentHandlers {
 			return errorResult("Failed to register agency", err);
 		}
 	}
+
+	async getRoleDefinition(args: {
+		role_slug: string;
+	}): Promise<CallToolResult> {
+		try {
+			const roleSlug = args.role_slug?.trim();
+			if (!roleSlug) {
+				return errorResult(
+					"Missing role_slug",
+					new Error("role_slug is required"),
+				);
+			}
+
+			const capResult = await query<{
+				is_active: boolean;
+			}>(
+				"SELECT is_active FROM roadmap_proposal.capability_taxonomy WHERE role_slug = $1",
+				[roleSlug],
+			);
+
+			if (capResult.rows.length === 0) {
+				const activeResult = await query<{ role_slug: string }>(
+					"SELECT role_slug FROM roadmap_proposal.capability_taxonomy WHERE is_active = true ORDER BY role_slug LIMIT 10",
+					[],
+				);
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(
+								{
+									error: "role_not_found",
+									role_slug: roleSlug,
+									status: 404,
+									message: `Role '${roleSlug}' not found`,
+									active_roles_sample: activeResult.rows.map((r) => r.role_slug),
+									note: "Use role_slug format: domain/role-name",
+								},
+								null,
+								2,
+							),
+						},
+					],
+					isError: true,
+				};
+			}
+
+			const { is_active } = capResult.rows[0];
+
+			if (!is_active) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(
+								{
+									error: "role_inactive",
+									role_slug: roleSlug,
+									status: 410,
+									message: `Role '${roleSlug}' is inactive`,
+								},
+								null,
+								2,
+							),
+						},
+					],
+					isError: true,
+				};
+			}
+
+			const defResult = await query<{
+				role_slug: string;
+				content_md: string;
+				frontmatter?: Record<string, unknown>;
+				synced_at: string;
+				synced_sha: string;
+			}>(
+				"SELECT role_slug, content_md, frontmatter, synced_at, synced_sha FROM roadmap_proposal.role_definition WHERE role_slug = $1",
+				[roleSlug],
+			);
+
+			if (defResult.rows.length === 0) {
+				return errorResult(
+					"Role definition missing",
+					new Error(`Definition for '${roleSlug}' not found`),
+				);
+			}
+
+			const { content_md, frontmatter, synced_at, synced_sha } =
+				defResult.rows[0];
+
+			return {
+				content: [
+					{
+						type: "text",
+						text: JSON.stringify(
+							{
+								role_slug: roleSlug,
+								content_md,
+								frontmatter: frontmatter || {},
+								synced_at,
+								synced_sha,
+								is_active: true,
+								status: 200,
+							},
+							null,
+							2,
+						),
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to get role definition", err);
+		}
+	}
 }

@@ -443,4 +443,36 @@ export function registerAgentTools(server: McpServer): void {
 		async (input) => pgHandlers.registerAgent(input as PgRegisterArgs),
 	);
 	server.addTool(pgRegisterTool);
+
+	// ── agent_get_role_definition ───────────────────────────────────────────
+	// AC-7: P1068 role-identity registry — fetch role definition from DB
+	type GetRoleDefinitionArgs = Parameters<PgAgentHandlers["getRoleDefinition"]>[0];
+	const getRoleDefinitionTool = createSimpleValidatedTool<GetRoleDefinitionArgs>(
+		{
+			name: "agent_get_role_definition",
+			description:
+				"P1068 AC-7: Fetch a role definition by role_slug from the role_definition table. " +
+				"Remote liaison processes call this at spawn time to load the full MD spec. " +
+				"role_slug format: domain/role-name (e.g., engineering/code-reviewer). " +
+				"Returns: {role_slug, content_md, frontmatter, synced_at, is_active} on 200. " +
+				"404 if slug unknown; 410 if slug inactive.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					role_slug: {
+						type: "string",
+						description: "Role identifier: domain/role-name (e.g., engineering/code-reviewer)",
+					},
+				},
+				required: ["role_slug"],
+			},
+		},
+		{
+			type: "object",
+			properties: { role_slug: { type: "string" } },
+			required: ["role_slug"],
+		},
+		async (input) => pgHandlers.getRoleDefinition(input),
+	);
+	server.addTool(getRoleDefinitionTool);
 }
