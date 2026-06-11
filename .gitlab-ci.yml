@@ -69,6 +69,16 @@ capability-coverage-check:
     paths:
       - node_modules/
 
+workflow-states-check:
+  stage: check
+  script:
+    - npm ci
+    - npm run scan:workflow-states
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
+
 migration-schema-lint:
   stage: check
   script:
