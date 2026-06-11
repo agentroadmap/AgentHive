@@ -979,13 +979,38 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 
 	let tierFilter = "";
 	let tierParamValue: string | null = requiredTier;
-	
+
 	if (role && (role.includes("frontier-review") || role.includes("audit"))) {
 		tierParamValue = "frontier";
 	}
 
 	if (tierParamValue) {
 		tierFilter = ` AND mr.tier = '${tierParamValue}'`;
+	}
+
+	// P1068 AC-5: Layer 7 — enforce agency preferred_provider as hard constraint
+	// If agency has preferred_provider set, only routes matching that provider are allowed
+	let preferredProviderFilter = "";
+	if (agencyIdentity) {
+		try {
+			const { rows: agencyRows } = await query<{ preferred_provider: string | null }>(
+				`SELECT preferred_provider FROM roadmap_workforce.agent_registry
+				 WHERE agent_identity = $1 AND status = 'active'`,
+				[agencyIdentity],
+			);
+			const preferredProvider = agencyRows[0]?.preferred_provider;
+			if (preferredProvider) {
+				preferredProviderFilter = ` AND mr.route_provider = '${preferredProvider}'`;
+				console.log(
+					`[AgentSpawner AC-5] Layer 7 applied: agency '${agencyIdentity}' enforced provider='${preferredProvider}'`,
+				);
+			}
+		} catch (err) {
+			console.warn(
+				`[AgentSpawner AC-5] failed to resolve preferred_provider for '${agencyIdentity}':`,
+				err instanceof Error ? err.message : err,
+			);
+		}
 	}
 
 	// P771/P773/P1435: shared params for all route queries: $3=host, $4=projectId, $5=agencyIdentity, $6=roleProfileId
@@ -997,7 +1022,7 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
           AND ${rolePolicyFilterSql(6, "mr")}
           AND ${budgetFilterSql(4, "mr")}
           AND ${cooldownFilterSql("mr")}
-          AND ${authDownFilterSql("mr")}${tierFilter}`;
+          AND ${authDownFilterSql("mr")}${tierFilter}${preferredProviderFilter}`;
 
 	const fetchRoute = (modelName: string) => {
 		// P742+P771: $3=host, $4=projectId, $5=agencyIdentity, $6=roleProfileId
@@ -1086,7 +1111,7 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
           AND ${agencyPolicyFilterSql(4, "mr")}
           AND ${rolePolicyFilterSql(5, "mr")}
           AND ${budgetFilterSql(3, "mr")}
-          AND ${cooldownFilterSql("mr")}${tierFilter}`;
+          AND ${cooldownFilterSql("mr")}${tierFilter}${preferredProviderFilter}`;
 	// P771: policy params without a leading modelName param (for default-selection queries)
 	const defaultPolicyParams = [AGENTHIVE_HOST, projectId, agencyIdentity, roleProfileId] as const;
 
