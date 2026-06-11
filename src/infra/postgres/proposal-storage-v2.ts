@@ -749,12 +749,15 @@ export async function claimLease(
 	proposalId: number,
 	agentIdentity: string,
 	expiresAt?: Date,
+	claimMessage?: string,
 ): Promise<boolean> {
 	try {
+		// P1389: claimMessage persisted in metadata for claim rationale tracking
+		const metadata = claimMessage ? JSON.stringify({ claim_message: claimMessage }) : null;
 		await query(
-			`INSERT INTO roadmap_proposal.proposal_lease (proposal_id, agent_identity, expires_at)
-       VALUES ($1, $2, $3)`,
-			[proposalId, agentIdentity, expiresAt ?? null],
+			`INSERT INTO roadmap_proposal.proposal_lease (proposal_id, agent_identity, expires_at, metadata)
+       VALUES ($1, $2, $3, $4)`,
+			[proposalId, agentIdentity, expiresAt ?? null, metadata],
 		);
 		return true;
 	} catch {
