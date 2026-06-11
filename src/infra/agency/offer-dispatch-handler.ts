@@ -483,6 +483,18 @@ async function runSpawn(args: {
 
 	clearInterval(renewalTimer);
 
+	// P2322 AC-4: Post-dispatch guard — verify primary checkout is clean
+	try {
+		void verifyAndRestorePrimaryCheckout(logger).catch((err) => {
+			logger.warn(
+				`[OfferDispatchHandler] ${agencyId}: post-dispatch guard failed:`,
+				err instanceof Error ? err.message : err,
+			);
+		});
+	} catch {
+		// ignore — guard is best-effort
+	}
+
 	const succeeded =
 		spawnError === null && (result?.exitCode === 0 || result?.exitCode === null);
 	const status: "delivered" | "failed" = succeeded ? "delivered" : "failed";
@@ -717,4 +729,84 @@ async function pauseAgency(
 		  WHERE agency_id = $1`,
 		[agencyId, String(seconds), reason],
 	);
+}
+
+/**
+ * P2322 AC-4: Post-dispatch guard — verify that the primary checkout
+ * (/data/code/AgentHive) is still on `main` with a clean working tree.
+ *
+ * If a sub-agent leaves the primary checkout on a feature branch or with
+ * uncommitted files, auto-restore and emit a WARNING. This is a safety net
+ * against agents contaminating the shared dev environment.
+ *
+ * This is best-effort — failures are logged but don't block offer completion.
+ */
+async function verifyAndRestorePrimaryCheckout(
+	logger: Pick<Console, "log" | "warn" | "error">,
+): Promise<void> {
+	const { execSync } = await import("node:child_process");
+	const PRIMARY_CHECKOUT = "/data/code/AgentHive";
+
+	try {
+		// Check if primary checkout exists
+		try {
+			await import("fs/promises").then((fs) =>
+				fs.access(PRIMARY_CHECKOUT, 0x0), // F_OK = 0x0
+			);
+		} catch {
+			// Primary doesn't exist or not accessible; skip check
+			return;
+		}
+
+		// Check current branch
+		const branch = execSync(`cd ${PRIMARY_CHECKOUT} && git rev-parse --abbrev-ref HEAD`, {
+			encoding: "utf8",
+			stdio: ["pipe", "pipe", "pipe"], // suppress stderr
+		})
+			.trim();
+
+		if (branch !== "main") {
+			logger.warn(
+				`[P2322 AC-4] Primary checkout on branch "${branch}", not "main" — auto-restoring to main`,
+			);
+			try {
+				execSync(`cd ${PRIMARY_CHECKOUT} && git checkout main`, {
+					stdio: "pipe",
+				});
+			} catch (err) {
+				logger.error(
+					`[P2322 AC-4] Failed to checkout main in primary:`,
+					err instanceof Error ? err.message : err,
+				);
+			}
+		}
+
+		// Check for dirty files
+		const dirtyOutput = execSync(`cd ${PRIMARY_CHECKOUT} && git status --porcelain`, {
+			encoding: "utf8",
+			stdio: ["pipe", "pipe", "pipe"],
+		});
+
+		if (dirtyOutput.trim()) {
+			logger.warn(
+				`[P2322 AC-4] Primary checkout has uncommitted changes — auto-cleaning with 'git clean -fd'`,
+			);
+			try {
+				execSync(`cd ${PRIMARY_CHECKOUT} && git clean -fd`, {
+					stdio: "pipe",
+				});
+			} catch (err) {
+				logger.error(
+					`[P2322 AC-4] Failed to clean primary:`,
+					err instanceof Error ? err.message : err,
+				);
+			}
+		}
+	} catch (err) {
+		// Best-effort; don't block completion
+		logger.warn(
+			`[P2322 AC-4] Post-dispatch guard check failed (this is informational):`,
+			err instanceof Error ? err.message : err,
+		);
+	}
 }
