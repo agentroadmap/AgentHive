@@ -74,7 +74,7 @@ import {
 	query,
 	setPoolLifecycleMode,
 } from "../src/infra/postgres/pool.ts";
-import { loadRuntimeEnvFile } from "../src/shared/runtime/config.ts";
+import { loadRuntimeEnvFile, initConfig } from "../src/shared/runtime/config.ts";
 
 // Protect the shared pool from stray pool.end() in shared CLI code.
 setPoolLifecycleMode("long-running");
@@ -460,6 +460,16 @@ async function main(): Promise<void> {
 
 	// Force pool init so loadRuntimeFlags has a connection. getPool() lazily inits.
 	getPool();
+
+	// P1447 AC-2: Initialize the runtime config resolver with the pool, otherwise
+	// runtime flag reads (AGENCY_OFFER_CLAIM_ENABLED etc.) fail silently. Mirrors
+	// scripts/start-liaison.ts:51-57 and scripts/orchestrator.ts:40.
+	await initConfig({
+		pool: getPool(),
+		scopeContext: {
+			hostId: host,
+		},
+	});
 
 	flags = await loadRuntimeFlags();
 	console.log(`[a2a-host] flags: ${JSON.stringify(flags)}`);
