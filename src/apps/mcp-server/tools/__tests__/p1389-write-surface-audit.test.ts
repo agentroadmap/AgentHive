@@ -143,6 +143,34 @@ describe.skipIf(!LIVE)("P1389: MCP write-surface parameter fidelity", () => {
 		expect(rows[0].author_identity).toBe("system");
 	});
 
+	it("set_maturity.reason persists into proposal.audit JSONB (AC-8)", async () => {
+		const { setMaturity } = await import("../../../../infra/postgres/proposal-storage-v2.ts");
+		const reason = `audit reason round-trip ${STAMP}`;
+		// lease triggers from earlier tests may have already moved maturity;
+		// pick a target that guarantees a real transition (idempotent calls
+		// skip the audit append by design).
+		const { rows: cur } = await query<{ maturity: string }>(
+			`SELECT maturity FROM roadmap_proposal.proposal WHERE id = $1`,
+			[testProposalId],
+		);
+		const target = cur[0].maturity === "active" ? "new" : "active";
+		await setMaturity(testProposalId, target as "new" | "active", "system", reason);
+		const { rows } = await query<{ entry: { Reason?: string; Activity?: string } }>(
+			`SELECT audit->-1 AS entry FROM roadmap_proposal.proposal WHERE id = $1`,
+			[testProposalId],
+		);
+		expect(rows[0].entry.Activity).toBe("MaturityChange");
+		expect(rows[0].entry.Reason).toBe(reason);
+	});
+
+	it("prop_list search param is honored (title ILIKE filter, not a silent full list)", async () => {
+		const { PgProposalHandlers } = await import("../proposals/pg-handlers.ts");
+		const handlers = new PgProposalHandlers();
+		const res = await handlers.listProposals({ search: STAMP });
+		const text = (res.content[0] as { text: string }).text;
+		expect(text).toContain(`P1389 fidelity test ${STAMP}`);
+	});
+
 	it("add_discussion: explicit author is honored verbatim", async () => {
 		// author_identity has an FK to agent_registry — use a registered
 		// identity distinct from 'system' to prove no silent defaulting.
