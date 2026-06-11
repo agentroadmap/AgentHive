@@ -30,7 +30,7 @@ import {
   getCapacityEnvelope,
 } from "./subscription-policy.ts";
 import { initializeContextAtBoot, refreshContextOnInterval } from "./liaison-context.ts";
-import { config } from "../runtime/index.ts";
+import * as config from "../../shared/runtime/config.ts";
 import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 
 export interface AgencyConfig {
