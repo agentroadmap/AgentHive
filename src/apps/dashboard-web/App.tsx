@@ -80,7 +80,7 @@ function toSharedProposal(proposal: WebSocketProposal): Proposal {
 		acceptanceCriteriaItems: proposal.acceptanceCriteriaItems,
 		needs_capabilities: proposal.needsCapabilities,
 		required_capabilities: proposal.requiredCapabilities,
-		parentProposalId: proposal.parentProposalId,
+		parentProposalId: proposal.parentId ?? undefined,
 		parentProposalTitle: proposal.parentProposalTitle,
 		maturity: proposal.maturity,
 		obsoleted_reason: proposal.obsoleted_reason,
@@ -89,6 +89,11 @@ function toSharedProposal(proposal: WebSocketProposal): Proposal {
 		liveActivity: proposal.liveActivity,
 		displayId: proposal.displayId,
 		websocketId: proposal.websocketId ?? proposal.id,
+		tags: proposal.tags,
+		gateScannerPaused: proposal.gateScannerPaused,
+		gatePausedBy: proposal.gatePausedBy ?? undefined,
+		gatePausedAt: proposal.gatePausedAt,
+		gatePausedReason: proposal.gatePausedReason,
 		selectionAliases: buildProposalSelectionAliases(
 			proposal.displayId,
 			proposal.websocketId,
@@ -117,7 +122,15 @@ function toSharedChannel(channel: WebSocketChannel): SharedChannel {
 }
 
 export default function App() {
-	const { connected, proposals, agents, channels, boardReloadSignal } = useWebSocket();
+	const {
+		connected,
+		proposals,
+		agents,
+		channels,
+		notifications,
+		bellEnabled,
+		boardReloadSignal,
+	} = useWebSocket();
 	const [activeWorkflow, setActiveWorkflow] = useState(() => {
 		if (typeof window !== "undefined") {
 			return (

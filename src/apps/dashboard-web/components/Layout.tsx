@@ -13,6 +13,17 @@ interface LayoutProps {
 	decisions: Decision[];
 	isLoading: boolean;
 	onRefreshData: () => Promise<void>;
+	unreadNotificationCount?: number;
+	bellEnabled?: boolean;
+	notifications?: Array<{
+		id: string;
+		severity: string;
+		title: string;
+		message: string;
+		created_at: string;
+		seen: boolean;
+	}>;
+	onMarkNotificationSeen?: (id: string) => Promise<void>;
 }
 
 export default function Layout({
@@ -24,9 +35,13 @@ export default function Layout({
 	decisions,
 	isLoading,
 	onRefreshData,
+	unreadNotificationCount = 0,
+	bellEnabled = false,
+	notifications = [],
+	onMarkNotificationSeen,
 }: LayoutProps) {
 	return (
-		<div className="h-screen bg-gray-50 dark:bg-gray-900 flex overflow-hidden transition-colors duration-200">
+		<div className="h-dvh bg-gray-50 dark:bg-gray-900 flex overflow-hidden transition-colors duration-200">
 			<HealthIndicator />
 			<SideNavigation
 				proposals={proposals}
@@ -36,7 +51,13 @@ export default function Layout({
 				onRefreshData={onRefreshData}
 			/>
 			<div className="flex-1 flex flex-col min-h-0 min-w-0">
-				<Navigation projectName={projectName} />
+				<Navigation
+					projectName={projectName}
+					unreadNotificationCount={unreadNotificationCount}
+					bellEnabled={bellEnabled}
+					notifications={notifications}
+					onMarkNotificationSeen={onMarkNotificationSeen}
+				/>
 				<main className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden">
 					<Outlet
 						context={{ proposals, docs, decisions, isLoading, onRefreshData }}

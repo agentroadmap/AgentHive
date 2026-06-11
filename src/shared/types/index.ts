@@ -142,6 +142,16 @@ export interface Proposal {
 	onStatusChange?: string;
 	/** Budget limit in USD for this proposal */
 	budgetLimitUsd?: number;
+	/** Tags (schema drift, origin tracking, etc.) in object or JSON string form */
+	tags?: Record<string, unknown> | string | null;
+	/** Circuit breaker pause state */
+	gateScannerPaused?: boolean;
+	/** Actor that paused the gate (e.g. 'circuit_breaker') */
+	gatePausedBy?: string | null;
+	/** Timestamp when gate was paused */
+	gatePausedAt?: string | null;
+	/** Reason for gate pause (nullable, may be unset if never paused) */
+	gatePausedReason?: string | null;
 	/**
 	 * Live activity snapshot from roadmap.v_proposal_activity (P272).
 	 * Populated only when the backend is Postgres and the view returns a row.
