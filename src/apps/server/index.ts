@@ -4698,7 +4698,9 @@ export class RoadmapServer {
 			}
 
 			if (agentIdentity) {
-				whereParts.push(`from_agent = $${params.length + 1}`);
+				// Filter by the actual agent from metadata payload (from_agent is always system:proposal-feed)
+				whereParts.push(`(metadata->'payload'->>'agent' = $${params.length + 1} OR metadata->'payload'->>'agent_identity' = $${params.length + 1})`);
+				params.push(agentIdentity);
 				params.push(agentIdentity);
 			}
 
