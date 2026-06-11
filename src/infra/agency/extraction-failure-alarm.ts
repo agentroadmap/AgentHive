@@ -87,7 +87,10 @@ export async function checkExtractionFailureAlarm(
 		};
 
 		const rateRow = rateResult.rows[0];
-		if (!rateRow || rateRow.total_count === 0) {
+		// pg returns count(*) (bigint) and round() (numeric) as strings —
+		// coerce before any arithmetic/toFixed (caught live, missed by mocks).
+		const totalCount = Number(rateRow?.total_count ?? 0);
+		if (!rateRow || totalCount === 0) {
 			return {
 				alarmTriggered: false,
 				failureRatePercent: null,
@@ -95,7 +98,7 @@ export async function checkExtractionFailureAlarm(
 			};
 		}
 
-		const failureRatePercent = rateRow.failure_rate_percent;
+		const failureRatePercent = Number(rateRow.failure_rate_percent);
 
 		// Step 3: Check threshold
 		if (failureRatePercent <= FAILURE_THRESHOLD_PERCENT) {
