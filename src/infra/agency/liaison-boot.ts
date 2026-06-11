@@ -30,7 +30,7 @@ import {
   getCapacityEnvelope,
 } from "./subscription-policy.ts";
 import { initializeContextAtBoot, refreshContextOnInterval } from "./liaison-context.ts";
-import * as config from "../../shared/runtime/config.ts";
+import { get as getRuntimeFlag } from "../../shared/runtime/config.ts";
 import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 
 export interface AgencyConfig {
@@ -202,7 +202,7 @@ export async function bootLiaison(
   // P1370 AC-8: Set up periodic context refresh on interval.
   // Uses LIAISON_CONTEXT_REFRESH_MS flag (default 60s).
   try {
-    const refreshMs = await config.get(FlagKeys.LIAISON_CONTEXT_REFRESH_MS);
+    const refreshMs = await getRuntimeFlag(FlagKeys.LIAISON_CONTEXT_REFRESH_MS);
     contextRefreshTimer = setInterval(
       () => {
         refreshContextOnInterval(config.agency_id, 1).catch((err) => {
