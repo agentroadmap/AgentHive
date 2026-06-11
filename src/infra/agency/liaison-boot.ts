@@ -28,7 +28,7 @@ import { startLiaisonHub, propagateHeartbeat } from "./liaison-hub.ts";
 import {
   clearThrottleIfExpired,
   getCapacityEnvelope,
-} from "./subscription-quota.ts";
+} from "./subscription-policy.ts";
 
 export interface AgencyConfig {
   agency_id: string;

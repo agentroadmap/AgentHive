@@ -11,6 +11,9 @@ import {
 	loadCapacityEnvelope,
 	loadCapacityConfig,
 	evaluateSubscriptionPolicy,
+	computeWindowStart,
+	computeWindowResetAt,
+	checkCapacityBeforeClaim,
 	DEFAULT_SAFETY_MARGIN,
 	DEFAULT_REFUSE_BELOW_SLOTS,
 	type CapacityEnvelope,
@@ -233,4 +236,106 @@ test("evaluateSubscriptionPolicy: fail-open on unexpected exec error", async () 
 	const exec = async () => { throw new Error("unexpected"); };
 	const result = await evaluateSubscriptionPolicy("test-agency", exec as never, silentLogger());
 	assert.equal(result.allowed, true);
+});
+
+// ── Window boundary helpers (consolidated from subscription-quota tests) ──────
+
+test("computeWindowStart: 5h floors to current 5-hour boundary", () => {
+	const t = new Date("2025-01-01T14:30:00Z"); // 14h → boundary 10h
+	const s = computeWindowStart("5h", t);
+	assert.equal(s.getUTCHours(), 10);
+	assert.equal(s.getUTCMinutes(), 0);
+	assert.equal(s.getUTCSeconds(), 0);
+});
+
+test("computeWindowStart: daily resets to midnight UTC", () => {
+	const t = new Date("2025-06-15T17:45:00Z");
+	const s = computeWindowStart("daily", t);
+	assert.equal(s.toISOString(), "2025-06-15T00:00:00.000Z");
+});
+
+test("computeWindowStart: monthly resets to 1st of month", () => {
+	const t = new Date("2025-06-20T12:00:00Z");
+	const s = computeWindowStart("monthly", t);
+	assert.equal(s.toISOString(), "2025-06-01T00:00:00.000Z");
+});
+
+test("computeWindowStart: weekly resets to Sunday (UTC)", () => {
+	const t = new Date("2025-06-18T12:00:00Z");
+	const s = computeWindowStart("weekly", t);
+	assert.equal(s.toISOString(), "2025-06-15T00:00:00.000Z");
+});
+
+test("computeWindowResetAt: 5h next 5-hour boundary", () => {
+	const t = new Date("2025-01-01T14:30:00Z");
+	const r = computeWindowResetAt("5h", t);
+	assert.equal(r.getUTCHours(), 15);
+	assert.equal(r.getUTCMinutes(), 0);
+});
+
+test("computeWindowResetAt: daily midnight of next day", () => {
+	const t = new Date("2025-06-15T17:45:00Z");
+	assert.equal(computeWindowResetAt("daily", t).toISOString(), "2025-06-16T00:00:00.000Z");
+});
+
+test("computeWindowResetAt: monthly 1st of next month", () => {
+	const t = new Date("2025-06-20T12:00:00Z");
+	assert.equal(computeWindowResetAt("monthly", t).toISOString(), "2025-07-01T00:00:00.000Z");
+});
+
+test("computeWindowResetAt: weekly next Sunday", () => {
+	const t = new Date("2025-06-18T12:00:00Z");
+	assert.equal(computeWindowResetAt("weekly", t).toISOString(), "2025-06-22T00:00:00.000Z");
+});
+
+// ── checkCapacityBeforeClaim (consolidated from subscription-quota) ──────────
+
+test("checkCapacityBeforeClaim: allows when no config exists (unconstrained)", async () => {
+	const exec = async () => ({ rows: [] });
+	const result = await checkCapacityBeforeClaim("agency-x", undefined, exec as never);
+	assert.equal(result.allowed, true);
+});
+
+test("checkCapacityBeforeClaim: allows when projected margin >= safety_margin", async () => {
+	// Mock exec for loadFullCapacityConfig + loadWindowUsage
+	let callCount = 0;
+	const exec = async (sql: string) => {
+		callCount++;
+		// First call: loadFullCapacityConfig for agency_capacity_config
+		if (sql.includes("agency_capacity_config")) {
+			return {
+				rows: [{
+					windows: [{ window_kind: "daily", quota_tokens: 1_000_000, quota_requests: 100 }],
+					safety_margin: "0.15",
+					refuse_below_slots: 1,
+				}],
+			};
+		}
+		// Subsequent calls: loadWindowUsage for agency_usage_meter
+		return { rows: [{ used_tokens: "400000", used_requests: "5", source: "local_meter" }] };
+	};
+	const result = await checkCapacityBeforeClaim("agency-x", { tokens: 50_000, requests: 1 }, exec as never);
+	assert.equal(result.allowed, true);
+});
+
+test("checkCapacityBeforeClaim: refuses when token margin < safety_margin", async () => {
+	// Mock exec for loadFullCapacityConfig + loadWindowUsage
+	const exec = async (sql: string) => {
+		// First call: loadFullCapacityConfig for agency_capacity_config
+		if (sql.includes("agency_capacity_config")) {
+			return {
+				rows: [{
+					windows: [{ window_kind: "daily", quota_tokens: 1_000_000, quota_requests: 100 }],
+					safety_margin: "0.15",
+					refuse_below_slots: 1,
+				}],
+			};
+		}
+		// Subsequent calls: loadWindowUsage for agency_usage_meter
+		return { rows: [{ used_tokens: "900000", used_requests: "5", source: "local_meter" }] };
+	};
+	const result = await checkCapacityBeforeClaim("agency-x", { tokens: 200_000, requests: 1 }, exec as never);
+	assert.equal(result.allowed, false);
+	assert.ok(result.refuse_reason?.includes("throttle:daily"));
+	assert.ok(result.throttle_until instanceof Date);
 });
