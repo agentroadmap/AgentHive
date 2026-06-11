@@ -1,0 +1,41 @@
+[Unit]
+Description=AgentHive pg_stat Exporter (Prometheus metrics for tenant backups)
+Documentation=https://gitlab.local/agenthive/agenthive/-/blob/main/docs/P509-ops-bundle-install-runbook.md
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=agenthive
+Group=agenthive
+
+# DSN substituted at deploy time by provisioning script
+Environment="AGENTHIVE_CONTROL_DSN={{AGENTHIVE_CONTROL_DSN}}"
+Environment="PYTHONUNBUFFERED=1"
+Environment="EXPORTER_PORT=9101"
+Environment="SCRAPE_INTERVAL=60"
+Environment="TENANT_REFRESH_INTERVAL=300"
+Environment="TENANTS_LOCAL=/etc/agenthive/tenants.local"
+
+ExecStart=/usr/local/bin/agenthive-pg-stat-exporter.py
+
+# HA configuration: restart on failure with exponential backoff
+Restart=always
+RestartSec=5
+StartLimitBurst=10
+StartLimitIntervalSec=60
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agenthive-exporter
+
+# Security: no privilege escalation, no network access outside localhost
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/log/agenthive /var/run/agenthive
+
+[Install]
+WantedBy=multi-user.target
