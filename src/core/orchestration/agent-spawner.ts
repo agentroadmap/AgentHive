@@ -248,6 +248,8 @@ export interface SpawnRequest {
 	traceId?: string;
 	/** P604: parent span ID for child span linking */
 	parentSpanId?: string | null;
+	/** P1068 AC-3: required role slug (e.g., 'engineering/code-reviewer') for role-identity binding */
+	requiredRole?: string | null;
 }
 
 export interface SpawnResult {
@@ -1320,7 +1322,15 @@ export function renderClosingHint(input: {
 	stage: string;
 	proposalId: number | string;
 	workflowName?: string;
+	roleDefinitionMd?: string | null;
 }): string {
+	// P1068 AC-3: prepend role definition if provided
+	// Role spec becomes the first context layer (identity + discipline)
+	let prompt = input.contextPackage;
+	if (input.roleDefinitionMd) {
+		prompt = `${input.roleDefinitionMd}\n\n---\n\n${prompt}`;
+	}
+
 	// Terminal check using canonical state names from state-names.ts.
 	// If workflowName is provided, use isTerminal() from the registry.
 	// Otherwise, fall back to checking common terminal stage names.
@@ -1339,7 +1349,7 @@ export function renderClosingHint(input: {
 	const hint = terminal
 		? ""
 		: `\n\n## Completion\nWhen you finish, emit \`mcp_agent action="spawn_summary_emit"\` with outcome=success|partial|failure|timeout|escalated and a one-paragraph summary. DO NOT call \`set_maturity\` — only the gate-evaluator advances maturity, after parsing your stdout verdict (gate roles) or after the orchestrator's reconciler reads your spawn_summary (non-gate roles). Proposal id: ${input.proposalId}.`;
-	return `${input.contextPackage}\n\n## Task\n${input.task}${hint}`;
+	return `${prompt}\n\n## Task\n${input.task}${hint}`;
 }
 
 // ─── Core spawn logic ─────────────────────────────────────────────────────────
@@ -1631,12 +1641,36 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		} catch {
 			// Silently ignore query errors; renderClosingHint has fallback checks
 		}
+
+		// P1068 AC-3: Load role definition if requiredRole is specified
+		let roleDefinitionMd: string | null = null;
+		if (req.requiredRole) {
+			try {
+				const { rows } = await query<{ content_md: string }>(
+					`SELECT content_md FROM roadmap_proposal.role_definition WHERE role_slug = $1`,
+					[req.requiredRole],
+				);
+				roleDefinitionMd = rows[0]?.content_md ?? null;
+				if (!roleDefinitionMd) {
+					console.warn(
+						`[AgentSpawner] AC-3: role '${req.requiredRole}' not found in role_definition table`,
+					);
+				}
+			} catch (err) {
+				console.warn(
+					`[AgentSpawner] AC-3: failed to load role definition for '${req.requiredRole}':`,
+					err instanceof Error ? err.message : err,
+				);
+			}
+		}
+
 		assembledTask = renderClosingHint({
 			contextPackage,
 			task,
 			stage,
 			proposalId,
 			workflowName,
+			roleDefinitionMd,
 		});
 	}
 
