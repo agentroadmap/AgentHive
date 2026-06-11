@@ -862,6 +862,24 @@ AgentHive is multi-agent. Git discipline is part of system safety.
 - Do not use destructive Git commands to discard work you did not create.
 - If you encounter unexpected changes, assume they may be intentional until proven otherwise.
 
+### Sub-agent Isolation Convention (P2322 AC-3)
+
+**The primary checkout `/data/code/AgentHive` is a shared dev environment.** Live services run from a dedicated deploy checkout (`/data/code/AgentHive-live`). Build agents, reviewers, and other spawned sub-agents must never contaminate the primary checkout with uncommitted changes or branch switches.
+
+**Enforce true worktree isolation:**
+
+- **Do NOT pass agents the primary path.** Sub-agent dispatch instructions and briefings must never say "clone /data/code/AgentHive" or "cd /data/code/AgentHive" or "git checkout -b <feat>". Agents operate in their own isolated worktree (typically a `.claude/worktrees/<task-id>/` sibling resolved at spawn time) and commit work to the branch provided by the dispatcher.
+- **Relative paths only.** Sub-agent build scripts and prompts must use relative paths (e.g., `src/core/...`) referencing the agent's worktree CWD, never absolute paths like `/data/code/AgentHive/src/core/...`.
+- **Commit on the provided branch, in place.** Agents commit their work to the feature branch they were spawned with, in their worktree. Merging to main happens later via a clean cherry-pick/rebase on a throwaway worktree, never by pushing from the shared primary.
+
+**Post-dispatch guard (P2322 AC-4):**
+
+- After a sub-agent returns from a task (dispatch completed or failed), the orchestrating workflow MUST verify that the primary checkout is still on `main` with a clean working tree.
+- If the primary is contaminated (dirty files, different branch), auto-restore with `git checkout main && git clean -fd` and emit a WARNING log entry.
+- This is a safety net, not a substitute for proper isolation design. Violations suggest a briefing/dispatch error that should be investigated.
+
+Why this rule exists: 2026-06-04 incident where agents left multiple feature branches in the primary checkout, causing the next agent to unexpectedly read partial code from those branches instead of main. Services running from the primary checkout would have executed the wrong code on restart.
+
 ## 8. Validation and Deployment Expectations
 
 - For code changes, run the relevant existing tests, build steps, or targeted checks already provided by the repo.
