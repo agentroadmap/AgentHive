@@ -40,6 +40,8 @@ export {
 	VaultAuthError,
 } from "./types.ts";
 
+export { fileVault } from "./file-vault.ts";
+export type { FileVaultOptions } from "./file-vault.ts";
 export { hcvVault } from "./hcv-vault.ts";
 export type { HcvVaultOptions } from "./hcv-vault.ts";
 export { awsVault } from "./aws-vault.ts";
