@@ -43,6 +43,22 @@ const DISPATCH_LOOP_THRESHOLD_PER_HOUR = Number(
 );
 
 /**
+ * P1729: Cumulative gate convergence guard. Complements the per-hour breaker
+ * by tracking accumulated blocking reviews and per-role dispatch attempts
+ * since the last state or maturity transition.
+ *
+ * When blocking-review count >= K or per-role run count >= N, the proposal
+ * is paused. Resets on state/maturity transition.
+ */
+const GATE_CONVERGENCE_MAX_BLOCKING = Number(
+	process.env.AGENTHIVE_GATE_CONVERGENCE_MAX_BLOCKING ?? "3",
+);
+
+const GATE_CONVERGENCE_MAX_RUNS_PER_ROLE = Number(
+	process.env.AGENTHIVE_GATE_CONVERGENCE_MAX_RUNS_PER_ROLE ?? "8",
+);
+
+/**
  * Global cap on alive offers (open or claimed-but-not-completed) across the
  * whole orchestrator. The orchestrator otherwise tends to fan out 80–100 offers
  * in seconds, exhausting agency capacity and starting Claude subprocesses that
@@ -144,6 +160,31 @@ export class ProposalPausedError extends Error {
 	}
 }
 
+// P1729: postWorkOffer refused because cumulative convergence guard
+// detected either (a) blocking review count >= K, or (b) per-role run count >= N
+// since last state/maturity transition. Proposal is paused.
+export class ConvergenceGuardError extends Error {
+	constructor(
+		readonly proposalId: number,
+		readonly blockingCount: number | null,
+		readonly runsCount: number | null,
+		readonly maxBlocking: number,
+		readonly maxRunsPerRole: number,
+	) {
+		const reasons = [];
+		if (blockingCount !== null && blockingCount >= maxBlocking) {
+			reasons.push(`blocking reviews: ${blockingCount} >= ${maxBlocking}`);
+		}
+		if (runsCount !== null && runsCount >= maxRunsPerRole) {
+			reasons.push(`per-role runs: ${runsCount} >= ${maxRunsPerRole}`);
+		}
+		super(
+			`postWorkOffer: convergence guard tripped for proposal ${proposalId} (${reasons.join(", ")}). gate_scanner_paused=true.`,
+		);
+		this.name = "ConvergenceGuardError";
+	}
+}
+
 export interface WorkOfferInput {
 	proposalId: number;
 	squadName: string;
@@ -225,6 +266,106 @@ function computeIdempotencyKey(parts: {
  * Live evidence 2026-05-29 03:23 UTC: cap=1 admitted 11 offers in a single tick.
  */
 let postSerializationChain: Promise<unknown> = Promise.resolve();
+
+/**
+ * P1729: Check cumulative convergence guard. Returns { blockingCount, runsCount }
+ * or throws ConvergenceGuardError if either exceeds its threshold.
+ *
+ * - blockingCount: proposal_reviews rows with is_blocking=true since state_changed_at
+ * - runsCount: squad_dispatch rows for (proposal_id, agent_identity) since state_changed_at
+ */
+async function checkConvergenceGuard(
+	proposalId: number,
+	queryFn: QueryFn = defaultQuery,
+): Promise<{ blockingCount: number; runsCount: number }> {
+	// Fetch state_changed_at to define the window
+	const { rows: stateRows } = await queryFn<{ state_changed_at: string }>(
+		`SELECT state_changed_at::text
+		   FROM roadmap_proposal.proposal
+		  WHERE id = $1`,
+		[proposalId],
+	);
+	const stateChangedAt = stateRows[0]?.state_changed_at;
+	if (!stateChangedAt) {
+		return { blockingCount: 0, runsCount: 0 };
+	}
+
+	// Count blocking reviews since last transition
+	const { rows: blockingRows } = await queryFn<{ count: number }>(
+		`SELECT count(*)::int AS count
+		   FROM roadmap_proposal.proposal_reviews
+		  WHERE proposal_id = $1
+		    AND is_blocking = true
+		    AND reviewed_at > $2::timestamp with time zone`,
+		[proposalId, stateChangedAt],
+	);
+	const blockingCount = blockingRows[0]?.count ?? 0;
+
+	// Count per-role run attempts since last transition
+	const { rows: runsRows } = await queryFn<{ count: number }>(
+		`SELECT count(*)::int AS count
+		   FROM roadmap_workforce.squad_dispatch
+		  WHERE proposal_id = $1
+		    AND agent_identity IS NOT NULL
+		    AND assigned_at > $2::timestamp with time zone`,
+		[proposalId, stateChangedAt],
+	);
+	const runsCount = runsRows[0]?.count ?? 0;
+
+	// Check thresholds
+	if (blockingCount >= GATE_CONVERGENCE_MAX_BLOCKING || runsCount >= GATE_CONVERGENCE_MAX_RUNS_PER_ROLE) {
+		// Pause the proposal
+		await queryFn(
+			`UPDATE roadmap_proposal.proposal
+			    SET gate_scanner_paused = true,
+			        gate_paused_by = 'convergence_guard',
+			        gate_paused_at = now(),
+			        gate_paused_reason = $2
+			  WHERE id = $1 AND gate_scanner_paused = false`,
+			[
+				proposalId,
+				JSON.stringify({
+					blocking_review_count: blockingCount,
+					per_role_run_count: runsCount,
+					threshold_blocking: GATE_CONVERGENCE_MAX_BLOCKING,
+					threshold_runs_per_role: GATE_CONVERGENCE_MAX_RUNS_PER_ROLE,
+					paused_reason: blockingCount >= GATE_CONVERGENCE_MAX_BLOCKING
+						? `blocking reviews (${blockingCount} >= ${GATE_CONVERGENCE_MAX_BLOCKING})`
+						: `per-role runs (${runsCount} >= ${GATE_CONVERGENCE_MAX_RUNS_PER_ROLE})`,
+				}),
+			],
+		);
+
+		// Emit notification
+		await queryFn(
+			`INSERT INTO roadmap.notification_queue
+			   (proposal_id, severity, kind, title, body, metadata)
+			 VALUES ($1, 'CRITICAL', 'convergence_guard_triggered', $2, $3, $4::jsonb)`,
+			[
+				proposalId,
+				`Convergence guard triggered for proposal ${proposalId}`,
+				`postWorkOffer refused: Proposal appears stuck — blocking reviews: ${blockingCount} (threshold ${GATE_CONVERGENCE_MAX_BLOCKING}), per-role runs: ${runsCount} (threshold ${GATE_CONVERGENCE_MAX_RUNS_PER_ROLE}) since last state/maturity transition. gate_scanner_paused=true. Investigate blocking feedback or stale acceptance criteria.`,
+				JSON.stringify({
+					proposal_id: proposalId,
+					blocking_count: blockingCount,
+					runs_count: runsCount,
+					threshold_blocking: GATE_CONVERGENCE_MAX_BLOCKING,
+					threshold_runs_per_role: GATE_CONVERGENCE_MAX_RUNS_PER_ROLE,
+				}),
+			],
+		);
+
+		throw new ConvergenceGuardError(
+			proposalId,
+			blockingCount >= GATE_CONVERGENCE_MAX_BLOCKING ? blockingCount : null,
+			runsCount >= GATE_CONVERGENCE_MAX_RUNS_PER_ROLE ? runsCount : null,
+			GATE_CONVERGENCE_MAX_BLOCKING,
+			GATE_CONVERGENCE_MAX_RUNS_PER_ROLE,
+		);
+	}
+
+	return { blockingCount, runsCount };
+}
 
 /**
  * Insert a work offer into squad_dispatch and notify the work_offers channel.
@@ -372,6 +513,23 @@ async function postWorkOfferImpl(
 			ctx.gate_paused_by,
 			ctx.gate_paused_at ? new Date(ctx.gate_paused_at) : null,
 		);
+	}
+
+	// P1729: cumulative convergence guard. Check if blocking review count or
+	// per-role run count have exceeded their thresholds since the last state/maturity
+	// transition. If so, pause the proposal.
+	try {
+		await checkConvergenceGuard(input.proposalId, queryFn);
+	} catch (err) {
+		if (err instanceof ConvergenceGuardError) {
+			throw err;
+		}
+		// Swallow other errors to avoid blocking dispatch on guard check failures
+		obs.log({
+			level: "warn",
+			message: `convergence guard check failed for P${input.proposalId}`,
+			error: err instanceof Error ? err.message : String(err),
+		});
 	}
 
 	// P721: skip dispatch if the target route is currently throttled due to
