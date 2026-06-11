@@ -1,6 +1,7 @@
 import type { CallToolResult } from "../types.ts";
 import { handleMcpError, McpValidationError, McpPolicyError } from "../errors/mcp-errors.ts";
 import type { ToolContract, AliasMapping } from "./contract.ts";
+import { recordAliasUsage } from "./alias-metrics.ts";
 
 /**
  * Structured parameter error for InvalidArgument responses
@@ -32,6 +33,7 @@ export function validateAgainstSchema(
 	input: Record<string, unknown>,
 	schema: Record<string, unknown>,
 	aliases?: AliasMapping[],
+	toolName?: string,
 ): EnforcementResult {
 	const validated = { ...input };
 	const paramErrors: ParamError[] = [];
@@ -42,7 +44,10 @@ export function validateAgainstSchema(
 			if (alias.deprecated in validated && !(alias.canonical in validated)) {
 				validated[alias.canonical] = validated[alias.deprecated];
 				delete validated[alias.deprecated];
-				// Track alias usage for metrics (in production, emit mcp_handler_param_alias_used)
+				// Track alias usage for metrics (non-blocking, fire-and-forget)
+				if (toolName) {
+					void recordAliasUsage(toolName, alias.deprecated, alias.canonical);
+				}
 			}
 		}
 	}
@@ -136,7 +141,7 @@ export function checkPersistenceDeclaration(
 /**
  * Enforces a contract at tool invocation time.
  * - Validates input against schema
- * - Resolves aliases
+ * - Resolves aliases and records usage
  * - Returns structured validation errors if needed
  */
 export async function enforceContract(
@@ -148,6 +153,7 @@ export async function enforceContract(
 		input,
 		contract.argsSchema,
 		contract.aliases,
+		contract.name,
 	);
 
 	if (!schemaResult.ok) {

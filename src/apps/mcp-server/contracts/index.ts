@@ -22,6 +22,8 @@ export { createErrorResult, wrapErrorHandling, isRetriable, isValidErrorEnvelope
 
 export { mcp_proposal_contract } from "./mcp_proposal.ts";
 
+export { recordAliasUsage, generateDeprecationRemovalQuery, getDeprecationCandidates, type DeprecationCandidate } from "./alias-metrics.ts";
+
 // Central registry instance (singleton)
 import { ContractRegistry } from "./contract.ts";
 import { mcp_proposal_contract } from "./mcp_proposal.ts";

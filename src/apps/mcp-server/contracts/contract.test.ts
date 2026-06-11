@@ -13,6 +13,7 @@ import {
 import { generateHelpResponse } from "./help-generator.ts";
 import { createErrorResult, isValidErrorEnvelope, isRetriable } from "./error-envelope.ts";
 import { mcp_proposal_contract } from "./mcp_proposal.ts";
+import { generateDeprecationRemovalQuery } from "./alias-metrics.ts";
 
 describe("Contract Framework (P475)", () => {
 	// AC-2: Contracts directory and defineContract export
@@ -387,6 +388,29 @@ describe("Contract Framework (P475)", () => {
 			);
 			expect(result.ok).toBe(true);
 			expect(result.validated?.canonical_name).toBe("canonical_value");
+		});
+	});
+
+	// AC-7: Alias metrics
+	describe("AC-7: Alias Metrics", () => {
+		it("should generate deprecation removal query", () => {
+			const query = generateDeprecationRemovalQuery(14);
+			expect(query).toContain("mcp_alias_used");
+			expect(query).toContain("deprecated_key");
+			expect(query).toContain("14 days");
+		});
+
+		it("should generate query for custom retention period", () => {
+			const query = generateDeprecationRemovalQuery(30);
+			expect(query).toContain("30 days");
+		});
+
+		it("should query groups by deprecated_key, canonical_key, tool_name", () => {
+			const query = generateDeprecationRemovalQuery(7);
+			expect(query).toContain("GROUP BY");
+			expect(query).toContain("deprecated_key");
+			expect(query).toContain("canonical_key");
+			expect(query).toContain("tool_name");
 		});
 	});
 });
