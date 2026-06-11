@@ -40,7 +40,7 @@ import {
 	isModelInCooldown,
 	setProviderCooldown,
 } from "./provider-cooldown.ts";
-import { HotfixStates, RfcStates } from "../workflow/state-names.ts";
+import { HotfixStates, RfcStates, isTerminal } from "../workflow/state-names.ts";
 import { isWithinCapacity } from "./resolvers/capacity-guard.ts";
 import { sanitizeExtraEnv } from "./spawn-env-sanitizer.ts";
 import {
@@ -1319,12 +1319,23 @@ export function renderClosingHint(input: {
 	task: string;
 	stage: string;
 	proposalId: number | string;
+	workflowName?: string;
 }): string {
 	// Terminal check using canonical state names from state-names.ts.
-	// RfcStates accessors get values from the loaded registry; this function
-	// may be called before registry load completes, so we check against the
-	// canonical string values that define terminal stages.
-	const terminal = input.stage === "COMPLETE" || input.stage === "DEPLOYED";
+	// If workflowName is provided, use isTerminal() from the registry.
+	// Otherwise, fall back to checking common terminal stage names.
+	let terminal = false;
+	if (input.workflowName) {
+		try {
+			terminal = isTerminal(input.workflowName, input.stage);
+		} catch {
+			// Registry not loaded or workflow unknown; fall back to hardcoded check
+			terminal = input.stage === "COMPLETE" || input.stage === "DEPLOYED";
+		}
+	} else {
+		// No workflow name provided; use fallback check
+		terminal = input.stage === "COMPLETE" || input.stage === "DEPLOYED";
+	}
 	const hint = terminal
 		? ""
 		: `\n\n## Completion\nWhen you finish, emit \`mcp_agent action="spawn_summary_emit"\` with outcome=success|partial|failure|timeout|escalated and a one-paragraph summary. DO NOT call \`set_maturity\` — only the gate-evaluator advances maturity, after parsing your stdout verdict (gate roles) or after the orchestrator's reconciler reads your spawn_summary (non-gate roles). Proposal id: ${input.proposalId}.`;
@@ -1609,11 +1620,23 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 			agentIdentity,
 			maxTokens: 2000,
 		});
+		// Fetch workflow name for terminal state check
+		let workflowName: string | undefined;
+		try {
+			const { rows } = await query<{ workflow_name: string | null }>(
+				`SELECT workflow_name FROM roadmap_proposal.proposal WHERE id = $1`,
+				[proposalId],
+			);
+			workflowName = rows[0]?.workflow_name ?? undefined;
+		} catch {
+			// Silently ignore query errors; renderClosingHint has fallback checks
+		}
 		assembledTask = renderClosingHint({
 			contextPackage,
 			task,
 			stage,
 			proposalId,
+			workflowName,
 		});
 	}
 

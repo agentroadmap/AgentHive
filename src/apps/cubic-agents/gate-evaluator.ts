@@ -175,6 +175,16 @@ export class GateEvaluatorAgent {
 		gate: GateBrief,
 		decision: GateDecision,
 	): Promise<void> {
+		// Closure verdicts that set maturity=obsolete
+		const closureVerdicts = new Set([
+			"wontfix",
+			"discard",
+			"replace",
+			"escalate",
+			"nonissue",
+		]);
+		const isClosureVerdict = closureVerdicts.has(decision.verdict);
+
 		switch (decision.verdict) {
 			case "approve": {
 				try {
@@ -232,8 +242,38 @@ export class GateEvaluatorAgent {
 				);
 				return;
 			}
+			case "wontfix":
+			case "discard":
+			case "replace":
+			case "escalate":
+			case "nonissue": {
+				// Closure verdicts: set maturity=obsolete, store obsoleted_reason, do NOT change status
+				const obsoletedReason = `${decision.verdict}: ${decision.reason ?? "no reason given"}`;
+				try {
+					await this.setMaturityObsolete(
+						proposal.id,
+						obsoletedReason,
+					);
+				} catch (err) {
+					console.error(
+						`[GateEvaluator] ✗ Failed to set maturity for closure verdict ${decision.verdict}:`,
+						err,
+					);
+					throw err;
+				}
+				await this.assertMaturityDemoted(
+					proposal.id,
+					proposal.display_id ?? `#${proposal.id}`,
+					"obsolete",
+					gate.name,
+				);
+				console.log(
+					`[GateEvaluator] ✓ Closure verdict ${decision.verdict} applied to ${proposal.display_id}: maturity=obsolete, status unchanged`,
+				);
+				return;
+			}
 			default:
-				// 'pending' or future verdicts: do not mutate state.
+				// 'pending', 'abstain', or future verdicts: do not mutate state.
 				return;
 		}
 	}
@@ -331,6 +371,41 @@ export class GateEvaluatorAgent {
 				   (proposal_id, author, context_prefix, content)
 				 VALUES ($1, 'gate-evaluator', 'general:', $2)`,
 				[proposalId, `Maturity demoted to ${maturity}: ${note}`],
+			);
+		} catch {
+			// non-fatal
+		}
+	}
+
+	/**
+	 * P778: Update proposal to maturity=obsolete with obsoleted_reason.
+	 * Closure verdicts (reject, wontfix, discard, replace, escalate, nonissue)
+	 * do NOT change proposal.status; they only set maturity and obsoleted_reason.
+	 */
+	private async setMaturityObsolete(
+		proposalId: number,
+		obsoletedReason: string,
+	): Promise<void> {
+		await this.queryFn(
+			`WITH _actor AS (
+				 SELECT set_config('app.agent_identity', $1, true) AS agent_identity
+			 )
+			 UPDATE roadmap_proposal.proposal
+			    SET maturity = 'obsolete',
+			        obsoleted_reason = $2,
+			        modified_at = NOW()
+			   FROM _actor
+			  WHERE id = $3`,
+			["gate-evaluator", obsoletedReason, proposalId],
+		);
+		// Best-effort discussion entry; do not throw if discussion table
+		// is unavailable (e.g. test fixture).
+		try {
+			await this.queryFn(
+				`INSERT INTO roadmap_proposal.proposal_discussions
+				   (proposal_id, author, context_prefix, content)
+				 VALUES ($1, 'gate-evaluator', 'general:', $2)`,
+				[proposalId, `Closure verdict applied: ${obsoletedReason}`],
 			);
 		} catch {
 			// non-fatal
