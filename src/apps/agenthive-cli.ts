@@ -573,10 +573,4 @@ program
 	.argument("[target]", "postgres | pgbouncer | all", "all")
 	.action(cmdDbPing);
 
-program
-	.command("db-ping")
-	.description("Ping a database endpoint: postgres | pgbouncer | all")
-	.argument("[target]", "postgres | pgbouncer | all", "all")
-	.action(cmdDbPing);
-
 program.parse();
