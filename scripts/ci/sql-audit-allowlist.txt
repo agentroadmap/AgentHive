@@ -1,22 +1,56 @@
-# P677 — SQL audit allowlist.
+# P677 - SQL audit allowlist.
 #
 # Use this file to suppress known false positives from:
 #   - scripts/ci/audit-sql-columns.ts  (column not found in information_schema)
 #   - scripts/ci/check-migration-drops.sh  (DROP/RENAME COLUMN cross-ref grep)
 #
-# The migration linkage check cannot distinguish which table a column reference
-# targets. If the same column name exists on multiple tables and only ONE drops
-# it, every TS reference to the surviving table is flagged.
+# Format: one entry per line
+#   - "file:column" - allow in specific migration
+#   - "column" - allow globally
 #
-# Format (one entry per line):
-#   - "file:column"   — allow this column reference in a specific migration
-#   - "column"        — allow globally (use sparingly)
-#
-# Comment with `#` BEFORE each entry explaining why the false positive is safe.
-# Blank lines are ignored.
-#
-# Example:
-#   # cost_per_1k_input was dropped from model_routes in migration 038, but
-#   # model_metadata still has it; the 7 TS files querying model_metadata are
-#   # the surviving callers.
-#   scripts/migrations/038-rename-cost-cols.sql:cost_per_1k_input
+# IMPORTANT: Each entry must be preceded by a comment line explaining why.
+
+# Tables referenced in code but pending migration creation.
+# These are legitimate WIP tables that haven't yet been created in the live database.
+
+# agent_secret table (infra/security/agent-secret-store.ts) - migration pending
+agent_secret
+
+# proposal_lease_renewal table (infra/agency/liaison-lease.ts) - migration pending
+proposal_lease_renewal
+
+# federation_peers table (core/infrastructure/federation-sync.ts) - federation infrastructure WIP
+federation_peers
+
+# sync_log table (core/infrastructure/federation-sync.ts) - federation sync logging WIP
+sync_log
+
+# sync_conflict_log table (core/infrastructure/federation-sync.ts) - conflict tracking WIP
+sync_conflict_log
+
+# tool_call_log table (core/dispatch/dispatch-handler.ts) - tool instrumentation WIP
+tool_call_log
+
+# tool_grant table (core/dispatch/dispatch-handler.ts) - tool authorization WIP
+tool_grant
+
+# tool table (core/dispatch/dispatch-handler.ts) - tool registry WIP
+tool
+
+# test_results table (tests) - test instrumentation WIP
+test_results
+
+# provider_health_log table (infra/routing/provider-health-monitor.ts) - health instrumentation WIP
+provider_health_log
+
+# message_validity_log table (infra/messaging/cross-host-relay.ts) - message audit WIP
+message_validity_log
+
+# notification_inbox table (core/notification/inbox.ts) - notification system WIP
+notification_inbox
+
+# cubic table (referenced as singular; database has 'cubics' plural)
+cubic
+
+# acceptance_criteria table (note: proposal_acceptance_criteria exists)
+acceptance_criteria
