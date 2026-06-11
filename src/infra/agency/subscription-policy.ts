@@ -52,8 +52,9 @@
  */
 
 import { SHORT_WINDOW_SECONDS } from "./usage-limit-detector.ts";
+import { query } from "../postgres/pool.ts";
 
-export type WindowKind = "5h" | "daily" | "weekly" | "monthly";
+export type WindowKind = "5h" | "daily" | "weekly" | "monthly" | "custom";
 export type WindowSource = "provider_api" | "local_meter" | "manual";
 
 // ── AC-1: SubscriptionWindow ──────────────────────────────────────────────────
@@ -100,6 +101,110 @@ export interface PolicyResult {
 	/** Human-readable reason logged on refusal. */
 	reason: string | null;
 }
+
+// ── ClaimCostEstimate ─────────────────────────────────────────────────────────
+
+export interface ClaimCostEstimate {
+	tokens: number;
+	requests: number;
+}
+
+// ── CapacityCheckResult ───────────────────────────────────────────────────────
+
+export interface CapacityCheckResult {
+	allowed: boolean;
+	/** Set when refused: 'throttle:<window_kind>' */
+	refuse_reason?: string;
+	/** Timestamp when the tightest window resets (safe to re-check after this). */
+	throttle_until?: Date;
+}
+
+// ── Window boundary helpers ───────────────────────────────────────────────────
+
+/**
+ * Compute the start of the current window (UTC-aligned).
+ * e.g. for '5h' at 14:30 → 10:00 today.
+ */
+export function computeWindowStart(
+	windowKind: WindowKind,
+	now: Date = new Date(),
+): Date {
+	const d = new Date(now);
+	switch (windowKind) {
+		case "5h": {
+			const boundary = Math.floor(d.getUTCHours() / 5) * 5;
+			d.setUTCHours(boundary, 0, 0, 0);
+			return d;
+		}
+		case "daily": {
+			d.setUTCHours(0, 0, 0, 0);
+			return d;
+		}
+		case "weekly": {
+			// ISO week starts Monday; we use Sunday=0 convention for simplicity
+			d.setUTCDate(d.getUTCDate() - d.getUTCDay());
+			d.setUTCHours(0, 0, 0, 0);
+			return d;
+		}
+		case "monthly": {
+			d.setUTCDate(1);
+			d.setUTCHours(0, 0, 0, 0);
+			return d;
+		}
+		default: {
+			// custom: treat as daily boundary
+			d.setUTCHours(0, 0, 0, 0);
+			return d;
+		}
+	}
+}
+
+/**
+ * Compute when the current window expires (next boundary after `now`).
+ * e.g. for 'daily' at 14:30 → midnight tonight.
+ */
+export function computeWindowResetAt(
+	windowKind: WindowKind,
+	now: Date = new Date(),
+): Date {
+	const d = new Date(now);
+	switch (windowKind) {
+		case "5h": {
+			const nextBoundaryH = (Math.floor(d.getUTCHours() / 5) + 1) * 5;
+			if (nextBoundaryH >= 24) {
+				d.setUTCDate(d.getUTCDate() + 1);
+				d.setUTCHours(0, 0, 0, 0);
+			} else {
+				d.setUTCHours(nextBoundaryH, 0, 0, 0);
+			}
+			return d;
+		}
+		case "daily": {
+			d.setUTCDate(d.getUTCDate() + 1);
+			d.setUTCHours(0, 0, 0, 0);
+			return d;
+		}
+		case "weekly": {
+			const daysUntilNextSunday = 7 - d.getUTCDay();
+			d.setUTCDate(d.getUTCDate() + daysUntilNextSunday);
+			d.setUTCHours(0, 0, 0, 0);
+			return d;
+		}
+		case "monthly": {
+			d.setUTCMonth(d.getUTCMonth() + 1, 1);
+			d.setUTCHours(0, 0, 0, 0);
+			return d;
+		}
+		default: {
+			// custom: treat as daily boundary
+			d.setUTCDate(d.getUTCDate() + 1);
+			d.setUTCHours(0, 0, 0, 0);
+			return d;
+		}
+	}
+}
+
+// ── AC-3: Policy evaluation ───────────────────────────────────────────────────
 
 /**
  * Pure function: evaluate whether a new claim is allowed given the current
@@ -175,7 +280,7 @@ export type SqlExec = (sql: string, params?: unknown[]) => Promise<unknown>;
  */
 export async function loadCapacityEnvelope(
 	agencyId: string,
-	exec: SqlExec,
+	exec: SqlExec = query as SqlExec,
 ): Promise<CapacityEnvelope | null> {
 	// Layer 1: provider_api — deferred to P1018/P1022; no-op today
 	// (stub: returns null, falls through)
@@ -244,12 +349,114 @@ function parseRawEnvelope(
 // ── AC-7/AC-8: Config loader ──────────────────────────────────────────────────
 
 /**
+ * Internal interface for full capacity config with windows.
+ */
+interface FullCapacityConfig {
+	windows: WindowConfig[];
+	safety_margin: number;
+	refuse_below_slots: number;
+}
+
+interface WindowConfig {
+	window_kind: WindowKind;
+	quota_tokens?: number;
+	quota_requests?: number;
+}
+
+/**
+ * Internal: Load full capacity config including windows for getCapacityEnvelope.
+ * Three-tier fallback (per-agency, provider defaults, built-in defaults).
+ * Returns null when no config is found.
+ */
+async function loadFullCapacityConfig(
+	agencyId: string,
+	exec: SqlExec = query as SqlExec,
+): Promise<FullCapacityConfig | null> {
+	// Tier 1: per-agency config
+	try {
+		const result = (await exec(
+			`SELECT windows, safety_margin, refuse_below_slots
+			 FROM roadmap.agency_capacity_config
+			 WHERE agency_id = $1`,
+			[agencyId],
+		)) as
+			| {
+					rows: Array<{
+						windows: unknown;
+						safety_margin: string | number;
+						refuse_below_slots: number;
+					}>;
+			  }
+			| undefined;
+		const row = result?.rows?.[0];
+		if (row) {
+			const rawWindows = Array.isArray(row.windows) ? (row.windows as WindowConfig[]) : [];
+			return {
+				windows: rawWindows,
+				safety_margin: typeof row.safety_margin === "string"
+					? parseFloat(row.safety_margin)
+					: row.safety_margin,
+				refuse_below_slots: row.refuse_below_slots,
+			};
+		}
+	} catch {
+		// Schema drift — fall through to tier 2
+	}
+
+	// Tier 2: provider defaults (not implemented yet)
+	// Tier 3: built-in defaults
+	return null;
+}
+
+/**
+ * Internal: Load usage for a specific window.
+ */
+async function loadWindowUsage(
+	agencyId: string,
+	windowKind: string,
+	windowStart: Date,
+	exec: SqlExec = query as SqlExec,
+): Promise<{ used_tokens: number; used_requests: number; source: string }> {
+	try {
+		const result = (await exec(
+			`SELECT used_tokens, used_requests, source
+			 FROM roadmap.agency_usage_meter
+			 WHERE agency_id = $1 AND window_kind = $2 AND window_start = $3`,
+			[agencyId, windowKind, windowStart.toISOString()],
+		)) as
+			| {
+					rows: Array<{
+						used_tokens: string | number;
+						used_requests: string | number;
+						source: string;
+					}>;
+			  }
+			| undefined;
+		if ((result?.rows?.length ?? 0) === 0) {
+			return { used_tokens: 0, used_requests: 0, source: "local_meter" };
+		}
+		const row = result!.rows![0];
+		return {
+			used_tokens: typeof row.used_tokens === "string"
+				? parseInt(row.used_tokens, 10)
+				: row.used_tokens,
+			used_requests: typeof row.used_requests === "string"
+				? parseInt(row.used_requests, 10)
+				: row.used_requests,
+			source: row.source,
+		};
+	} catch {
+		return { used_tokens: 0, used_requests: 0, source: "local_meter" };
+	}
+}
+
+/**
  * Read per-agency policy config from agency_capacity_config. Falls back to
  * defaults when the row is missing or the query fails.
  */
 export async function loadCapacityConfig(
 	agencyId: string,
-	exec: SqlExec,
+	exec: SqlExec = query as SqlExec,
 ): Promise<PolicyConfig> {
 	try {
 		const result = (await exec(
@@ -289,8 +496,8 @@ export async function loadCapacityConfig(
  */
 export async function evaluateSubscriptionPolicy(
 	agencyId: string,
-	exec: SqlExec,
-	logger: Pick<Console, "log" | "warn" | "error">,
+	exec: SqlExec = query as SqlExec,
+	logger: Pick<Console, "log" | "warn" | "error"> = console,
 	estimatedTokens = 0,
 ): Promise<PolicyResult> {
 	try {
@@ -324,7 +531,7 @@ export async function declareThrottle(
 	agencyId: string,
 	resetsAt: Date | null,
 	reason: string,
-	exec: SqlExec,
+	exec: SqlExec = query as SqlExec,
 ): Promise<void> {
 	const untilIso = resetsAt?.toISOString() ?? null;
 	const resetSeconds = resetsAt
@@ -362,4 +569,220 @@ export async function declareThrottle(
 			[agencyId, reason, untilIso ?? "null"],
 		);
 	}
+}
+
+/**
+ * Record usage in the local meter (all applicable windows for this agency).
+ * Upserts to ensure idempotent accumulation within the same window boundary.
+ */
+export async function recordUsage(
+	agencyId: string,
+	tokensUsed: number,
+	requestsUsed: number = 1,
+	exec: SqlExec = query,
+): Promise<void> {
+	const config = await loadFullCapacityConfig(agencyId, exec);
+	if (!config || config.windows.length === 0) return;
+
+	const now = new Date();
+	for (const wc of config.windows) {
+		const windowStart = computeWindowStart(wc.window_kind, now);
+		await exec(
+			`INSERT INTO roadmap.agency_usage_meter
+			        (agency_id, window_kind, window_start, used_tokens, used_requests, source, updated_at)
+			 VALUES ($1, $2, $3, $4, $5, 'local_meter', now())
+			 ON CONFLICT (agency_id, window_kind, window_start)
+			 DO UPDATE SET
+			   used_tokens   = roadmap.agency_usage_meter.used_tokens   + EXCLUDED.used_tokens,
+			   used_requests = roadmap.agency_usage_meter.used_requests + EXCLUDED.used_requests,
+			   updated_at    = now()`,
+			[agencyId, wc.window_kind, windowStart.toISOString(), tokensUsed, requestsUsed],
+		);
+	}
+}
+
+/**
+ * Restore the agency to active once the throttle window has passed.
+ * No-op when the agency is not currently throttled.
+ */
+export async function clearThrottleIfExpired(
+	agencyId: string,
+	exec: SqlExec = query,
+): Promise<boolean> {
+	const result = await exec(
+		`UPDATE roadmap.agency
+		    SET status          = 'active',
+		        status_reason   = 'Quota window reset',
+		        throttled_until = NULL
+		  WHERE agency_id = $1
+		    AND status = 'throttled'
+		    AND throttled_until IS NOT NULL
+		    AND throttled_until <= now()
+		  RETURNING agency_id`,
+		[agencyId],
+	);
+	return (result.rowCount ?? 0) > 0;
+}
+
+/**
+ * Record that a hard provider limit (429) was hit (AC-6).
+ * Sets paused_at_provider_limit=true and provider_limit_paused_at on the dispatch row,
+ * and writes a claim_paused message to message_ledger for the orchestrator.
+ */
+export async function recordProviderHardLimit(
+	agencyId: string,
+	dispatchId: number,
+	resumeEligibleAt: Date,
+	exec: SqlExec = query,
+): Promise<void> {
+	await exec(
+		`UPDATE roadmap_workforce.squad_dispatch
+		    SET paused_at_provider_limit = true,
+		        provider_limit_paused_at = now(),
+		        metadata = COALESCE(metadata, '{}'::jsonb)
+		                   || jsonb_build_object('resume_eligible_at', $3::text)
+		  WHERE id = $1 AND agent_identity = $2`,
+		[dispatchId, agencyId, resumeEligibleAt.toISOString()],
+	);
+
+	// Best-effort notification to orchestrator channel
+	try {
+		await exec(
+			`INSERT INTO roadmap.message_ledger
+			        (from_agent, channel, message_content, message_type, metadata)
+			 VALUES ($1, 'system:operator', $2, 'alert', $3)`,
+			[
+				agencyId,
+				`Claim paused at provider hard limit for dispatch ${dispatchId}`,
+				JSON.stringify({
+					kind: "claim_paused",
+					dispatch_id: dispatchId,
+					agency_id: agencyId,
+					reason: "provider_hard_limit",
+					resume_eligible_at: resumeEligibleAt.toISOString(),
+				}),
+			],
+		);
+	} catch {
+		/* best-effort */
+	}
+}
+
+/**
+ * Build the full CapacityEnvelope for an agency.
+ * Returns null when no config is registered (unconstrained).
+ */
+export async function getCapacityEnvelope(
+	agencyId: string,
+	exec: SqlExec = query,
+): Promise<CapacityEnvelope | null> {
+	const config = await loadFullCapacityConfig(agencyId, exec);
+	if (!config) return null;
+
+	const now = new Date();
+	const windows: SubscriptionWindow[] = [];
+
+	for (const wc of config.windows) {
+		const windowStart = computeWindowStart(wc.window_kind, now);
+		const resets_at = computeWindowResetAt(wc.window_kind, now);
+		const usage = await loadWindowUsage(agencyId, wc.window_kind, windowStart, exec);
+
+		windows.push({
+			window_kind: wc.window_kind as "5h" | "daily" | "weekly" | "monthly" | "custom",
+			resets_at,
+			quota_tokens: wc.quota_tokens,
+			quota_requests: wc.quota_requests,
+			used_tokens: usage.used_tokens,
+			used_requests: usage.used_requests,
+			source: usage.source as SubscriptionWindow["source"],
+		});
+	}
+
+	const { rows: inFlightRows } = await exec<{ cnt: string }>(
+		`SELECT COUNT(*) AS cnt
+		   FROM roadmap_workforce.squad_dispatch
+		  WHERE agent_identity = $1
+		    AND offer_status = 'claimed'
+		    AND completed_at IS NULL`,
+		[agencyId],
+	);
+	const in_flight_claims = Number(inFlightRows[0]?.cnt ?? 0);
+
+	return {
+		agency_id: agencyId,
+		windows,
+		free_claim_slots: Math.max(0, config.refuse_below_slots - in_flight_claims),
+		in_flight_claims,
+		last_updated_at: now,
+	};
+}
+
+/**
+ * Check whether the agency has quota capacity to absorb a new claim.
+ *
+ * Iterates all configured windows; if any window's projected remaining
+ * fraction after spending `cost` falls below `safety_margin`, the check
+ * fails and returns the tightest (soonest-resetting) window as the basis
+ * for `throttle_until`.
+ *
+ * Returns `{ allowed: true }` when no config exists (unconstrained).
+ */
+export async function checkCapacityBeforeClaim(
+	agencyId: string,
+	cost?: ClaimCostEstimate,
+	exec: SqlExec = query,
+): Promise<CapacityCheckResult> {
+	const config = await loadFullCapacityConfig(agencyId, exec);
+	if (!config || config.windows.length === 0) {
+		return { allowed: true };
+	}
+
+	const effectiveCost: ClaimCostEstimate = cost ?? {
+		tokens: 50_000,
+		requests: 1,
+	};
+
+	const now = new Date();
+	// Track the window that is tightest (soonest to reset) that triggered refusal
+	let tightest: { window_kind: string; resets_at: Date } | null = null;
+
+	for (const wc of config.windows) {
+		const windowStart = computeWindowStart(wc.window_kind, now);
+		const resets_at = computeWindowResetAt(wc.window_kind, now);
+		const usage = await loadWindowUsage(agencyId, wc.window_kind, windowStart, exec);
+
+		// Token quota check
+		if (wc.quota_tokens != null && wc.quota_tokens > 0) {
+			const remaining = wc.quota_tokens - usage.used_tokens;
+			const projected = remaining - effectiveCost.tokens;
+			const margin = projected / wc.quota_tokens;
+			if (margin < config.safety_margin) {
+				if (!tightest || resets_at < tightest.resets_at) {
+					tightest = { window_kind: wc.window_kind, resets_at };
+				}
+			}
+		}
+
+		// Request quota check
+		if (wc.quota_requests != null && wc.quota_requests > 0) {
+			const remaining = wc.quota_requests - usage.used_requests;
+			const projected = remaining - effectiveCost.requests;
+			const margin = projected / wc.quota_requests;
+			if (margin < config.safety_margin) {
+				if (!tightest || resets_at < tightest.resets_at) {
+					tightest = { window_kind: wc.window_kind, resets_at };
+				}
+			}
+		}
+	}
+
+	if (tightest) {
+		return {
+			allowed: false,
+			refuse_reason: `throttle:${tightest.window_kind}`,
+			throttle_until: tightest.resets_at,
+		};
+	}
+
+	return { allowed: true };
 }

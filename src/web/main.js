@@ -155390,7 +155390,7 @@ var init_sankey = __esm(() => {
   init_align();
 });
 
-// node_modules/d3-sankey/node_modules/d3-shape/node_modules/d3-path/src/path.js
+// node_modules/d3-sankey/node_modules/d3-path/src/path.js
 function Path2() {
   this._x0 = this._y0 = this._x1 = this._y1 = null;
   this._ = "";
@@ -155472,7 +155472,7 @@ var init_path3 = __esm(() => {
   path_default2 = path4;
 });
 
-// node_modules/d3-sankey/node_modules/d3-shape/node_modules/d3-path/src/index.js
+// node_modules/d3-sankey/node_modules/d3-path/src/index.js
 var init_src34 = __esm(() => {
   init_path3();
 });
@@ -160400,7 +160400,7 @@ var init_diagram_5BDNPKRD = __esm(() => {
   };
 });
 
-// node_modules/cytoscape-fcose/node_modules/cose-base/node_modules/layout-base/layout-base.js
+// node_modules/cytoscape-fcose/node_modules/layout-base/layout-base.js
 var require_layout_base2 = __commonJS((exports, module) => {
   (function webpackUniversalModuleDefinition(root10, factory2) {
     if (typeof exports === "object" && typeof module === "object")
@@ -208041,7 +208041,7 @@ var serialize = (value, { json: json2, lossy } = {}) => {
 // node_modules/@ungap/structured-clone/esm/index.js
 var esm_default = typeof structuredClone === "function" ? (any, options) => options && (("json" in options) || ("lossy" in options)) ? deserialize(serialize(any, options)) : structuredClone(any) : (any, options) => deserialize(serialize(any, options));
 
-// node_modules/hast-util-from-parse5/node_modules/hastscript/node_modules/hast-util-parse-selector/lib/index.js
+// node_modules/hast-util-parse-selector/lib/index.js
 var search2 = /[#.]/g;
 function parseSelector2(selector, defaultTagName) {
   const value = selector || "";
@@ -208077,7 +208077,7 @@ function parseSelector2(selector, defaultTagName) {
     children: []
   };
 }
-// node_modules/hast-util-from-parse5/node_modules/hastscript/lib/create-h.js
+// node_modules/hastscript/lib/create-h.js
 function createH(schema, defaultTagName, caseSensitive) {
   const adjust = caseSensitive ? createAdjustMap2(caseSensitive) : undefined;
   function h2(selector, properties2, ...children) {
@@ -208217,7 +208217,7 @@ function createAdjustMap2(values) {
   return result;
 }
 
-// node_modules/hast-util-from-parse5/node_modules/hastscript/lib/svg-case-sensitive-tag-names.js
+// node_modules/hastscript/lib/svg-case-sensitive-tag-names.js
 var svgCaseSensitiveTagNames = [
   "altGlyph",
   "altGlyphDef",
@@ -208260,7 +208260,7 @@ var svgCaseSensitiveTagNames = [
   "textPath"
 ];
 
-// node_modules/hast-util-from-parse5/node_modules/hastscript/lib/index.js
+// node_modules/hastscript/lib/index.js
 var h2 = createH(html4, "div");
 var s3 = createH(svg4, "g", svgCaseSensitiveTagNames);
 // node_modules/vfile-location/lib/index.js
