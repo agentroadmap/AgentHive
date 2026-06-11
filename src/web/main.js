@@ -175771,6 +175771,11 @@ class ApiClient {
     const result = await this.fetchJson(`${API_BASE}/operator/control/replay/${dispatchId}`);
     return result.events ?? [];
   }
+  async markNotificationSeen(notificationId) {
+    return this.fetchJson(`${API_BASE}/notifications/${encodeURIComponent(notificationId)}/seen`, {
+      method: "PATCH"
+    });
+  }
 }
 var apiClient = new ApiClient;
 
@@ -178204,6 +178209,26 @@ function statusBadgeColors(value) {
   }
 }
 
+// src/apps/dashboard-web/utils/parseTags.ts
+function parseTags(tags) {
+  if (!tags) {
+    return {};
+  }
+  if (typeof tags === "object") {
+    return tags;
+  }
+  if (typeof tags === "string") {
+    try {
+      const parsed = JSON.parse(tags);
+      if (typeof parsed === "object" && parsed !== null) {
+        return parsed;
+      }
+    } catch {}
+    return {};
+  }
+  return {};
+}
+
 // src/apps/dashboard-web/components/Board.tsx
 var jsx_dev_runtime11 = __toESM(require_jsx_dev_runtime(), 1);
 var Board = ({
@@ -178400,10 +178425,10 @@ var Board = ({
                             }, undefined, true, undefined, this),
                             proposal.tags && /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("div", {
                               className: "mt-1.5 flex flex-wrap gap-1",
-                              children: proposal.tags.split(",").map((tag) => /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("span", {
+                              children: Object.keys(parseTags(proposal.tags)).map((tag) => /* @__PURE__ */ jsx_dev_runtime11.jsxDEV("span", {
                                 className: "text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded",
-                                children: tag.trim()
-                              }, tag.trim(), false, undefined, this))
+                                children: tag
+                              }, tag, false, undefined, this))
                             }, undefined, false, undefined, this)
                           ]
                         }, proposal.id, true, undefined, this))
@@ -232172,7 +232197,7 @@ var Modal = ({
       }
     },
     children: /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
-      className: `bg-white dark:bg-gray-800 sm:rounded-lg shadow-2xl ${maxWidthClass} w-full max-h-full sm:max-h-[94vh] overflow-y-auto transition-colors duration-200`,
+      className: `bg-white dark:bg-gray-800 sm:rounded-lg shadow-2xl ${maxWidthClass} w-full max-h-full sm:max-h-[94dvh] overflow-y-auto transition-colors duration-200`,
       style: {
         touchAction: "pan-y",
         overscrollBehavior: "contain"
@@ -232182,7 +232207,10 @@ var Modal = ({
       "aria-labelledby": "modal-title",
       children: [
         /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("div", {
-          className: "sticky top-0 z-10 flex items-center justify-between gap-2 px-3 sm:px-6 pt-3 sm:pt-4 pb-2 sm:pb-3 border-b border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-800/95 backdrop-blur supports-[backdrop-filter]:bg-white/75 supports-[backdrop-filter]:dark:bg-gray-800/75",
+          className: "sticky top-0 z-10 flex items-center justify-between gap-2 px-3 sm:px-6 pb-2 sm:pb-3 border-b border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-800/95 backdrop-blur supports-[backdrop-filter]:bg-white/75 supports-[backdrop-filter]:dark:bg-gray-800/75",
+          style: {
+            paddingTop: "max(0.75rem, max(0.75rem, env(safe-area-inset-top)))"
+          },
           children: [
             /* @__PURE__ */ jsx_dev_runtime28.jsxDEV("h2", {
               id: "modal-title",
@@ -233021,6 +233049,107 @@ var ProposalDetailsModalComponent = ({
         className: "mb-3 text-sm text-red-600 dark:text-red-400",
         children: error3
       }, undefined, false, undefined, this),
+      proposal?.gatePausedBy === "circuit_breaker" && /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
+        className: "mb-4 flex items-start gap-3 px-4 py-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("svg", {
+            className: "w-5 h-5 flex-shrink-0 text-red-600 dark:text-red-400 mt-0.5",
+            fill: "currentColor",
+            viewBox: "0 0 24 24",
+            "aria-hidden": "true",
+            focusable: "false",
+            children: /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("path", {
+              d: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
+            className: "flex-1",
+            children: [
+              /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
+                className: "font-medium text-red-800 dark:text-red-200",
+                children: "Paused by circuit breaker"
+              }, undefined, false, undefined, this),
+              proposal?.gatePausedAt && /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
+                className: "text-sm text-red-700 dark:text-red-300 mt-1",
+                children: [
+                  "Paused at",
+                  " ",
+                  formatStoredUtcDateForDisplay(proposal.gatePausedAt),
+                  proposal?.gatePausedReason && /* @__PURE__ */ jsx_dev_runtime29.jsxDEV(jsx_dev_runtime29.Fragment, {
+                    children: [
+                      ": ",
+                      proposal.gatePausedReason
+                    ]
+                  }, undefined, true, undefined, this)
+                ]
+              }, undefined, true, undefined, this),
+              mode === "preview" && !isFromOtherBranch && /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("button", {
+                type: "button",
+                onClick: async () => {
+                  try {
+                    await apiClient.updateProposal(proposal.id, {
+                      gateScannerPaused: false
+                    });
+                    onSaved?.();
+                  } catch (err) {
+                    console.error("Failed to unpause:", err);
+                  }
+                },
+                disabled: saving,
+                className: "mt-2 px-3 py-1.5 text-sm font-medium text-white bg-red-600 dark:bg-red-700 hover:bg-red-700 dark:hover:bg-red-800 disabled:opacity-50 disabled:cursor-not-allowed rounded transition-colors",
+                children: "Unpause and resume"
+              }, undefined, false, undefined, this)
+            ]
+          }, undefined, true, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
+      (parseTags(proposal?.tags)?.schema_drift === true || parseTags(proposal?.tags)?.origin_unknown === true) && /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
+        className: "mb-4 flex items-start gap-3 px-4 py-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg",
+        children: [
+          /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("svg", {
+            className: "w-5 h-5 flex-shrink-0 text-amber-600 dark:text-amber-400 mt-0.5",
+            fill: "none",
+            stroke: "currentColor",
+            viewBox: "0 0 24 24",
+            "aria-hidden": "true",
+            focusable: "false",
+            children: /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("path", {
+              strokeLinecap: "round",
+              strokeLinejoin: "round",
+              strokeWidth: 2,
+              d: "M12 9v2m0 4v2m0 0a9 9 0 11-18 0 9 9 0 0118 0z"
+            }, undefined, false, undefined, this)
+          }, undefined, false, undefined, this),
+          /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
+            className: "flex-1",
+            children: parseTags(proposal?.tags)?.origin_unknown === true ? /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
+              className: "text-amber-800 dark:text-amber-200",
+              children: /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
+                className: "font-medium",
+                children: "Origin could not be traced; needs operator triage"
+              }, undefined, false, undefined, this)
+            }, undefined, false, undefined, this) : /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
+              className: "text-amber-800 dark:text-amber-200",
+              children: [
+                /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
+                  className: "font-medium",
+                  children: "Schema drift detected"
+                }, undefined, false, undefined, this),
+                proposal?.parentProposalId && /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("button", {
+                  type: "button",
+                  onClick: () => {},
+                  className: "mt-2 text-amber-700 dark:text-amber-300 hover:underline text-sm font-medium",
+                  children: [
+                    "View parent (",
+                    proposal.parentProposalId,
+                    ")"
+                  ]
+                }, undefined, true, undefined, this)
+              ]
+            }, undefined, true, undefined, this)
+          }, undefined, false, undefined, this)
+        ]
+      }, undefined, true, undefined, this),
       isFromOtherBranch && /* @__PURE__ */ jsx_dev_runtime29.jsxDEV("div", {
         className: "mb-4 flex items-center gap-2 px-4 py-3 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded-lg text-amber-800 dark:text-amber-200",
         children: [
@@ -233861,6 +233990,8 @@ var ProposalsPage = ({
   const [statusFilter, setStatusFilter] = import_react64.useState("");
   const [priorityFilter, setPriorityFilter] = import_react64.useState("");
   const [typeFilter, setTypeFilter] = import_react64.useState("");
+  const [schemaDriftFilter, setSchemaDriftFilter] = import_react64.useState(false);
+  const [pausedFilter, setPausedFilter] = import_react64.useState(false);
   const [sortColumn, setSortColumn] = import_react64.useState("id");
   const [sortDirection, setSortDirection] = import_react64.useState("desc");
   const [currentPage, setCurrentPage] = import_react64.useState(1);
@@ -233902,6 +234033,12 @@ var ProposalsPage = ({
     if (typeFilter) {
       result = result.filter((p5) => p5.proposalType === typeFilter);
     }
+    if (schemaDriftFilter) {
+      result = result.filter((p5) => parseTags(p5.tags)?.schema_drift === true);
+    }
+    if (pausedFilter) {
+      result = result.filter((p5) => p5.gatePausedBy === "circuit_breaker");
+    }
     return [...result].sort((a3, b3) => {
       let comparison = 0;
       switch (sortColumn) {
@@ -233935,6 +234072,8 @@ var ProposalsPage = ({
     statusFilter,
     priorityFilter,
     typeFilter,
+    schemaDriftFilter,
+    pausedFilter,
     sortColumn,
     sortDirection
   ]);
@@ -233962,6 +234101,7 @@ var ProposalsPage = ({
       children: sortDirection === "asc" ? "↑" : "↓"
     }, undefined, false, undefined, this);
   };
+  const pausedCount = proposals.filter((p5) => p5.gatePausedBy === "circuit_breaker").length;
   return /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("div", {
     className: "space-y-4",
     children: [
@@ -233973,6 +234113,20 @@ var ProposalsPage = ({
             "Proposals (",
             filteredProposals.length,
             ")"
+          ]
+        }, undefined, true, undefined, this)
+      }, undefined, false, undefined, this),
+      pausedCount > 0 && /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("div", {
+        className: "bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4",
+        children: /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("button", {
+          type: "button",
+          onClick: () => setPausedFilter(!pausedFilter),
+          className: "text-red-800 dark:text-red-200 font-medium text-sm hover:underline",
+          children: [
+            pausedCount,
+            " proposal",
+            pausedCount !== 1 ? "s" : "",
+            " paused by circuit breaker"
           ]
         }, undefined, true, undefined, this)
       }, undefined, false, undefined, this),
@@ -234039,13 +234193,21 @@ var ProposalsPage = ({
               }, t4, false, undefined, this))
             ]
           }, undefined, true, undefined, this),
-          (filter7 || statusFilter || priorityFilter || typeFilter) && /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("button", {
+          /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("button", {
+            type: "button",
+            onClick: () => setSchemaDriftFilter(!schemaDriftFilter),
+            className: `px-3 py-1.5 text-sm rounded border font-medium transition-colors ${schemaDriftFilter ? "bg-amber-50 dark:bg-amber-900/20 border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-200" : "bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600"}`,
+            children: "⚠ Schema drift"
+          }, undefined, false, undefined, this),
+          (filter7 || statusFilter || priorityFilter || typeFilter || schemaDriftFilter || pausedFilter) && /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("button", {
             type: "button",
             onClick: () => {
               setFilter("");
               setStatusFilter("");
               setPriorityFilter("");
               setTypeFilter("");
+              setSchemaDriftFilter(false);
+              setPausedFilter(false);
             },
             className: "text-sm text-blue-600 dark:text-blue-400 hover:underline",
             children: "Clear filters"
@@ -234189,8 +234351,26 @@ var ProposalsPage = ({
                       children: proposal.id
                     }, undefined, false, undefined, this),
                     /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("td", {
-                      className: "px-4 py-3 text-gray-900 dark:text-gray-100 max-w-xs truncate",
-                      children: proposal.title
+                      className: "px-4 py-3 text-gray-900 dark:text-gray-100 max-w-xs",
+                      children: /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("div", {
+                        className: "flex items-center gap-2",
+                        children: [
+                          /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("span", {
+                            className: "truncate",
+                            children: proposal.title
+                          }, undefined, false, undefined, this),
+                          parseTags(proposal.tags)?.schema_drift === true && /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("button", {
+                            type: "button",
+                            onClick: (e3) => {
+                              e3.stopPropagation();
+                              onProposalClick?.(proposal.parentProposalId ? proposals.find((p5) => p5.id === proposal.parentProposalId) || proposal : proposal);
+                            },
+                            className: "flex-shrink-0 px-2 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded text-xs font-medium hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors",
+                            title: "Schema drift detected",
+                            children: "⚠ drift"
+                          }, undefined, false, undefined, this)
+                        ]
+                      }, undefined, true, undefined, this)
                     }, undefined, false, undefined, this),
                     /* @__PURE__ */ jsx_dev_runtime30.jsxDEV("td", {
                       className: "px-4 py-3",
@@ -235407,6 +235587,9 @@ function isChannel(value2) {
 function isMessage(value2) {
   return isObject3(value2) && typeof value2.id === "string";
 }
+function isNotification(value2) {
+  return isObject3(value2) && typeof value2.id === "string" && typeof value2.severity === "string" && typeof value2.title === "string" && typeof value2.message === "string" && typeof value2.created_at === "string" && typeof value2.seen === "boolean";
+}
 function asArrayOf(value2, guard) {
   return Array.isArray(value2) ? value2.filter(guard) : [];
 }
@@ -235417,6 +235600,8 @@ function useWebSocket(url) {
   const [agents, setAgents] = import_react70.useState([]);
   const [channels2, setChannels] = import_react70.useState([]);
   const [messages2, setMessages] = import_react70.useState([]);
+  const [notifications2, setNotifications] = import_react70.useState([]);
+  const [bellEnabled, setBellEnabled] = import_react70.useState(false);
   const [boardReloadSignal, setBoardReloadSignal] = import_react70.useState(0);
   const wsRef = import_react70.useRef(null);
   const reconnectTimeoutRef = import_react70.useRef(undefined);
@@ -235522,6 +235707,28 @@ function useWebSocket(url) {
               setMessages((prev2) => [...prev2, message].slice(-200));
             }
             break;
+          case "notification_inbox_snapshot":
+            setNotifications(asArrayOf(msg.data, isNotification));
+            setBellEnabled(true);
+            break;
+          case "notification_insert":
+          case "notification_update":
+            if (!isNotification(msg.data)) {
+              break;
+            }
+            {
+              const updated = msg.data;
+              setNotifications((prev2) => {
+                const idx = prev2.findIndex((n3) => n3.id === updated.id);
+                if (idx >= 0) {
+                  const next4 = [...prev2];
+                  next4[idx] = updated;
+                  return next4;
+                }
+                return [updated, ...prev2];
+              });
+            }
+            break;
           case "board_reload":
             setBoardReloadSignal((n3) => n3 + 1);
             break;
@@ -235599,7 +235806,7 @@ function useWebSocket(url) {
     }
     connect();
   }, [connect]);
-  return { connected, proposals, agents, channels: channels2, messages: messages2, reconnect, boardReloadSignal };
+  return { connected, proposals, agents, channels: channels2, messages: messages2, notifications: notifications2, bellEnabled, reconnect, boardReloadSignal };
 }
 
 // src/apps/dashboard-web/lib/proposal-detail-selection.ts
@@ -235689,7 +235896,7 @@ function toSharedProposal(proposal) {
     acceptanceCriteriaItems: proposal.acceptanceCriteriaItems,
     needs_capabilities: proposal.needsCapabilities,
     required_capabilities: proposal.requiredCapabilities,
-    parentProposalId: proposal.parentProposalId,
+    parentProposalId: proposal.parentId ?? undefined,
     parentProposalTitle: proposal.parentProposalTitle,
     maturity: proposal.maturity,
     obsoleted_reason: proposal.obsoleted_reason,
@@ -235698,6 +235905,11 @@ function toSharedProposal(proposal) {
     liveActivity: proposal.liveActivity,
     displayId: proposal.displayId,
     websocketId: proposal.websocketId ?? proposal.id,
+    tags: proposal.tags,
+    gateScannerPaused: proposal.gateScannerPaused,
+    gatePausedBy: proposal.gatePausedBy ?? undefined,
+    gatePausedAt: proposal.gatePausedAt,
+    gatePausedReason: proposal.gatePausedReason,
     selectionAliases: buildProposalSelectionAliases(proposal.displayId, proposal.websocketId, proposal.id)
   };
 }
@@ -235719,7 +235931,15 @@ function toSharedChannel(channel2) {
   };
 }
 function App() {
-  const { connected, proposals, agents, channels: channels2, boardReloadSignal } = useWebSocket();
+  const {
+    connected,
+    proposals,
+    agents,
+    channels: channels2,
+    notifications: notifications2,
+    bellEnabled,
+    boardReloadSignal
+  } = useWebSocket();
   const [activeWorkflow, setActiveWorkflow] = import_react71.useState(() => {
     if (typeof window !== "undefined") {
       return window.localStorage.getItem("roadmap.board.workflow") || "Standard RFC";
