@@ -1191,7 +1191,7 @@ export async function listReviews(args: {
 		}
 
 		const { rows: reviewRows } = await query(
-			`SELECT reviewer_identity, verdict, notes, findings, reviewed_at
+			`SELECT reviewer_identity, verdict, notes, findings, is_blocking, reviewed_at
        FROM roadmap_proposal.proposal_reviews WHERE proposal_id = $1
        ORDER BY reviewed_at DESC`,
 			[propId],
@@ -1210,7 +1210,7 @@ export async function listReviews(args: {
 		};
 		const lines = reviewRows.map(
 			(r) =>
-				`${verdictEmoji[r.verdict] || "?"} ${r.reviewer_identity}: ${r.verdict}${r.notes ? ` — ${r.notes}` : ""}`,
+				`${verdictEmoji[r.verdict] || "?"} ${r.reviewer_identity}: ${r.verdict}${r.is_blocking ? " [is_blocking]" : ""}${r.notes ? ` — ${r.notes}` : ""}`,
 		);
 		return {
 			content: [
@@ -1305,7 +1305,9 @@ export async function addDiscussion(args: {
 	}
 	if (!args.author) {
 		// Default authoring identity so cubic/gate agents don't bounce on a
-		// missing arg — they're system-issued, not user-issued.
+		// missing arg — they're system-issued, not user-issued. (P1389 review:
+		// this is a documented default, not a silent drop — do not convert it
+		// to a rejection; system-issued callers legitimately omit author.)
 		(args as any).author = "system";
 	}
 	try {

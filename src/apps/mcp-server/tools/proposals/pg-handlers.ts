@@ -847,6 +847,7 @@ export class PgProposalHandlers {
 		display_id?: string;
 		durationMinutes?: number;
 		force?: boolean;
+		message?: string;
 	}): Promise<CallToolResult> {
 		try {
 			// P1340 AC-4: accept id|proposal_id|display_id as aliases for the
@@ -963,7 +964,7 @@ export class PgProposalHandlers {
 				);
 			}
 
-			const claimed = await pg.claimLease(id, agentArg, expiresAt);
+			const claimed = await pg.claimLease(id, agentArg, expiresAt, args.message);
 			if (!claimed) {
 				return {
 					content: [
