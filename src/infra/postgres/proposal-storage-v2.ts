@@ -715,6 +715,9 @@ export async function setMaturity(
 				Activity: "MaturityChange",
 				From: prior.maturity ?? "new",
 				To: maturity,
+				// P1389 AC-8: persist the caller's reason for ALL transitions,
+				// not only the mature-path discussion note below.
+				...(reason ? { Reason: reason } : {}),
 			}),
 			proposalId,
 		],
