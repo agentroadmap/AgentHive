@@ -14,10 +14,6 @@ CREATE TABLE IF NOT EXISTS roadmap.extraction_failure_tracking (
 CREATE INDEX idx_extraction_failure_tracking_provider_time
   ON roadmap.extraction_failure_tracking(provider, recorded_at);
 
-CREATE INDEX idx_extraction_failure_tracking_recent
-  ON roadmap.extraction_failure_tracking(provider, recorded_at DESC)
-  WHERE recorded_at > now() - interval '2 hours';
-
 -- View to compute failure rate per provider over rolling 1-hour windows
 CREATE OR REPLACE VIEW roadmap.v_extraction_failure_rate AS
   SELECT
