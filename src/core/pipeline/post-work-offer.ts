@@ -160,6 +160,21 @@ export class ProposalPausedError extends Error {
 	}
 }
 
+// Offer-gen guard: COMPLETE is a terminal state — never post work offers for
+// a completed proposal (operator directive 2026-06-09). scanQueues/legacy-dispatch
+// treat this as skip-and-continue, same shape as ProposalPausedError.
+export class TerminalProposalError extends Error {
+	constructor(
+		readonly proposalId: number,
+		readonly status: string,
+	) {
+		super(
+			`postWorkOffer: P${proposalId} dispatch refused — proposal status='${status}' is terminal (COMPLETE); no offers for completed proposals.`,
+		);
+		this.name = "TerminalProposalError";
+	}
+}
+
 // P1729: postWorkOffer refused because cumulative convergence guard
 // detected either (a) blocking review count >= K, or (b) per-role run count >= N
 // since last state/maturity transition. Proposal is paused.
@@ -495,6 +510,13 @@ async function postWorkOfferImpl(
 			`postWorkOffer: proposal ${input.proposalId} not found`,
 		);
 	}
+
+	// Terminal-status guard (operator directive): COMPLETE is terminal — refuse before INSERT.
+	const TERMINAL_PROPOSAL_STATUSES = new Set(["COMPLETE"]);
+	if (ctx.status && TERMINAL_PROPOSAL_STATUSES.has(ctx.status.toUpperCase())) {
+		throw new TerminalProposalError(input.proposalId, ctx.status);
+	}
+
 	if (ctx.gate_scanner_paused) {
 		throw new Error(
 			`postWorkOffer: proposal ${input.proposalId} is gate_scanner_paused; dispatch refused`,
