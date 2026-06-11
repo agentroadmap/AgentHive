@@ -188,7 +188,7 @@ export function setVault(v: VaultInterface): void {
  * plain env var refs continue to work, vault:// refs that require a configured
  * backend fail with clear errors.
  */
-function createBridgeAdapter(sharedVault: VaultInterface): VaultInterface {
+export function createBridgeAdapter(sharedVault: VaultInterface): VaultInterface {
 	return {
 		async read(ref: string): Promise<string> {
 			// Route vault:// scheme refs to the shared vault chooser
@@ -205,8 +205,9 @@ function createBridgeAdapter(sharedVault: VaultInterface): VaultInterface {
  * Returns the configured vault, lazily initializing on first call.
  * Lazy init ensures vault environment variables (AGENTHIVE_VAULT_KIND,
  * AGENTHIVE_HCV_ADDR, etc.) are read at pool-resolution time, not module-load.
+ * Exported for tests; production callers go through getProjectDb().
  */
-function getVault(): VaultInterface {
+export function getVault(): VaultInterface {
 	if (!_vault) {
 		_vault = createBridgeAdapter(getSharedVault());
 	}

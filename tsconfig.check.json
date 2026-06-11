@@ -17,7 +17,8 @@
   "include": [
     "src/apps/hive-cli/**/*.ts",
     "src/apps/cubic-agents/**/*.ts",
-    "src/core/gate/**/*.ts"
+    "src/core/gate/**/*.ts",
+    "src/shared/vault/aws-sdk.d.ts"
   ],
   "exclude": ["node_modules"]
 }
