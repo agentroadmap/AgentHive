@@ -475,4 +475,48 @@ export function registerAgentTools(server: McpServer): void {
 		async (input) => pgHandlers.getRoleDefinition(input),
 	);
 	server.addTool(getRoleDefinitionTool);
+
+	// ── agent_report_mismatch ───────────────────────────────────────────────
+	// AC-9: P1068 expertise mismatch self-reporting
+	type ReportMismatchArgs = Parameters<PgAgentHandlers["reportMismatch"]>[0];
+	const reportMismatchTool = createSimpleValidatedTool<ReportMismatchArgs>(
+		{
+			name: "agent_report_mismatch",
+			description:
+				"P1068 AC-9: Report an expertise mismatch for a dispatched work offer. " +
+				"When an agent discovers it cannot handle assigned work due to skill gaps, " +
+				"it calls this to release the lease and revert proposal maturity to 'new'. " +
+				"This allows the work to be reassigned to a more suitable agent. " +
+				"Returns: {status, dispatch_id, proposal_id, action_taken} on success.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					dispatch_id: {
+						oneOf: [{ type: "number" }, { type: "string" }],
+						description: "ID of the work offer being returned",
+					},
+					claim_token: {
+						type: "string",
+						description: "Current claim token (UUID) from the work offer lease",
+					},
+					reason: {
+						type: "string",
+						description: "Explanation of the expertise mismatch (e.g., 'lacks advanced Rust knowledge')",
+					},
+				},
+				required: ["dispatch_id", "claim_token", "reason"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				dispatch_id: { oneOf: [{ type: "number" }, { type: "string" }] },
+				claim_token: { type: "string" },
+				reason: { type: "string" },
+			},
+			required: ["dispatch_id", "claim_token", "reason"],
+		},
+		async (input) => pgHandlers.reportMismatch(input),
+	);
+	server.addTool(reportMismatchTool);
 }

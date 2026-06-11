@@ -1089,4 +1089,134 @@ export class PgAgentHandlers {
 			return errorResult("Failed to get role definition", err);
 		}
 	}
+
+	/**
+	 * P1068 AC-9: Report expertise mismatch for a dispatched work offer.
+	 *
+	 * When an agent discovers it cannot properly handle assigned work due to
+	 * expertise mismatch (e.g., assigned a code-review role but lacks the expertise),
+	 * it calls this to:
+	 * 1. Release the lease on the current dispatch
+	 * 2. Revert the proposal maturity to 'new' (restarts work assignment)
+	 * 3. Log the mismatch for operator visibility
+	 *
+	 * Arguments:
+	 *   - dispatch_id: ID of the work offer being returned
+	 *   - claim_token: Current claim token (lease validation)
+	 *   - reason: Explanation of the expertise mismatch
+	 */
+	async reportMismatch(args: {
+		dispatch_id: string | number;
+		claim_token: string;
+		reason: string;
+	}): Promise<CallToolResult> {
+		try {
+			const dispatchId = typeof args.dispatch_id === "string"
+				? parseInt(args.dispatch_id, 10)
+				: args.dispatch_id;
+			const claimToken = args.claim_token?.trim();
+			const reason = args.reason?.trim();
+
+			if (Number.isNaN(dispatchId) || !claimToken || !reason) {
+				return errorResult(
+					"Invalid report_mismatch arguments",
+					new Error(
+						"dispatch_id (number), claim_token (uuid), and reason (text) are required",
+					),
+				);
+			}
+
+			// Verify the dispatch exists and claim token matches
+			const dispatchResult = await query<{
+				proposal_id: bigint;
+				claim_token: string;
+				status: string;
+			}>(
+				`SELECT proposal_id, claim_token, status
+				 FROM roadmap_workforce.squad_dispatch
+				 WHERE id = $1`,
+				[dispatchId],
+			);
+
+			if (dispatchResult.rows.length === 0) {
+				return errorResult(
+					"Dispatch not found",
+					new Error(`dispatch_id ${dispatchId} not found`),
+				);
+			}
+
+			const { proposal_id, claim_token: storedToken, status } =
+				dispatchResult.rows[0];
+
+			if (storedToken !== claimToken) {
+				return errorResult(
+					"Claim token mismatch",
+					new Error("Supplied claim_token does not match dispatch lease token"),
+				);
+			}
+
+			if (status !== "active") {
+				return errorResult(
+					"Dispatch not active",
+					new Error(`Dispatch status is '${status}', expected 'active'`),
+				);
+			}
+
+			// P1068 AC-9: Release the lease and revert proposal maturity
+			await query(
+				`UPDATE roadmap_workforce.squad_dispatch
+				 SET status = 'returned',
+					 updated_at = now(),
+					 completion_notes = $1
+				 WHERE id = $2`,
+				[`Expertise mismatch reported: ${reason}`, dispatchId],
+			);
+
+			// Revert proposal maturity to 'new' so it can be reassigned
+			await query(
+				`UPDATE roadmap_proposal.proposal
+				 SET maturity = 'new',
+					 updated_at = now()
+				 WHERE id = $1`,
+				[proposal_id],
+			);
+
+			// Log the mismatch for operator visibility
+			await query(
+				`INSERT INTO control_audit.proposal_audit_log (proposal_id, action, actor, notes, created_at)
+				 VALUES ($1, 'expertise_mismatch_reported', $2, $3, now())`,
+				[proposal_id, "worker_self_report", reason],
+			).catch((err) => {
+				console.warn(
+					`[PgAgentHandlers AC-9] Failed to log mismatch audit: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			});
+
+			return {
+				content: [
+					{
+						type: "text",
+						text: JSON.stringify(
+							{
+								status: 200,
+								message: "Expertise mismatch reported and lease released",
+								dispatch_id: dispatchId,
+								proposal_id: Number(proposal_id),
+								action_taken: [
+									"dispatch status → returned",
+									"proposal maturity → new",
+									"audit log entry created",
+								],
+								reason,
+							},
+							null,
+							2,
+						),
+					},
+				],
+			};
+		} catch (err) {
+			return errorResult("Failed to report expertise mismatch", err);
+		}
+	}
 }
