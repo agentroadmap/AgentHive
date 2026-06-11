@@ -6,6 +6,7 @@
  */
 
 import { query } from "../../postgres/pool.ts";
+import { RfcStates } from "../workflow/state-names.ts";
 
 const STOP_WORDS = new Set([
 	"the", "and", "for", "with", "this", "that", "from", "into", "have",
@@ -64,6 +65,9 @@ export async function detectConflicts(
 	const inputText = `${directiveTitle} ${directiveSummary ?? ""}`;
 	const inputKeywords = extractKeywords(inputText);
 
+	// Terminal/closed states come from the canonical state-names registry
+	// (P306 uppercased all stored statuses, so the comparison is exact).
+	const inactiveStates = [RfcStates.COMPLETE, RfcStates.REJECTED, RfcStates.DISCARDED];
 	const { rows } = await queryFn<{
 		id: string;
 		display_id: string | null;
@@ -74,8 +78,8 @@ export async function detectConflicts(
 		   FROM roadmap_proposal.proposal
 		  WHERE type != 'directive'
 		    AND id::text != $1
-		    AND upper(status) NOT IN ('COMPLETE', 'DEPLOYED', 'RECYCLED', 'REJECTED', 'ABANDONED', 'REPLACED')`,
-		[directiveId],
+		    AND upper(status) <> ALL($2::text[])`,
+		[directiveId, inactiveStates],
 	);
 
 	const conflicts: ConflictEntry[] = [];

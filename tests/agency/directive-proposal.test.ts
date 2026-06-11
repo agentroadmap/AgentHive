@@ -109,15 +109,19 @@ describe("AC-5: detectConflicts", async () => {
 		assert.equal(report.conflicts[0].requires_review, true);
 	});
 
-	it("excludes the directive itself and terminal proposals case-insensitively", async () => {
+	it("excludes the directive itself and inactive proposals case-insensitively", async () => {
 		let capturedSql = "";
-		const capturingQuery = async (sql: string) => {
+		let capturedParams: unknown[] = [];
+		const capturingQuery = async (sql: string, params: unknown[]) => {
 			capturedSql = sql;
+			capturedParams = params;
 			return { rows: [] };
 		};
 		await detectConflicts("99", "payment billing", null, capturingQuery as any);
-		assert.ok(capturedSql.includes("upper(status) NOT IN"), "terminal-state filter must be case-insensitive (P306 uppercased statuses)");
+		assert.ok(capturedSql.includes("upper(status) <> ALL($2::text[])"), "inactive-state filter must be case-insensitive (P306 uppercased statuses)");
 		assert.ok(capturedSql.includes("!= 'directive'"));
+		assert.ok(Array.isArray(capturedParams[1]), "inactive states passed as array param from state-names registry");
+		assert.ok((capturedParams[1] as string[]).length >= 1);
 	});
 
 	it("counts extracted keywords (>3 chars, stop words removed)", async () => {
