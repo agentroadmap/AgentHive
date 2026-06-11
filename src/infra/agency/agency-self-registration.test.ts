@@ -340,3 +340,153 @@ describe("P913 — agency-self-registration hotfix (transaction + advisory lock 
 		},
 	);
 });
+
+describe("P1351 — Nested agencies (parent_agency_id)", () => {
+	dbTest(
+		"AgencySelfRegistrationOptions accepts optional parentAgencyId parameter",
+		async () => {
+			const testParent = `test/parent-${Date.now()}`;
+			const testChild = `test/child-${Date.now()}`;
+
+			// Register parent first
+			const parentReg = await selfRegisterAgency({
+				agencyId: testParent,
+				provider: "claude",
+				capabilities: ["test"],
+			});
+
+			try {
+				// Register child with parent reference
+				const childReg = await selfRegisterAgency({
+					agencyId: testChild,
+					provider: "claude",
+					capabilities: ["test"],
+					parentAgencyId: testParent,
+				});
+
+				try {
+					// Verify parent_agency_id is persisted in roadmap.agency
+					const childRow = await pool.query<{ parent_agency_id: string | null }>(
+						`SELECT parent_agency_id FROM roadmap.agency WHERE agency_id = $1`,
+						[testChild],
+					);
+					assert.strictEqual(
+						childRow.rows.length,
+						1,
+						"child agency row exists",
+					);
+					assert.strictEqual(
+						childRow.rows[0].parent_agency_id,
+						testParent,
+						"parent_agency_id matches",
+					);
+				} finally {
+					await childReg.stop("operator");
+				}
+			} finally {
+				await parentReg.stop("operator");
+			}
+		},
+	);
+
+	dbTest(
+		"liaisonRegister preserves parent_agency_id on upsert",
+		async () => {
+			const testParent = `test/parent-upsert-${Date.now()}`;
+			const testChild = `test/child-upsert-${Date.now()}`;
+
+			// Register parent
+			const parentReg = await selfRegisterAgency({
+				agencyId: testParent,
+				provider: "claude",
+				capabilities: ["test"],
+			});
+
+			try {
+				// Register child twice with same parent_agency_id
+				const childReg1 = await selfRegisterAgency({
+					agencyId: testChild,
+					provider: "claude",
+					capabilities: ["test"],
+					parentAgencyId: testParent,
+				});
+
+				await childReg1.stop("operator");
+
+				// Re-register child (should upsert, preserving parent)
+				const childReg2 = await selfRegisterAgency({
+					agencyId: testChild,
+					provider: "claude",
+					capabilities: ["test"],
+					parentAgencyId: testParent,
+				});
+
+				try {
+					// Verify parent_agency_id is still correct after upsert
+					const childRow = await pool.query<{ parent_agency_id: string | null }>(
+						`SELECT parent_agency_id FROM roadmap.agency WHERE agency_id = $1`,
+						[testChild],
+					);
+					assert.strictEqual(
+						childRow.rows[0].parent_agency_id,
+						testParent,
+						"parent_agency_id persists after upsert",
+					);
+				} finally {
+					await childReg2.stop("operator");
+				}
+			} finally {
+				await parentReg.stop("operator");
+			}
+		},
+	);
+
+	dbTest(
+		"UNIQUE(parent_agency_id, agency_id) constraint enforces sibling deduplication",
+		async () => {
+			const testParent = `test/parent-unique-${Date.now()}`;
+			const testChild = `test/child-unique-${Date.now()}`;
+
+			// Register parent
+			const parentReg = await selfRegisterAgency({
+				agencyId: testParent,
+				provider: "claude",
+				capabilities: ["test"],
+			});
+
+			try {
+				// Register child with parent
+				const childReg = await selfRegisterAgency({
+					agencyId: testChild,
+					provider: "claude",
+					capabilities: ["test"],
+					parentAgencyId: testParent,
+				});
+
+				try {
+					// Try to insert duplicate (parent, child) — should violate UNIQUE constraint
+					try {
+						await pool.query(
+							`INSERT INTO roadmap.agency (agency_id, display_name, provider, host_id, parent_agency_id)
+							 VALUES ($1, $2, $3, $4, $5)`,
+							[testChild, testChild, "claude", "test-host", testParent],
+						);
+						assert.fail(
+							"Duplicate (parent, child) insert should violate UNIQUE constraint",
+						);
+					} catch (err) {
+						assert(
+							err instanceof Error &&
+								err.message.includes("unique_parent_child"),
+							`Expected unique_parent_child constraint error, got: ${(err as Error).message}`,
+						);
+					}
+				} finally {
+					await childReg.stop("operator");
+				}
+			} finally {
+				await parentReg.stop("operator");
+			}
+		},
+	);
+});
