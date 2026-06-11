@@ -1,5 +1,6 @@
 import type { McpServer } from "../../server.ts";
 import { takeBackup, verifyBackup, listBackups } from "./pg-handlers.ts";
+import { setupTenantOps, cleanupTenantOps } from "../ops/tenant-ops-setup.ts";
 
 export function registerBackupTools(server: McpServer): void {
 	server.addTool({
@@ -50,5 +51,34 @@ export function registerBackupTools(server: McpServer): void {
 			},
 		},
 		handler: async (args) => listBackups(args as any),
+	});
+
+	server.addTool({
+		name: "tenant_ops_setup",
+		description: "P509: Set up tenant backup ops (policy, tenants.local) after project provisioning",
+		inputSchema: {
+			type: "object",
+			required: ["project_slug"],
+			properties: {
+				project_slug: { type: "string", description: "Project slug (e.g., agenthive)" },
+				control_dsn: { type: "string", description: "Control-plane DSN (optional)" },
+				dry_run: { type: "boolean", description: "Dry-run mode" },
+			},
+		},
+		handler: async (args) => setupTenantOps(args as any),
+	});
+
+	server.addTool({
+		name: "tenant_ops_cleanup",
+		description: "P509: Clean up tenant from ops (remove from tenants.local) on archive",
+		inputSchema: {
+			type: "object",
+			required: ["project_slug"],
+			properties: {
+				project_slug: { type: "string", description: "Project slug" },
+				dry_run: { type: "boolean", description: "Dry-run mode" },
+			},
+		},
+		handler: async (args) => cleanupTenantOps(args as any),
 	});
 }
