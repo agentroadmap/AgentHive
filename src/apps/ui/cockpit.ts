@@ -22,6 +22,10 @@ export interface WorkforceAgent {
 	currentProposal?: string;
 	statusMessage: string;
 	lastSeen?: number;
+	// P1365-AC6: Capacity awareness
+	capacityHeadroomPct?: number | null;  // headroom percentage from agency_capacity
+	capacityThrottleAction?: 'none' | 'soft' | 'hard' | null; // throttle action type
+	capacityResetAt?: number | null;      // ms epoch — when capacity resets
 }
 
 export interface PipelineProposal {
@@ -275,6 +279,20 @@ export function renderCockpit(
 		const online = agents.filter((a) => a.presenceOnline).length;
 		const working = agents.filter((a) => a.status === "active" && a.currentProposal);
 		const idle = agents.filter((a) => a.status === "active" && !a.currentProposal);
+
+		// P1365-AC6: Split idle agents by capacity headroom
+		// "ready" = healthy headroom (>= 25%), "cooling" = low headroom (< 25%)
+		const ready = idle.filter((a) => {
+			const headroom = a.capacityHeadroomPct;
+			// If no headroom data, assume ready (no capacity record = healthy)
+			return headroom === null || headroom === undefined || headroom >= 25;
+		});
+		const cooling = idle.filter((a) => {
+			const headroom = a.capacityHeadroomPct;
+			// Cooling = explicit headroom < 25% OR soft-throttled by capacity
+			return headroom !== null && headroom !== undefined && headroom < 25;
+		});
+
 		const throttled = agents.filter((a) => a.status === "throttled");
 		const offline = agents.filter((a) => a.status === "offline");
 
@@ -288,13 +306,29 @@ export function renderCockpit(
 		// Header: agencies + agents counts, liaison responsiveness, dispatch
 		// states. Operator request (2026-05-22): "agencies #, registered,
 		// online (liaison responsive, token available or to reset time)".
+		// P1365-AC6: Split "ready" and "cooling" to show capacity awareness.
 		const parts = [
 			`{bold}${agencyCount}{/} agencies`,
 			`{bold}${totalAgents}{/} agents`,
 			`{green-fg}${online}{/} online`,
 			`{bold}${working.length}{/} working`,
-			`{cyan-fg}${idle.length}{/} ready`,
 		];
+		// Show "N ready · M cooling" format for capacity awareness
+		if (ready.length > 0 || cooling.length > 0) {
+			parts.push(`{cyan-fg}${ready.length}{/} ready`);
+			if (cooling.length > 0) {
+				// Show shortest reset window for cooling agencies
+				const coolingResets = cooling
+					.map((a) => a.capacityResetAt)
+					.filter((t): t is number => typeof t === "number" && t > Date.now())
+					.sort((a, b) => a - b);
+				const nextCoolingReset = coolingResets[0];
+				const coolingResetIn = nextCoolingReset
+					? ` (reset ${formatRelativeTime(nextCoolingReset - Date.now())})`
+					: "";
+				parts.push(`{yellow-fg}${cooling.length} cooling${coolingResetIn}{/}`);
+			}
+		}
 		if (throttled.length > 0) {
 			// Show shortest reset window so operator knows when to expect capacity.
 			const resets = throttled
@@ -326,28 +360,45 @@ export function renderCockpit(
 			lines.push("");
 		}
 
-		if (idle.length > 0) {
+		if (ready.length > 0 || cooling.length > 0) {
 			lines.push(`{cyan-fg}[ ] AVAILABLE{/}`);
-			// Group by provider@host — the user's mental model. claude@bot,
-			// codex@bot, gemini@bot, etc. Each shown as a single line with
-			// agency names comma-separated.
-			const byProvider = new Map<string, string[]>();
-			idle.forEach((a) => {
-				const key = a.role || "unknown@?";
-				if (!byProvider.has(key)) byProvider.set(key, []);
-				byProvider.get(key)!.push(a.id);
-			});
-			// Sort providers alphabetically for stability.
-			const orderedProviders = Array.from(byProvider.keys()).sort();
-			orderedProviders.forEach((provider) => {
-				const names = byProvider.get(provider) ?? [];
-				const joined = names.join(", ");
-				const labelLen = provider.length + String(names.length).length + 5;
-				const fit = joined.length > panelBudget - labelLen
-					? `${joined.substring(0, panelBudget - labelLen - 1)}…`
-					: joined;
-				lines.push(`  {gray-fg}${provider}{/} (${names.length}): ${fit}`);
-			});
+
+			// Show READY agencies
+			if (ready.length > 0) {
+				const byProvider = new Map<string, string[]>();
+				ready.forEach((a) => {
+					const key = a.role || "unknown@?";
+					if (!byProvider.has(key)) byProvider.set(key, []);
+					byProvider.get(key)!.push(a.id);
+				});
+				const orderedProviders = Array.from(byProvider.keys()).sort();
+				orderedProviders.forEach((provider) => {
+					const names = byProvider.get(provider) ?? [];
+					const joined = names.join(", ");
+					const labelLen = provider.length + String(names.length).length + 5;
+					const fit = joined.length > panelBudget - labelLen
+						? `${joined.substring(0, panelBudget - labelLen - 1)}…`
+						: joined;
+					lines.push(`  {gray-fg}${provider}{/} (${names.length}): ${fit}`);
+				});
+			}
+
+			// Show COOLING agencies with headroom info
+			if (cooling.length > 0) {
+				lines.push(`  {yellow-fg}[cooling]{/}`);
+				cooling.forEach((a) => {
+					const headroom = a.capacityHeadroomPct !== undefined ? a.capacityHeadroomPct : null;
+					const resetMs = a.capacityResetAt;
+					const resetTime = resetMs && resetMs > Date.now()
+						? formatRelativeTime(resetMs - Date.now())
+						: "unknown";
+					const headroomStr = headroom !== null && headroom !== undefined
+						? `${headroom.toFixed(1)}%`
+						: "N/A";
+					const role = `{gray-fg}(${a.role}){/}`;
+					lines.push(`  {bold}${a.id}{/} ${role} [{yellow-fg}${headroomStr} headroom↓{/} reset ${resetTime}]`);
+				});
+			}
 		}
 
 		if (throttled.length > 0) {
