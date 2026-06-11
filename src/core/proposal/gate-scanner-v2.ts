@@ -91,6 +91,7 @@ export async function getGateQueue(limit: number = 100): Promise<ProposalInQueue
 					 FROM roadmap_proposal.proposal_lease
 					 WHERE proposal_id = $1
 					   AND released_at IS NULL
+					   AND (expires_at IS NULL OR expires_at > now())
 					 FOR UPDATE SKIP LOCKED
 					 LIMIT 1`,
 					[candidate.id],
