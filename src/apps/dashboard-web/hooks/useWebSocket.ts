@@ -98,12 +98,23 @@ export interface Message {
 	timestamp: string;
 }
 
+export interface Notification {
+	id: string;
+	severity: string;
+	title: string;
+	message: string;
+	created_at: string;
+	seen: boolean;
+}
+
 export interface UseWebSocketReturn {
 	connected: boolean;
 	proposals: Proposal[];
 	agents: Agent[];
 	channels: Channel[];
 	messages: Message[];
+	notifications: Notification[];
+	bellEnabled: boolean;
 	reconnect: () => void;
 	boardReloadSignal: number;
 }
@@ -128,6 +139,18 @@ function isMessage(value: unknown): value is Message {
 	return isObject(value) && typeof value.id === "string";
 }
 
+function isNotification(value: unknown): value is Notification {
+	return (
+		isObject(value) &&
+		typeof value.id === "string" &&
+		typeof value.severity === "string" &&
+		typeof value.title === "string" &&
+		typeof value.message === "string" &&
+		typeof value.created_at === "string" &&
+		typeof value.seen === "boolean"
+	);
+}
+
 function asArrayOf<T>(
 	value: unknown,
 	guard: (entry: unknown) => entry is T,
@@ -148,6 +171,8 @@ export function useWebSocket(url?: string): UseWebSocketReturn {
 	const [agents, setAgents] = useState<Agent[]>([]);
 	const [channels, setChannels] = useState<Channel[]>([]);
 	const [messages, setMessages] = useState<Message[]>([]);
+	const [notifications, setNotifications] = useState<Notification[]>([]);
+	const [bellEnabled, setBellEnabled] = useState(false);
 	const [boardReloadSignal, setBoardReloadSignal] = useState(0);
 	const wsRef = useRef<WebSocket | null>(null);
 	const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(
@@ -281,6 +306,33 @@ export function useWebSocket(url?: string): UseWebSocketReturn {
 						}
 						break;
 
+					case "notification_inbox_snapshot":
+						// Phase 4: Receive notification_inbox table snapshot
+						// This message signals that the server detected notification_inbox table
+						setNotifications(asArrayOf(msg.data, isNotification));
+						setBellEnabled(true);
+						break;
+
+					case "notification_insert":
+					case "notification_update":
+						// Phase 4: Real-time notification updates
+						if (!isNotification(msg.data)) {
+							break;
+						}
+						{
+							const updated = msg.data;
+							setNotifications((prev) => {
+								const idx = prev.findIndex((n) => n.id === updated.id);
+								if (idx >= 0) {
+									const next = [...prev];
+									next[idx] = updated;
+									return next;
+								}
+								return [updated, ...prev];
+							});
+						}
+						break;
+
 					case "board_reload":
 						setBoardReloadSignal((n) => n + 1);
 						break;
@@ -378,5 +430,5 @@ export function useWebSocket(url?: string): UseWebSocketReturn {
 		connect();
 	}, [connect]);
 
-	return { connected, proposals, agents, channels, messages, reconnect, boardReloadSignal };
+	return { connected, proposals, agents, channels, messages, notifications, bellEnabled, reconnect, boardReloadSignal };
 }

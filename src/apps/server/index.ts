@@ -1278,6 +1278,15 @@ export class RoadmapServer {
 				}
 			}
 
+			// P705 Phase 4: Notification endpoint
+			if (pathname.startsWith("/api/notifications/")) {
+				const parts = pathname.split("/");
+				const id = parts[3]!;
+				if (parts.length === 5 && parts[4] === "seen") {
+					if (method === "PATCH") return await this.handleMarkNotificationSeen(id);
+				}
+			}
+
 			// GET /api/proposals/:id/notes - Discussion notes for a proposal
 			if (
 				pathname.startsWith("/api/proposals/") &&
@@ -2237,6 +2246,70 @@ export class RoadmapServer {
 					? error.message
 					: "Failed to resolve schema drift";
 			console.error("Error resolving schema drift:", error);
+			return Response.json({ error: message }, { status: 500 });
+		}
+	}
+
+	// P705 Phase 4: Mark notification as seen
+	private async handleMarkNotificationSeen(
+		notificationId: string,
+	): Promise<Response> {
+		try {
+			// Check if notification_inbox table exists (Phase 4 optional feature)
+			const tableExists = await this.db.query(
+				`SELECT EXISTS (
+					SELECT 1 FROM information_schema.tables
+					WHERE table_schema='roadmap' AND table_name='notification_inbox'
+				) as exists`,
+			);
+
+			if (!tableExists.rows[0]?.exists) {
+				return Response.json(
+					{ error: "notification_inbox table not available (Phase 4 not deployed)" },
+					{ status: 503 },
+				);
+			}
+
+			// Update notification to mark as seen
+			const result = await this.db.query(
+				`UPDATE roadmap.notification_inbox
+				 SET seen = true
+				 WHERE id = $1
+				 RETURNING id, severity, title, message, created_at, seen`,
+				[notificationId],
+			);
+
+			if (result.rowCount === 0) {
+				return Response.json(
+					{ error: "Notification not found" },
+					{ status: 404 },
+				);
+			}
+
+			// Trigger pg_notify so WebSocket clients get real-time update
+			const notif = result.rows[0];
+			await this.db.query(
+				`SELECT pg_notify('notification_inbox_change', json_build_object('id', $1, 'change_type', 'update')::text)`,
+				[notificationId],
+			);
+
+			return Response.json({
+				success: true,
+				notification: {
+					id: notif.id,
+					severity: notif.severity ?? "info",
+					title: notif.title,
+					message: notif.message,
+					created_at: notif.created_at,
+					seen: notif.seen,
+				},
+			});
+		} catch (error) {
+			const message =
+				error instanceof Error
+					? error.message
+					: "Failed to mark notification as seen";
+			console.error("Error marking notification as seen:", error);
 			return Response.json({ error: message }, { status: 500 });
 		}
 	}

@@ -17,6 +17,49 @@ import {
 let wss: WebSocketServer | null = null;
 const clients = new Set<WebSocket>();
 
+// ─── Phase 4: Runtime probe for notification_inbox table ─────────────────────
+
+let notificationInboxAvailable = false;
+
+async function probeNotificationInbox(): Promise<boolean> {
+	try {
+		const result = await query(
+			`SELECT EXISTS (
+				SELECT 1 FROM information_schema.tables
+				WHERE table_schema='roadmap' AND table_name='notification_inbox'
+			) as table_exists`,
+		);
+		return result.rows[0]?.table_exists === true;
+	} catch {
+		// If query fails, assume table doesn't exist
+		return false;
+	}
+}
+
+async function loadNotifications(): Promise<Record<string, unknown>[]> {
+	if (!notificationInboxAvailable) return [];
+
+	try {
+		const rows = await query(
+			`SELECT id, severity, title, message, created_at, seen
+			 FROM roadmap.notification_inbox
+			 ORDER BY created_at DESC
+			 LIMIT 50`,
+		);
+		return rows.rows.map((r: any) => ({
+			id: r.id,
+			severity: r.severity ?? "info",
+			title: r.title,
+			message: r.message,
+			created_at: r.created_at,
+			seen: r.seen ?? false,
+		}));
+	} catch {
+		// Graceful degradation: if notification_inbox query fails, return empty
+		return [];
+	}
+}
+
 // ─── Data queries ─────────────────────────────────────────────────────────────
 
 async function loadProposals(): Promise<Record<string, unknown>[]> {
@@ -134,7 +177,10 @@ type BoardMessage =
 	| { type: "sla_state"; state: string; prev_state: string | null; trigger: string; timestamp: string }
 	// P720: Activity feed events
 	| { type: "activity_feed_snapshot"; data: unknown[]; channel?: string }
-	| { type: "activity_feed_update"; data: unknown; channel?: string };
+	| { type: "activity_feed_update"; data: unknown; channel?: string }
+	// P705 Phase 4: Notification inbox
+	| { type: "notification_inbox_snapshot"; data: unknown[] }
+	| { type: "notification_insert" | "notification_update"; data: unknown };
 
 type ClientMessage = {
 	type?: unknown;
@@ -149,14 +195,15 @@ function safeStringify(data: unknown): string {
 }
 
 async function buildSnapshot() {
-	const [proposals, agents, channels, messages, activityFeed] = await Promise.all([
+	const [proposals, agents, channels, messages, activityFeed, notifications] = await Promise.all([
 		loadProposals(),
 		loadAgents(),
 		loadChannels(),
 		loadMessages("public"),
 		loadActivityFeed(50), // P720: Include activity feed in snapshot
+		loadNotifications(), // P705 Phase 4: Include notification inbox
 	]);
-	return { proposals, agents, channels, messages, activityFeed };
+	return { proposals, agents, channels, messages, activityFeed, notifications };
 }
 
 async function sendSnapshot(ws: WebSocket): Promise<void> {
@@ -168,6 +215,14 @@ async function sendSnapshot(ws: WebSocket): Promise<void> {
 		{ type: "message_snapshot", data: snapshot.messages, channel: "public" },
 		{ type: "activity_feed_snapshot", data: snapshot.activityFeed, channel: "system:proposal-feed" }, // P720
 	];
+
+	// P705 Phase 4: Only send notification_inbox_snapshot if table exists
+	if (notificationInboxAvailable && snapshot.notifications.length >= 0) {
+		payloads.push({
+			type: "notification_inbox_snapshot",
+			data: snapshot.notifications,
+		});
+	}
 
 	for (const payload of payloads) {
 		if (ws.readyState === WebSocket.OPEN) {
@@ -201,6 +256,13 @@ async function broadcastSnapshot(): Promise<void> {
 		data: snapshot.activityFeed,
 		channel: "system:proposal-feed",
 	});
+	// P705 Phase 4: Broadcast notification inbox if available
+	if (notificationInboxAvailable) {
+		broadcast({
+			type: "notification_inbox_snapshot",
+			data: snapshot.notifications,
+		});
+	}
 }
 
 async function handleMessage(
@@ -275,6 +337,21 @@ export function startWebSocketServer(port = 3001): void {
 	startPoolPoisonWatchdog("agenthive-board-ws");
 	const server = createServer();
 	let snapshotTimer: NodeJS.Timeout | null = null;
+
+	// P705 Phase 4: Probe for notification_inbox table at startup
+	probeNotificationInbox()
+		.then((available) => {
+			notificationInboxAvailable = available;
+			if (available) {
+				console.log("[WS] notification_inbox table detected; enabling Phase 4 features");
+			} else {
+				console.log("[WS] notification_inbox table not found; Phase 4 disabled (graceful degradation)");
+			}
+		})
+		.catch((err) => {
+			console.warn("[WS] notification_inbox probe failed:", err.message);
+			notificationInboxAvailable = false;
+		});
 
 	wss = new WebSocketServer({ server });
 
@@ -360,6 +437,15 @@ export function startWebSocketServer(port = 3001): void {
 			await pgClient.query("LISTEN sla_state_change");
 			// P720: Activity feed real-time notifications
 			await pgClient.query("LISTEN new_message");
+			// P705 Phase 4: Notification inbox updates
+			if (notificationInboxAvailable) {
+				try {
+					await pgClient.query("LISTEN notification_inbox_change");
+				} catch {
+					// Graceful: trigger may not exist yet if P674 not applied
+					console.warn("[WS] notification_inbox_change trigger not available");
+				}
+			}
 			pgClient.on("notification", (msg) => {
 				if (msg.channel === "sla_state_change" && msg.payload) {
 					try {
@@ -422,6 +508,48 @@ export function startWebSocketServer(port = 3001): void {
 						})();
 					} catch {
 						// Ignore malformed new_message payloads
+					}
+					return;
+				}
+				// P705 Phase 4: Handle notification_inbox_change events
+				if (msg.channel === "notification_inbox_change" && msg.payload) {
+					try {
+						const notifData = JSON.parse(msg.payload) as {
+							id?: string;
+							change_type?: string;
+						};
+						if (!notifData.id) return;
+
+						// Query the notification to get updated record
+						void (async () => {
+							try {
+								const pool = getPool();
+								const result = await pool.query(
+									`SELECT id, severity, title, message, created_at, seen
+									 FROM roadmap.notification_inbox
+									 WHERE id = $1`,
+									[notifData.id],
+								);
+								if (result.rows.length > 0) {
+									const notif = result.rows[0];
+									broadcast({
+										type: notifData.change_type === "insert" ? "notification_insert" : "notification_update",
+										data: {
+											id: notif.id,
+											severity: notif.severity ?? "info",
+											title: notif.title,
+											message: notif.message,
+											created_at: notif.created_at,
+											seen: notif.seen ?? false,
+										},
+									});
+								}
+							} catch (err) {
+								console.warn("[WS] Notification inbox query failed:", err);
+							}
+						})();
+					} catch {
+						// Ignore malformed notification_inbox_change payloads
 					}
 					return;
 				}

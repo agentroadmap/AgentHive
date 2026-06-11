@@ -122,7 +122,15 @@ function toSharedChannel(channel: WebSocketChannel): SharedChannel {
 }
 
 export default function App() {
-	const { connected, proposals, agents, channels, boardReloadSignal } = useWebSocket();
+	const {
+		connected,
+		proposals,
+		agents,
+		channels,
+		notifications,
+		bellEnabled,
+		boardReloadSignal,
+	} = useWebSocket();
 	const [activeWorkflow, setActiveWorkflow] = useState(() => {
 		if (typeof window !== "undefined") {
 			return (
