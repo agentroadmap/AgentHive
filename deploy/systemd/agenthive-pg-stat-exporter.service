@@ -1,0 +1,38 @@
+[Unit]
+Description=AgentHive pg_stat Prometheus Exporter (P509)
+Documentation=https://gitlab.local/agenthive/operations/P509-backup-ops
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=prometheus
+Group=prometheus
+Environment="AGENTHIVE_CONTROL_DSN=postgresql://agenthive:${AGENTHIVE_PASSWORD}@127.0.0.1:5432/hiveCentral"
+Environment="EXPORTER_PORT=9101"
+Environment="SCRAPE_INTERVAL=60"
+Environment="TENANT_REFRESH_INTERVAL=300"
+Environment="TENANTS_LOCAL=/etc/agenthive/tenants.local"
+
+ExecStart=/usr/bin/python3 /opt/agenthive/scripts/ops/agenthive-pg-stat-exporter.py
+
+# HA configuration: restart on failure
+Restart=always
+RestartSec=5
+StartLimitBurst=10
+StartLimitIntervalSec=60
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pg-stat-exporter
+
+# Security hardening
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/etc/agenthive /var/lib/node_exporter/textfile
+
+[Install]
+WantedBy=multi-user.target

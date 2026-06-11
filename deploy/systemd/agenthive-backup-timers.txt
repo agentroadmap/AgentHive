@@ -1,0 +1,103 @@
+# P509 — AgentHive Tenant Backup Timers
+
+## Systemd Timer Configuration (Alternative to Cron)
+
+Instead of managing /etc/cron.d entries directly, consider using systemd timers for better integration.
+
+### Daily Full-DB Backup (04:00 UTC)
+File: /etc/systemd/system/agenthive-backup-full.timer
+```
+[Unit]
+Description=AgentHive Full Database Backup (Daily @ 04:00 UTC)
+
+[Timer]
+OnCalendar=daily
+OnCalendar=*-*-* 04:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+File: /etc/systemd/system/agenthive-backup-full.service
+```
+[Unit]
+Description=AgentHive Full Database Backup
+ConditionPathExists=/var/backups/agenthive
+
+[Service]
+Type=oneshot
+ExecStart=/opt/agenthive/scripts/ops/agenthive-tenant-backup.sh agenthive prod
+StandardOutput=journal
+StandardError=journal
+```
+
+### Per-Tenant Per-Schema Backup (03:15 UTC)
+Typically run per tenant from a provisioning-managed cron template.
+See: cron-tenant-backup.template
+
+### Daily Retention Prune (05:00 UTC)
+File: /etc/systemd/system/agenthive-retention-prune.timer
+```
+[Unit]
+Description=AgentHive Backup Retention Pruning (Daily @ 05:00 UTC)
+
+[Timer]
+OnCalendar=daily
+OnCalendar=*-*-* 05:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+File: /etc/systemd/system/agenthive-retention-prune.service
+```
+[Unit]
+Description=AgentHive Backup Retention Prune
+
+[Service]
+Type=oneshot
+ExecStart=/opt/agenthive/scripts/ops/agenthive-retention-prune.sh agenthive
+StandardOutput=journal
+StandardError=journal
+```
+
+### Monthly Restore Test (2026-06-01 @ 22:00 UTC)
+File: /etc/systemd/system/agenthive-restore-test.timer
+```
+[Unit]
+Description=AgentHive Monthly Restore Test
+
+[Timer]
+OnCalendar=*-*-01 22:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+File: /etc/systemd/system/agenthive-restore-test.service
+```
+[Unit]
+Description=AgentHive Monthly Restore Verification
+
+[Service]
+Type=oneshot
+ExecStart=/opt/agenthive/scripts/ops/agenthive-restore-test.sh agenthive
+StandardOutput=journal
+StandardError=journal
+```
+
+### Enable Timers
+```
+sudo systemctl daemon-reload
+sudo systemctl enable --now agenthive-backup-full.timer
+sudo systemctl enable --now agenthive-retention-prune.timer
+sudo systemctl enable --now agenthive-restore-test.timer
+```
+
+### Verify
+```
+sudo systemctl list-timers agenthive-*.timer
+```
