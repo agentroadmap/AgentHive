@@ -1191,7 +1191,7 @@ export async function listReviews(args: {
 		}
 
 		const { rows: reviewRows } = await query(
-			`SELECT reviewer_identity, verdict, notes, findings, reviewed_at
+			`SELECT reviewer_identity, verdict, notes, findings, is_blocking, reviewed_at
        FROM roadmap_proposal.proposal_reviews WHERE proposal_id = $1
        ORDER BY reviewed_at DESC`,
 			[propId],
@@ -1304,9 +1304,20 @@ export async function addDiscussion(args: {
 		};
 	}
 	if (!args.author) {
-		// Default authoring identity so cubic/gate agents don't bounce on a
-		// missing arg — they're system-issued, not user-issued.
-		(args as any).author = "system";
+		// P1389 AC-2: author is required. Callers must explicitly pass author identity
+		// — silent defaulting to 'system' erases attribution and masks caller bugs.
+		return {
+			isError: true,
+			content: [
+				{
+					type: "text",
+					text:
+						"add_discussion rejected: missing author identity. " +
+						"Pass `author` with the agent/user identity responsible for this discussion. " +
+						"Do not omit this field — silent defaulting to 'system' is no longer acceptable.",
+				},
+			],
+		};
 	}
 	try {
 		const proposalId = await resolveProposalId(args.proposal_id);
