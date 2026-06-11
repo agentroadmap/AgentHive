@@ -38,7 +38,7 @@ function makeMsg(payload: Record<string, unknown>): LiaisonMessage {
 	};
 }
 
-function makeExec(): {
+function makeExec(opts: { hasSpawnSummary?: boolean } = {}): {
 	calls: Array<{ sql: string; params: unknown[] }>;
 	exec: SqlExec;
 } {
@@ -47,6 +47,13 @@ function makeExec(): {
 		calls,
 		exec: async (sql, params) => {
 			calls.push({ sql, params: params ?? [] });
+			if (sql.includes("FROM roadmap.spawn_summary") && opts.hasSpawnSummary) {
+				return {
+					rows: [
+						{ id: 1, outcome: "success", summary: "Verified worker evidence" },
+					],
+				};
+			}
 			return { rows: [] };
 		},
 	};
@@ -72,18 +79,28 @@ function noop(): Pick<Console, "log" | "warn" | "error"> {
 
 async function drainMicrotasks(n = 15) {
 	for (let i = 0; i < n; i++) await new Promise((r) => setImmediate(r));
+	await new Promise((r) => setTimeout(r, 100));
 }
 
 // ─── AC-9 Test 1: Successful spawn → delivered, no uplink ───────────────────
 
 test("AC-9: successful spawn → fn_complete_work_offer('delivered'), no spawn_failure uplink", async () => {
-	const { calls: execCalls, exec } = makeExec();
+	const { calls: execCalls, exec } = makeExec({ hasSpawnSummary: true });
 	const { calls: uplinkCalls, fn: sendUplink } = makeUplinkCapture();
 	const spawnCalls: Record<string, unknown>[] = [];
 
-	const fakeSpawn = async (req: Record<string, unknown>): Promise<SpawnResult> => {
+	const fakeSpawn = async (
+		req: Record<string, unknown>,
+	): Promise<SpawnResult> => {
 		spawnCalls.push(req);
-		return { agentRunId: "r1", worktree: "wt-main", exitCode: 0, stdout: "ok", stderr: "", durationMs: 10 };
+		return {
+			agentRunId: "r1",
+			worktree: "wt-main",
+			exitCode: 0,
+			stdout: "ok",
+			stderr: "",
+			durationMs: 10,
+		};
 	};
 
 	await handleOfferDispatch(
@@ -101,7 +118,13 @@ test("AC-9: successful spawn → fn_complete_work_offer('delivered'), no spawn_f
 			lease_ttl_seconds: 60,
 			role_profile_id: 7,
 		}),
-		{ spawn: fakeSpawn as never, exec, logger: noop(), sendUplink, renewalIntervalMs: 1_000_000 },
+		{
+			spawn: fakeSpawn as never,
+			exec,
+			logger: noop(),
+			sendUplink,
+			renewalIntervalMs: 1_000_000,
+		},
 	);
 	await drainMicrotasks();
 
@@ -113,14 +136,25 @@ test("AC-9: successful spawn → fn_complete_work_offer('delivered'), no spawn_f
 	assert.equal(sp.stage, "develop");
 	assert.equal(sp.briefingId, "br-ok");
 	assert.deepEqual(sp.capabilities, ["develop", "typescript"]);
-	assert.equal(sp.agentLabel, undefined, "agentLabel must be absent (P852)");
+	assert.equal(
+		sp.agentLabel,
+		"claude/agency-bot",
+		"agentLabel must be the agency id so spawned subprocess claims as the named agent",
+	);
 	// AC-7: roleProfileId flows from payload
 	assert.equal(sp.roleProfileId, 7);
 
 	// Mechanical lifecycle: fn_complete_work_offer('delivered')
-	const complete = execCalls.filter((c) => c.sql.includes("fn_complete_work_offer"));
+	const complete = execCalls.filter((c) =>
+		c.sql.includes("fn_complete_work_offer"),
+	);
 	assert.equal(complete.length, 1);
-	assert.deepEqual(complete[0].params, [200, "claude/agency-bot", "tok-ok", "delivered"]);
+	assert.deepEqual(complete[0].params, [
+		200,
+		"claude/agency-bot",
+		"tok-ok",
+		"delivered",
+	]);
 
 	// No spawn_failure uplink on success
 	assert.equal(uplinkCalls.length, 0, "no uplink expected on success");
@@ -147,14 +181,27 @@ test("AC-9: spawn throws → fn_complete_work_offer('failed') + spawn_failure up
 			claim_token: "tok-fail",
 			lease_ttl_seconds: 60,
 		}),
-		{ spawn: fakeSpawn as never, exec, logger: noop(), sendUplink, renewalIntervalMs: 1_000_000 },
+		{
+			spawn: fakeSpawn as never,
+			exec,
+			logger: noop(),
+			sendUplink,
+			renewalIntervalMs: 1_000_000,
+		},
 	);
 	await drainMicrotasks();
 
 	// Mechanical lifecycle: fn_complete_work_offer('failed')
-	const complete = execCalls.filter((c) => c.sql.includes("fn_complete_work_offer"));
+	const complete = execCalls.filter((c) =>
+		c.sql.includes("fn_complete_work_offer"),
+	);
 	assert.equal(complete.length, 1);
-	assert.deepEqual(complete[0].params, [201, "claude/agency-bot", "tok-fail", "failed"]);
+	assert.deepEqual(complete[0].params, [
+		201,
+		"claude/agency-bot",
+		"tok-fail",
+		"failed",
+	]);
 
 	// AC-5: spawn_failure uplink emitted
 	const failure = uplinkCalls.filter((c) => c.kind === "spawn_failure");
@@ -177,8 +224,14 @@ test("AC-9: spawn returns non-zero exit → fn_complete_work_offer('failed') + s
 	const { calls: execCalls, exec } = makeExec();
 	const { calls: uplinkCalls, fn: sendUplink } = makeUplinkCapture();
 
-	const fakeSpawn = async (): Promise<SpawnResult> =>
-		({ agentRunId: "r3", worktree: "wt", exitCode: 1, stdout: "", stderr: "OOM", durationMs: 5 });
+	const fakeSpawn = async (): Promise<SpawnResult> => ({
+		agentRunId: "r3",
+		worktree: "wt",
+		exitCode: 1,
+		stdout: "",
+		stderr: "OOM",
+		durationMs: 5,
+	});
 
 	await handleOfferDispatch(
 		"claude/agency-bot",
@@ -191,13 +244,26 @@ test("AC-9: spawn returns non-zero exit → fn_complete_work_offer('failed') + s
 			claim_token: "tok-nonzero",
 			lease_ttl_seconds: 60,
 		}),
-		{ spawn: fakeSpawn as never, exec, logger: noop(), sendUplink, renewalIntervalMs: 1_000_000 },
+		{
+			spawn: fakeSpawn as never,
+			exec,
+			logger: noop(),
+			sendUplink,
+			renewalIntervalMs: 1_000_000,
+		},
 	);
 	await drainMicrotasks();
 
-	const complete = execCalls.filter((c) => c.sql.includes("fn_complete_work_offer"));
+	const complete = execCalls.filter((c) =>
+		c.sql.includes("fn_complete_work_offer"),
+	);
 	assert.equal(complete.length, 1);
-	assert.deepEqual(complete[0].params, [202, "claude/agency-bot", "tok-nonzero", "failed"]);
+	assert.deepEqual(complete[0].params, [
+		202,
+		"claude/agency-bot",
+		"tok-nonzero",
+		"failed",
+	]);
 
 	const failure = uplinkCalls.filter((c) => c.kind === "spawn_failure");
 	assert.equal(failure.length, 1);
@@ -215,9 +281,20 @@ test("AC-9: fn_renew_lease fires at least once while spawn is in-flight (250ms s
 	const { fn: sendUplink } = makeUplinkCapture();
 
 	const fakeSpawn = (): Promise<SpawnResult> =>
-		new Promise((r) => setTimeout(() =>
-			r({ agentRunId: "r4", worktree: "wt", exitCode: 0, stdout: "", stderr: "", durationMs: 250 }),
-		250));
+		new Promise((r) =>
+			setTimeout(
+				() =>
+					r({
+						agentRunId: "r4",
+						worktree: "wt",
+						exitCode: 0,
+						stdout: "",
+						stderr: "",
+						durationMs: 250,
+					}),
+				250,
+			),
+		);
 
 	await handleOfferDispatch(
 		"claude/agency-bot",
@@ -230,11 +307,20 @@ test("AC-9: fn_renew_lease fires at least once while spawn is in-flight (250ms s
 			claim_token: "tok-renew",
 			lease_ttl_seconds: 60,
 		}),
-		{ spawn: fakeSpawn as never, exec, logger: noop(), sendUplink, renewalIntervalMs: 50 },
+		{
+			spawn: fakeSpawn as never,
+			exec,
+			logger: noop(),
+			sendUplink,
+			renewalIntervalMs: 50,
+		},
 	);
 
 	await new Promise((r) => setTimeout(r, 400));
-	assert.ok(renewCount >= 2, `expected ≥2 renewals during 250ms spawn; got ${renewCount}`);
+	assert.ok(
+		renewCount >= 2,
+		`expected ≥2 renewals during 250ms spawn; got ${renewCount}`,
+	);
 });
 
 // ─── AC-9 Test 5: spawn_failure uplink failure is non-fatal ──────────────────
@@ -261,12 +347,29 @@ test("AC-9: spawn_failure uplink failure does not prevent fn_complete_work_offer
 			dispatch_id: 204,
 			claim_token: "tok-uplinkfail",
 		}),
-		{ spawn: fakeSpawn as never, exec, logger: noop(), sendUplink: throwingUplink, renewalIntervalMs: 1_000_000 },
+		{
+			spawn: fakeSpawn as never,
+			exec,
+			logger: noop(),
+			sendUplink: throwingUplink,
+			renewalIntervalMs: 1_000_000,
+		},
 	);
 	await drainMicrotasks();
 
 	// fn_complete_work_offer must still be called even when uplink throws.
-	const complete = execCalls.filter((c) => c.sql.includes("fn_complete_work_offer"));
-	assert.equal(complete.length, 1, "fn_complete_work_offer must fire even if uplink threw");
-	assert.deepEqual(complete[0].params, [204, "claude/agency-bot", "tok-uplinkfail", "failed"]);
+	const complete = execCalls.filter((c) =>
+		c.sql.includes("fn_complete_work_offer"),
+	);
+	assert.equal(
+		complete.length,
+		1,
+		"fn_complete_work_offer must fire even if uplink threw",
+	);
+	assert.deepEqual(complete[0].params, [
+		204,
+		"claude/agency-bot",
+		"tok-uplinkfail",
+		"failed",
+	]);
 });

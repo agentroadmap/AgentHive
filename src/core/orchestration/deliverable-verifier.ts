@@ -45,7 +45,7 @@ const ROLE_ARTIFACT_CHECKS: Record<
 	(
 		proposalId: number,
 		workerIdentity: string,
-		dispatchId?: number
+		dispatchId?: number,
 	) => Promise<VerifyResult>
 > = {
 	"gate-review": async (proposalId, workerIdentity, _dispatchId) => {
@@ -55,7 +55,7 @@ const ROLE_ARTIFACT_CHECKS: Record<
 			`SELECT id FROM roadmap_proposal.proposal_reviews
 			  WHERE proposal_id = $1 AND reviewer_identity = $2
 			  LIMIT 1`,
-			[proposalId, workerIdentity]
+			[proposalId, workerIdentity],
 		);
 		if (result.rows.length > 0) {
 			return {
@@ -71,28 +71,23 @@ const ROLE_ARTIFACT_CHECKS: Record<
 	},
 
 	developer: async (proposalId, workerIdentity, _dispatchId) => {
-		// Developers must produce a commit or code artifact. We check for:
-		// (1) agent_runs row with status='completed', OR
-		// (2) agent_runs row with a non-null output_summary indicating work was done
+		// Developers must produce a non-empty artifact summary. Exit/completed
+		// status alone is not proof: auth walls and quota failures can still exit
+		// through the runtime as "completed" rows.
 		const result = await queryDb(
 			`SELECT id, status, output_summary FROM roadmap_workforce.agent_runs
-			  WHERE proposal_id = $1 AND agent_identity = $2
+				  WHERE proposal_id = $1 AND agent_identity = $2
 			  ORDER BY completed_at DESC NULLS LAST, started_at DESC
 			  LIMIT 1`,
-			[proposalId, workerIdentity]
+			[proposalId, workerIdentity],
 		);
 		if (result.rows.length > 0) {
 			const row = result.rows[0];
-			// Accept if completed with a summary
-			if (row.status === "completed" && row.output_summary) {
-				return {
-					verified: true,
-					artifactType: "agent_runs",
-					artifactId: row.id,
-				};
-			}
-			// Also accept if status is 'completed' (the exit is the proof)
-			if (row.status === "completed") {
+			if (
+				row.status === "completed" &&
+				typeof row.output_summary === "string" &&
+				row.output_summary.trim().length > 0
+			) {
 				return {
 					verified: true,
 					artifactType: "agent_runs",
@@ -102,7 +97,7 @@ const ROLE_ARTIFACT_CHECKS: Record<
 		}
 		return {
 			verified: false,
-			failureReason: `No completed agent_runs row found for proposal_id=${proposalId}, agent_identity=${workerIdentity}`,
+			failureReason: `No completed agent_runs row with non-empty output_summary found for proposal_id=${proposalId}, agent_identity=${workerIdentity}`,
 		};
 	},
 
@@ -114,7 +109,7 @@ const ROLE_ARTIFACT_CHECKS: Record<
 			`SELECT id FROM roadmap_proposal.proposal_acceptance_criteria
 			  WHERE proposal_id = $1 AND status != 'pending'
 			  LIMIT 1`,
-			[proposalId]
+			[proposalId],
 		);
 		if (acResult.rows.length > 0) {
 			return {
@@ -128,7 +123,7 @@ const ROLE_ARTIFACT_CHECKS: Record<
 			`SELECT id FROM roadmap_proposal.proposal_discussions
 			  WHERE proposal_id = $1 AND context_prefix = 'feedback:'
 			  ORDER BY created_at DESC LIMIT 1`,
-			[proposalId]
+			[proposalId],
 		);
 		if (discussionResult.rows.length > 0) {
 			return {
@@ -151,7 +146,7 @@ const ROLE_ARTIFACT_CHECKS: Record<
 			`SELECT id, criterion_text FROM roadmap_proposal.proposal_acceptance_criteria
 			  WHERE proposal_id = $1 AND criterion_text IS NOT NULL AND criterion_text != ''
 			  LIMIT 1`,
-			[proposalId]
+			[proposalId],
 		);
 		if (result.rows.length > 0) {
 			return {
@@ -177,14 +172,16 @@ const ROLE_ARTIFACT_CHECKS: Record<
  * Throws on database errors (fatal). Returns {verified: false, failureReason: '...'} for
  * missing artifacts (transient, eligible for retry).
  */
-export async function verifyDeliverables(input: VerifyDeliverablesInput): Promise<VerifyResult> {
+export async function verifyDeliverables(
+	input: VerifyDeliverablesInput,
+): Promise<VerifyResult> {
 	const { proposalId, dispatchRole, workerIdentity } = input;
 
 	const checker = ROLE_ARTIFACT_CHECKS[dispatchRole];
 	if (!checker) {
 		// Unknown role: skip verification (allow advance). Log a warning.
 		console.warn(
-			`[DeliverableVerifier] Unknown dispatch_role: ${dispatchRole} for proposal=${proposalId}; skipping verification`
+			`[DeliverableVerifier] Unknown dispatch_role: ${dispatchRole} for proposal=${proposalId}; skipping verification`,
 		);
 		return {
 			verified: true, // Default to pass for unknown roles (safe default).
@@ -199,7 +196,7 @@ export async function verifyDeliverables(input: VerifyDeliverablesInput): Promis
 		// Database error: fatal. Re-throw.
 		console.error(
 			`[DeliverableVerifier] Fatal error verifying proposal=${proposalId}, role=${dispatchRole}:`,
-			err
+			err,
 		);
 		throw err;
 	}
@@ -217,7 +214,7 @@ export async function verifyDeliverables(input: VerifyDeliverablesInput): Promis
  */
 export async function markDeliverableVerificationFailed(
 	dispatchId: number,
-	failureReason: string
+	failureReason: string,
 ): Promise<void> {
 	try {
 		await queryDb(
@@ -233,12 +230,12 @@ export async function markDeliverableVerificationFailed(
 			                     'verified_at'::text, now()::text
 			                   )
 			  WHERE id = $2`,
-			[failureReason, dispatchId]
+			[failureReason, dispatchId],
 		);
 	} catch (err) {
 		console.error(
 			`[DeliverableVerifier] Failed to mark dispatch ${dispatchId} as failed:`,
-			err
+			err,
 		);
 		throw err;
 	}
@@ -250,8 +247,10 @@ export async function markDeliverableVerificationFailed(
 export function getRoleArtifactMap(): Record<string, string> {
 	return {
 		"gate-review": "proposal_reviews row (reviewer_identity + proposal_id)",
-		developer: "agent_runs row with status='completed'",
-		enhance: "proposal_acceptance_criteria (status != 'pending') OR proposal_discussions",
+		developer:
+			"agent_runs row with status='completed' and non-empty output_summary",
+		enhance:
+			"proposal_acceptance_criteria (status != 'pending') OR proposal_discussions",
 		architect: "proposal_acceptance_criteria with non-empty criterion_text",
 	};
 }

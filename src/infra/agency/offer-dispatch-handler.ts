@@ -21,7 +21,10 @@
  * `{rt}-{host}-{exp}-{n}` name from the resolved route + capabilities.
  */
 import { query } from "../postgres/pool.ts";
-import { spawnAgent } from "../../core/orchestration/agent-spawner.ts";
+import {
+	spawnAgent,
+	spawnWithRetry,
+} from "../../core/orchestration/agent-spawner.ts";
 import type { SpawnResult } from "../../core/orchestration/agent-spawner.ts";
 import type { LiaisonMessage } from "./liaison-message-types.ts";
 import { resolvePersonaByRoleName } from "../../core/orchestration/gate-role-resolver.ts";
@@ -142,8 +145,49 @@ export function _activeSpawnCountForTest(agencyId?: string): number {
 	return sum;
 }
 
-const defaultExec: SqlExec = (sql, params) =>
-	query(sql, params as unknown[]);
+const defaultExec: SqlExec = (sql, params) => query(sql, params as unknown[]);
+
+function isAllRoutesInCooldownError(err: Error | null): boolean {
+	if (!err) return false;
+	return (
+		err.message.includes("[P742]") &&
+		err.message.includes("All routes are in cooldown")
+	);
+}
+
+function rowsFromExecResult(result: unknown): Array<Record<string, unknown>> {
+	if (
+		result &&
+		typeof result === "object" &&
+		Array.isArray((result as { rows?: unknown }).rows)
+	) {
+		return (result as { rows: Array<Record<string, unknown>> }).rows;
+	}
+	return [];
+}
+
+async function hasSpawnSummaryEvidence(args: {
+	briefingId?: string;
+	exec: SqlExec;
+}): Promise<{ ok: boolean; reason: string }> {
+	const briefingId = args.briefingId?.trim();
+	if (!briefingId) {
+		return { ok: false, reason: "missing_briefing_id" };
+	}
+	const result = await args.exec(
+		`SELECT id, outcome, summary
+		   FROM roadmap.spawn_summary
+		  WHERE briefing_id = $1
+		    AND outcome IN ('success', 'partial')
+		    AND length(btrim(COALESCE(summary, ''))) > 0
+		  ORDER BY created_at DESC
+		  LIMIT 1`,
+		[briefingId],
+	);
+	return rowsFromExecResult(result).length > 0
+		? { ok: true, reason: "spawn_summary_present" }
+		: { ok: false, reason: "missing_non_empty_spawn_summary" };
+}
 
 const defaultDeps: Required<
 	Pick<
@@ -151,7 +195,7 @@ const defaultDeps: Required<
 		"spawn" | "exec" | "logger" | "resolveWorktree"
 	>
 > = {
-	spawn: spawnAgent,
+	spawn: spawnWithRetry,
 	exec: defaultExec,
 	logger: console,
 	// P914: include AGENTHIVE_DEFAULT_EXECUTOR_WORKTREE (the var actually
@@ -296,7 +340,8 @@ export async function handleOfferDispatch(
 		payload.required_capabilities && payload.required_capabilities.length > 0
 			? payload.required_capabilities
 			: [payload.role];
-	const leaseTtlSeconds = payload.lease_ttl_seconds ?? DEFAULT_LEASE_TTL_SECONDS;
+	const leaseTtlSeconds =
+		payload.lease_ttl_seconds ?? DEFAULT_LEASE_TTL_SECONDS;
 	const renewalIntervalMs =
 		deps.renewalIntervalMs ??
 		Math.max(5_000, Math.floor((leaseTtlSeconds * 1_000) / 3));
@@ -372,24 +417,31 @@ async function runSpawn(args: {
 
 	// P908-D: open offer_completed lifecycle span for the full spawn duration.
 	// Best-effort — errors are swallowed inside ObservabilityWriter.
-	const traceId = typeof payload.trace_id === "string" && payload.trace_id.length > 0
-		? payload.trace_id
-		: null;
+	const traceId =
+		typeof payload.trace_id === "string" && payload.trace_id.length > 0
+			? payload.trace_id
+			: null;
 	let completionSpanId: string | null = null;
 	if (traceId) {
 		const span = await obs.startSpan({
 			traceId,
 			operation: "offer_completed",
-			attributes: { dispatch_id: dispatchId, agency_id: agencyId, offer_id: payload.offer_id },
+			attributes: {
+				dispatch_id: dispatchId,
+				agency_id: agencyId,
+				offer_id: payload.offer_id,
+			},
 		});
 		completionSpanId = span.spanId;
 	}
 
 	const renewalTimer = setInterval(() => {
-		void exec(
-			`SELECT roadmap_workforce.fn_renew_lease($1, $2, $3, $4)`,
-			[dispatchId, agencyId, claimToken, leaseTtlSeconds],
-		).catch((err) => {
+		void exec(`SELECT roadmap_workforce.fn_renew_lease($1, $2, $3, $4)`, [
+			dispatchId,
+			agencyId,
+			claimToken,
+			leaseTtlSeconds,
+		]).catch((err) => {
 			logger.warn(
 				`[OfferDispatchHandler] ${agencyId}: fn_renew_lease failed for offer ${payload.offer_id}:`,
 				err instanceof Error ? err.message : err,
@@ -447,7 +499,9 @@ async function runSpawn(args: {
 		const persona: string | null =
 			typeof payload.persona === "string" && payload.persona.length > 0
 				? payload.persona
-				: await resolvePersonaByRoleName(payload.role, query as never).catch(() => null);
+				: await resolvePersonaByRoleName(payload.role, query as never).catch(
+						() => null,
+					);
 
 		const baseTask: string =
 			typeof payload.task === "string" && payload.task.length > 0
@@ -464,6 +518,7 @@ async function runSpawn(args: {
 			capabilities,
 			provider: agencyProvider as never,
 			briefingId: payload.briefing_id,
+			agencyIdentity: agencyId,
 			roleProfileId: payload.role_profile_id ?? null,
 			timeoutMs: spawnTimeoutMs,
 			// Use the agency's own name as the agent label so the spawned
@@ -483,14 +538,86 @@ async function runSpawn(args: {
 
 	clearInterval(renewalTimer);
 
+	if (isAllRoutesInCooldownError(spawnError)) {
+		try {
+			await exec(
+				`SELECT roadmap_workforce.fn_return_work_offer($1, $2, $3, $4)`,
+				[dispatchId, agencyId, claimToken, "all_routes_in_cooldown"],
+			);
+			logger.warn(
+				`[OfferDispatchHandler] ${agencyId}: returned offer=${payload.offer_id} because all routes are in cooldown`,
+			);
+		} catch (returnErr) {
+			logger.error(
+				`[OfferDispatchHandler] ${agencyId}: fn_return_work_offer failed for cooldown-blocked offer ${payload.offer_id}:`,
+				returnErr instanceof Error ? returnErr.message : returnErr,
+			);
+		}
+		if (completionSpanId) {
+			void obs.closeSpan({
+				spanId: completionSpanId,
+				status: "error",
+				errorMessage: spawnError.message,
+			});
+		}
+		return;
+	}
+
 	const succeeded =
-		spawnError === null && (result?.exitCode === 0 || result?.exitCode === null);
+		spawnError === null &&
+		(result?.exitCode === 0 || result?.exitCode === null);
 	const status: "delivered" | "failed" = succeeded ? "delivered" : "failed";
 	const provider = payload.route_hint ?? null;
 
+	if (succeeded) {
+		let evidence: { ok: boolean; reason: string };
+		try {
+			evidence = await hasSpawnSummaryEvidence({
+				briefingId: payload.briefing_id,
+				exec,
+			});
+		} catch (evidenceErr) {
+			evidence = {
+				ok: false,
+				reason: `evidence_check_failed:${evidenceErr instanceof Error ? evidenceErr.message : String(evidenceErr)}`,
+			};
+		}
+		if (!evidence.ok) {
+			try {
+				await exec(
+					`SELECT roadmap_workforce.fn_return_work_offer($1, $2, $3, $4)`,
+					[
+						dispatchId,
+						agencyId,
+						claimToken,
+						`missing_delivery_evidence:${evidence.reason}`,
+					],
+				);
+				logger.warn(
+					`[OfferDispatchHandler] ${agencyId}: returned offer=${payload.offer_id}; successful spawn lacked delivery evidence (${evidence.reason})`,
+				);
+			} catch (returnErr) {
+				logger.error(
+					`[OfferDispatchHandler] ${agencyId}: fn_return_work_offer failed for evidence-blocked offer ${payload.offer_id}:`,
+					returnErr instanceof Error ? returnErr.message : returnErr,
+				);
+			}
+			if (completionSpanId) {
+				void obs.closeSpan({
+					spanId: completionSpanId,
+					status: "error",
+					errorMessage: evidence.reason,
+				});
+			}
+			return;
+		}
+	}
+
 	// P908-B: classify provider error signal and update provider_health.
 	// Use the combined stderr+stdout text so we catch errors wherever they land.
-	const fullOutput = [result?.stderr, result?.stdout].filter(Boolean).join("\n");
+	const fullOutput = [result?.stderr, result?.stdout]
+		.filter(Boolean)
+		.join("\n");
 	let providerSignal: string | null = null;
 	if (!succeeded && provider) {
 		try {
@@ -539,7 +666,8 @@ async function runSpawn(args: {
 				dispatch_id: dispatchId,
 				offer_id: payload.offer_id,
 				role: payload.role,
-				error_message: spawnError?.message ?? `exit=${result?.exitCode ?? "n/a"}`,
+				error_message:
+					spawnError?.message ?? `exit=${result?.exitCode ?? "n/a"}`,
 				exit_code: result?.exitCode ?? null,
 			},
 		}).catch((err) => {
@@ -603,7 +731,10 @@ interface AgencyMetadataRow {
  * gate, fail-safe.
  */
 const MAX_IN_FLIGHT_CACHE_MS = 30_000;
-const maxInFlightCache = new Map<string, { value: number; expiresAt: number }>();
+const maxInFlightCache = new Map<
+	string,
+	{ value: number; expiresAt: number }
+>();
 
 /** @internal — reset for tests. */
 export function _resetMaxInFlightCacheForTest(): void {
@@ -631,7 +762,10 @@ async function readAgencyMaxInFlight(
 			[agencyId],
 		)) as { rows: Array<{ max_in_flight: number }> } | undefined;
 		const value = result?.rows?.[0]?.max_in_flight ?? 1;
-		maxInFlightCache.set(agencyId, { value, expiresAt: now + MAX_IN_FLIGHT_CACHE_MS });
+		maxInFlightCache.set(agencyId, {
+			value,
+			expiresAt: now + MAX_IN_FLIGHT_CACHE_MS,
+		});
 		return value;
 	} catch (err) {
 		logger.warn(

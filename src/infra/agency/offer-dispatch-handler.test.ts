@@ -37,13 +37,24 @@ function silentLogger(): Pick<Console, "log" | "warn" | "error"> {
 	return { log: () => {}, warn: () => {}, error: () => {} };
 }
 
-function recordingExec(): {
+async function drainAsyncWork(ms = 100): Promise<void> {
+	await new Promise((r) => setTimeout(r, ms));
+}
+
+function recordingExec(opts: { hasSpawnSummary?: boolean } = {}): {
 	calls: Array<{ sql: string; params: unknown[] }>;
 	exec: SqlExec;
 } {
 	const calls: Array<{ sql: string; params: unknown[] }> = [];
 	const exec: SqlExec = async (sql, params) => {
 		calls.push({ sql, params: params ?? [] });
+		if (sql.includes("FROM roadmap.spawn_summary") && opts.hasSpawnSummary) {
+			return {
+				rows: [
+					{ id: 1, outcome: "success", summary: "Verified worker evidence" },
+				],
+			};
+		}
 		return { rows: [] };
 	};
 	return { calls, exec };
@@ -51,9 +62,11 @@ function recordingExec(): {
 
 test("handleOfferDispatch: spawns with capabilities and agencyId as agentLabel; calls fn_complete_work_offer on success", async () => {
 	const spawnCalls: Array<Record<string, unknown>> = [];
-	const { calls: execCalls, exec } = recordingExec();
+	const { calls: execCalls, exec } = recordingExec({ hasSpawnSummary: true });
 
-	const fakeSpawn = async (req: Record<string, unknown>): Promise<SpawnResult> => {
+	const fakeSpawn = async (
+		req: Record<string, unknown>,
+	): Promise<SpawnResult> => {
 		spawnCalls.push(req);
 		return {
 			agentRunId: "run-1",
@@ -86,7 +99,7 @@ test("handleOfferDispatch: spawns with capabilities and agencyId as agentLabel; 
 	});
 
 	// Wait for fire-and-forget runSpawn to complete.
-	for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+	await drainAsyncWork();
 
 	assert.equal(spawnCalls.length, 1, "spawnAgent called exactly once");
 	const spawnReq = spawnCalls[0];
@@ -106,12 +119,77 @@ test("handleOfferDispatch: spawns with capabilities and agencyId as agentLabel; 
 	const completeCalls = execCalls.filter((c) =>
 		c.sql.includes("fn_complete_work_offer"),
 	);
-	assert.equal(completeCalls.length, 1, "fn_complete_work_offer called exactly once");
+	assert.equal(
+		completeCalls.length,
+		1,
+		"fn_complete_work_offer called exactly once",
+	);
 	assert.deepEqual(
 		completeCalls[0].params,
 		[42, "claude/agency-bot", "tok-1", "delivered"],
 		"fn_complete_work_offer called with mechanical args (no LLM text)",
 	);
+});
+
+test("handleOfferDispatch: successful spawn without spawn_summary evidence returns instead of delivered", async () => {
+	const { calls: execCalls, exec } = recordingExec();
+
+	const fakeSpawn = async (
+		req: Record<string, unknown>,
+	): Promise<SpawnResult> => ({
+		agentRunId: "run-no-evidence",
+		worktree: req.worktree as string,
+		exitCode: 0,
+		stdout: "ok",
+		stderr: "",
+		durationMs: 10,
+	});
+
+	const msg = makeMessage({
+		offer_id: "00000000-0000-0000-0000-00000000e14d",
+		role: "develop",
+		required_capabilities: ["develop"],
+		route_hint: "claude-code",
+		briefing_id: "br-no-evidence",
+		dispatch_id: 43,
+		proposal_id: 999,
+		claim_token: "tok-no-evidence",
+		lease_ttl_seconds: 60,
+	});
+
+	await handleOfferDispatch("claude/agency-bot", msg, {
+		spawn: fakeSpawn as never,
+		exec,
+		logger: silentLogger(),
+		resolveWorktree: () => "test-worktree",
+		renewalIntervalMs: 1_000_000,
+	});
+
+	await drainAsyncWork();
+
+	const completeCalls = execCalls.filter((c) =>
+		c.sql.includes("fn_complete_work_offer"),
+	);
+	assert.equal(
+		completeCalls.length,
+		0,
+		"missing evidence must not complete as delivered",
+	);
+
+	const returnCalls = execCalls.filter((c) =>
+		c.sql.includes("fn_return_work_offer"),
+	);
+	assert.equal(
+		returnCalls.length,
+		1,
+		"missing evidence returns the offer for retry/reroute",
+	);
+	assert.deepEqual(returnCalls[0].params, [
+		43,
+		"claude/agency-bot",
+		"tok-no-evidence",
+		"missing_delivery_evidence:missing_non_empty_spawn_summary",
+	]);
 });
 
 test("handleOfferDispatch: failed spawn marks offer 'failed' via fn_complete_work_offer", async () => {
@@ -139,7 +217,7 @@ test("handleOfferDispatch: failed spawn marks offer 'failed' via fn_complete_wor
 		renewalIntervalMs: 1_000_000,
 	});
 
-	for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+	await drainAsyncWork();
 
 	const completeCalls = execCalls.filter((c) =>
 		c.sql.includes("fn_complete_work_offer"),
@@ -157,7 +235,9 @@ test("handleOfferDispatch: empty capabilities falls back to [role]", async () =>
 	const spawnCalls: Array<Record<string, unknown>> = [];
 	const { exec } = recordingExec();
 
-	const fakeSpawn = async (req: Record<string, unknown>): Promise<SpawnResult> => {
+	const fakeSpawn = async (
+		req: Record<string, unknown>,
+	): Promise<SpawnResult> => {
 		spawnCalls.push(req);
 		return {
 			agentRunId: "run-2",
@@ -186,7 +266,7 @@ test("handleOfferDispatch: empty capabilities falls back to [role]", async () =>
 		renewalIntervalMs: 1_000_000,
 	});
 
-	for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+	await drainAsyncWork();
 
 	assert.deepEqual(spawnCalls[0].capabilities, ["gate-review"]);
 });
@@ -274,11 +354,20 @@ test("handleOfferDispatch: paused agency declines spawn and completes offer as f
 	const completeCalls = execCalls.filter((c) =>
 		c.sql.includes("fn_complete_work_offer"),
 	);
-	assert.equal(completeCalls.length, 1, "offer completed-as-failed so reaper requeues to another agency");
-	assert.deepEqual(completeCalls[0].params, [99, "claude/agency-bot", "tok-paused", "failed"]);
+	assert.equal(
+		completeCalls.length,
+		1,
+		"offer completed-as-failed so reaper requeues to another agency",
+	);
+	assert.deepEqual(completeCalls[0].params, [
+		99,
+		"claude/agency-bot",
+		"tok-paused",
+		"failed",
+	]);
 });
 
-test("handleOfferDispatch: codex usage-limit detected → throttle + pause SQL fired", async () => {
+test("handleOfferDispatch: codex usage-limit output stamps provider_signal and fails offer", async () => {
 	const execCalls: Array<{ sql: string; params: unknown[] }> = [];
 	const exec: SqlExec = async (sql, params) => {
 		execCalls.push({ sql, params: params ?? [] });
@@ -287,7 +376,9 @@ test("handleOfferDispatch: codex usage-limit detected → throttle + pause SQL f
 		return { rows: [] };
 	};
 
-	const fakeSpawn = async (req: Record<string, unknown>): Promise<SpawnResult> => ({
+	const fakeSpawn = async (
+		req: Record<string, unknown>,
+	): Promise<SpawnResult> => ({
 		agentRunId: "run-codex-limit",
 		worktree: req.worktree as string,
 		exitCode: 1,
@@ -315,14 +406,29 @@ test("handleOfferDispatch: codex usage-limit detected → throttle + pause SQL f
 		renewalIntervalMs: 1_000_000,
 	});
 
-	for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+	await drainAsyncWork();
 
-	const throttleCalls = execCalls.filter((c) =>
-		c.sql.includes("host_model_route_throttle"),
+	const signalCalls = execCalls.filter((c) =>
+		c.sql.includes("SET provider_signal = $1"),
 	);
-	assert.equal(throttleCalls.length, 1, "throttle row upserted exactly once");
-	assert.equal(throttleCalls[0].params[0], "openai");
-	assert.equal(throttleCalls[0].params[1], "gpt-5.4");
+	assert.equal(signalCalls.length, 1, "provider_signal stamped exactly once");
+	assert.equal(signalCalls[0].params[0], "credit_exhausted");
+	assert.equal(signalCalls[0].params[1], 200);
+
+	const completeCalls = execCalls.filter((c) =>
+		c.sql.includes("fn_complete_work_offer"),
+	);
+	assert.equal(
+		completeCalls.length,
+		1,
+		"usage-limit spawn completes the attempt as failed",
+	);
+	assert.deepEqual(completeCalls[0].params, [
+		200,
+		"calvin",
+		"tok-codex",
+		"failed",
+	]);
 });
 
 test("handleOfferDispatch: renewal timer fires fn_renew_lease while spawn runs", async () => {
@@ -416,7 +522,9 @@ test("handleOfferDispatch: at-capacity agency returns offer via fn_return_work_o
 
 	// Now a second offer arrives while the first spawn is still pending.
 	let secondSpawnCalled = false;
-	const secondSpawn = async (_req: Record<string, unknown>): Promise<SpawnResult> => {
+	const secondSpawn = async (
+		_req: Record<string, unknown>,
+	): Promise<SpawnResult> => {
 		secondSpawnCalled = true;
 		return {} as SpawnResult;
 	};
@@ -439,7 +547,11 @@ test("handleOfferDispatch: at-capacity agency returns offer via fn_return_work_o
 		renewalIntervalMs: 1_000_000,
 	});
 
-	assert.equal(secondSpawnCalled, false, "second offer must NOT trigger a spawn");
+	assert.equal(
+		secondSpawnCalled,
+		false,
+		"second offer must NOT trigger a spawn",
+	);
 
 	// Decline must go through fn_return_work_offer, NOT fn_complete_work_offer.
 	const completeCalls = execCalls.filter((c) =>
@@ -474,7 +586,7 @@ test("handleOfferDispatch: at-capacity agency returns offer via fn_return_work_o
 		stderr: "",
 		durationMs: 1,
 	});
-	for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
+	await drainAsyncWork();
 });
 
 test("handleOfferDispatch: after spawn completes, agency accepts the NEXT offer", async () => {
@@ -491,7 +603,9 @@ test("handleOfferDispatch: after spawn completes, agency accepts the NEXT offer"
 	};
 
 	let spawn1Calls = 0;
-	const fastSpawn = async (req: Record<string, unknown>): Promise<SpawnResult> => {
+	const fastSpawn = async (
+		req: Record<string, unknown>,
+	): Promise<SpawnResult> => {
 		spawn1Calls++;
 		return {
 			agentRunId: "run-fast",
@@ -523,7 +637,7 @@ test("handleOfferDispatch: after spawn completes, agency accepts the NEXT offer"
 	});
 
 	// Wait for the first spawn to settle (it's instant) + tick for finally.
-	for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
+	await drainAsyncWork();
 
 	await handleOfferDispatch("pablo", mk(2, "tok-2"), {
 		spawn: fastSpawn as never,
@@ -533,9 +647,13 @@ test("handleOfferDispatch: after spawn completes, agency accepts the NEXT offer"
 		renewalIntervalMs: 1_000_000,
 	});
 
-	for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
+	await drainAsyncWork();
 
-	assert.equal(spawn1Calls, 2, "both offers should produce a spawn — the second is accepted after the first settles");
+	assert.equal(
+		spawn1Calls,
+		2,
+		"both offers should produce a spawn — the second is accepted after the first settles",
+	);
 });
 
 test("handleOfferDispatch: max_in_flight=2 allows two concurrent spawns, returns the third", async () => {
@@ -554,7 +672,9 @@ test("handleOfferDispatch: max_in_flight=2 allows two concurrent spawns, returns
 	// Deferred spawns so the first two stay active simultaneously.
 	const resolvers: Array<(v: SpawnResult) => void> = [];
 	let spawnCallCount = 0;
-	const deferredSpawn = (req: Record<string, unknown>): Promise<SpawnResult> => {
+	const deferredSpawn = (
+		req: Record<string, unknown>,
+	): Promise<SpawnResult> => {
 		spawnCallCount++;
 		return new Promise<SpawnResult>((resolve) => {
 			resolvers.push(resolve);
@@ -573,30 +693,55 @@ test("handleOfferDispatch: max_in_flight=2 allows two concurrent spawns, returns
 		});
 
 	await handleOfferDispatch("pete", mk(11, "t1"), {
-		spawn: deferredSpawn as never, exec, logger: silentLogger(),
-		resolveWorktree: () => "wt", renewalIntervalMs: 1_000_000,
+		spawn: deferredSpawn as never,
+		exec,
+		logger: silentLogger(),
+		resolveWorktree: () => "wt",
+		renewalIntervalMs: 1_000_000,
 	});
 	await handleOfferDispatch("pete", mk(12, "t2"), {
-		spawn: deferredSpawn as never, exec, logger: silentLogger(),
-		resolveWorktree: () => "wt", renewalIntervalMs: 1_000_000,
+		spawn: deferredSpawn as never,
+		exec,
+		logger: silentLogger(),
+		resolveWorktree: () => "wt",
+		renewalIntervalMs: 1_000_000,
 	});
 	await handleOfferDispatch("pete", mk(13, "t3"), {
-		spawn: deferredSpawn as never, exec, logger: silentLogger(),
-		resolveWorktree: () => "wt", renewalIntervalMs: 1_000_000,
+		spawn: deferredSpawn as never,
+		exec,
+		logger: silentLogger(),
+		resolveWorktree: () => "wt",
+		renewalIntervalMs: 1_000_000,
 	});
 
-	assert.equal(spawnCallCount, 2, "first two offers spawn; third is over capacity");
+	await drainAsyncWork();
+	assert.equal(
+		spawnCallCount,
+		2,
+		"first two offers spawn; third is over capacity",
+	);
 	const returnCalls = execCalls.filter((c) =>
 		c.sql.includes("fn_return_work_offer"),
 	);
 	assert.equal(returnCalls.length, 1, "third offer returned");
-	assert.equal(returnCalls[0].params[0], 13, "the third dispatch_id was returned");
+	assert.equal(
+		returnCalls[0].params[0],
+		13,
+		"the third dispatch_id was returned",
+	);
 
 	// Cleanup so the test runner can exit.
 	for (const r of resolvers) {
-		r({ agentRunId: "run", worktree: "wt", exitCode: 0, stdout: "", stderr: "", durationMs: 1 });
+		r({
+			agentRunId: "run",
+			worktree: "wt",
+			exitCode: 0,
+			stdout: "",
+			stderr: "",
+			durationMs: 1,
+		});
 	}
-	for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
+	await drainAsyncWork();
 });
 
 // ── P1113: Persona injection ──────────────────────────────────────────────────
@@ -605,9 +750,18 @@ test("handleOfferDispatch: persona from payload is prepended to task string", as
 	const spawnCalls: Array<Record<string, unknown>> = [];
 	const { exec } = recordingExec();
 
-	const fakeSpawn = async (req: Record<string, unknown>): Promise<SpawnResult> => {
+	const fakeSpawn = async (
+		req: Record<string, unknown>,
+	): Promise<SpawnResult> => {
 		spawnCalls.push(req);
-		return { agentRunId: "r1", worktree: req.worktree as string, exitCode: 0, stdout: "", stderr: "", durationMs: 1 };
+		return {
+			agentRunId: "r1",
+			worktree: req.worktree as string,
+			exitCode: 0,
+			stdout: "",
+			stderr: "",
+			durationMs: 1,
+		};
 	};
 
 	const msg = makeMessage({
@@ -630,7 +784,7 @@ test("handleOfferDispatch: persona from payload is prepended to task string", as
 		renewalIntervalMs: 1_000_000,
 	});
 
-	for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+	await drainAsyncWork();
 
 	assert.equal(spawnCalls.length, 1);
 	const task = spawnCalls[0].task as string;
@@ -652,9 +806,18 @@ test("handleOfferDispatch: no persona in payload falls back to generic task (no 
 	const spawnCalls: Array<Record<string, unknown>> = [];
 	const { exec } = recordingExec();
 
-	const fakeSpawn = async (req: Record<string, unknown>): Promise<SpawnResult> => {
+	const fakeSpawn = async (
+		req: Record<string, unknown>,
+	): Promise<SpawnResult> => {
 		spawnCalls.push(req);
-		return { agentRunId: "r2", worktree: req.worktree as string, exitCode: 0, stdout: "", stderr: "", durationMs: 1 };
+		return {
+			agentRunId: "r2",
+			worktree: req.worktree as string,
+			exitCode: 0,
+			stdout: "",
+			stderr: "",
+			durationMs: 1,
+		};
 	};
 
 	const msg = makeMessage({
@@ -676,7 +839,7 @@ test("handleOfferDispatch: no persona in payload falls back to generic task (no 
 		renewalIntervalMs: 1_000_000,
 	});
 
-	for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+	await drainAsyncWork();
 
 	assert.equal(spawnCalls.length, 1);
 	const task = spawnCalls[0].task as string;
@@ -690,9 +853,18 @@ test("handleOfferDispatch: built-in role 'skeptic-alpha' gets BUILTIN_FALLBACK p
 	const spawnCalls: Array<Record<string, unknown>> = [];
 	const { exec } = recordingExec();
 
-	const fakeSpawn = async (req: Record<string, unknown>): Promise<SpawnResult> => {
+	const fakeSpawn = async (
+		req: Record<string, unknown>,
+	): Promise<SpawnResult> => {
 		spawnCalls.push(req);
-		return { agentRunId: "r3", worktree: req.worktree as string, exitCode: 0, stdout: "", stderr: "", durationMs: 1 };
+		return {
+			agentRunId: "r3",
+			worktree: req.worktree as string,
+			exitCode: 0,
+			stdout: "",
+			stderr: "",
+			durationMs: 1,
+		};
 	};
 
 	const msg = makeMessage({
@@ -715,7 +887,7 @@ test("handleOfferDispatch: built-in role 'skeptic-alpha' gets BUILTIN_FALLBACK p
 		renewalIntervalMs: 1_000_000,
 	});
 
-	for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+	await drainAsyncWork();
 
 	assert.equal(spawnCalls.length, 1);
 	const task = spawnCalls[0].task as string;
@@ -733,9 +905,18 @@ test("handleOfferDispatch: payload task overrides generic fallback even without 
 	const spawnCalls: Array<Record<string, unknown>> = [];
 	const { exec } = recordingExec();
 
-	const fakeSpawn = async (req: Record<string, unknown>): Promise<SpawnResult> => {
+	const fakeSpawn = async (
+		req: Record<string, unknown>,
+	): Promise<SpawnResult> => {
 		spawnCalls.push(req);
-		return { agentRunId: "r4", worktree: req.worktree as string, exitCode: 0, stdout: "", stderr: "", durationMs: 1 };
+		return {
+			agentRunId: "r4",
+			worktree: req.worktree as string,
+			exitCode: 0,
+			stdout: "",
+			stderr: "",
+			durationMs: 1,
+		};
 	};
 
 	const specificTask = "Implement the acceptance criteria for P999.";
@@ -759,7 +940,7 @@ test("handleOfferDispatch: payload task overrides generic fallback even without 
 		renewalIntervalMs: 1_000_000,
 	});
 
-	for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+	await drainAsyncWork();
 
 	assert.equal(spawnCalls.length, 1);
 	const task = spawnCalls[0].task as string;

@@ -559,7 +559,10 @@ function buildCopilotArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
 	return { argv, env: {} };
 }
 
-function buildAntigravityArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
+function buildAntigravityArgs(
+	req: SpawnRequest,
+	route: ModelRoute,
+): CommandSpec {
 	const argv = [
 		route.cliPath ?? "agy",
 		"-p",
@@ -574,7 +577,10 @@ function buildAntigravityArgs(req: SpawnRequest, route: ModelRoute): CommandSpec
 }
 
 /** Dispatch to the correct builder based on route.agentCli (DB is source of truth). */
-export function buildArgsBySpec(req: SpawnRequest, route: ModelRoute): CommandSpec {
+export function buildArgsBySpec(
+	req: SpawnRequest,
+	route: ModelRoute,
+): CommandSpec {
 	// agent_cli from DB determines which CLI to use
 	switch (route.agentCli) {
 		case "codex":
@@ -672,7 +678,9 @@ export class NoPolicyAllowedRoute extends Error {
 		readonly hint: string | null,
 		opts: { all_throttled?: boolean } = {},
 	) {
-		const throttledNote = opts.all_throttled ? " All routes are in cooldown — retry after throttle window elapses." : " Check roadmap.host_model_policy.";
+		const throttledNote = opts.all_throttled
+			? " All routes are in cooldown — retry after throttle window elapses."
+			: " Check roadmap.host_model_policy.";
 		super(
 			`[P742] No host_model_policy-allowed route for host="${host}" provider="${provider}" hint=${hint ? `"${hint}"` : "null"}.${throttledNote}`,
 		);
@@ -827,7 +835,10 @@ export async function resolveActiveRouteProvider(): Promise<AgentProvider | null
  * Falls through to AGENT_PROVIDER env var, then the first enabled model_routes row.
  * .env.agent is no longer read here (AC5).
  */
-export async function detectProvider(worktreeName: string, _worktreeRoot: string = WORKTREE_ROOT): Promise<AgentProvider> {
+export async function detectProvider(
+	worktreeName: string,
+	_worktreeRoot: string = WORKTREE_ROOT,
+): Promise<AgentProvider> {
 	// AC5: query preferred_provider for the active agency matching this worktree identity
 	try {
 		const { rows } = await query<{ preferred_provider: string | null }>(
@@ -893,10 +904,14 @@ async function logRouteDecision({
 		id: number;
 		route_provider: string;
 		first_failing_layer: string;
-	}>(
-		buildEliminationDiagnosticSql(1, 2, 3, 4, 5, 6, "mr"),
-		[provider, chosenRouteId, AGENTHIVE_HOST, projectId, agencyIdentity, roleProfileId],
-	);
+	}>(buildEliminationDiagnosticSql(1, 2, 3, 4, 5, 6, "mr"), [
+		provider,
+		chosenRouteId,
+		AGENTHIVE_HOST,
+		projectId,
+		agencyIdentity,
+		roleProfileId,
+	]);
 
 	const eliminatedRoutes = rows
 		.filter((r) => r.first_failing_layer !== "passed")
@@ -910,7 +925,13 @@ async function logRouteDecision({
 		`INSERT INTO roadmap.route_decision_log
 		   (proposal_id, role, agency_identity, chosen_route_id, eliminated_routes)
 		 VALUES ($1, $2, $3, $4, $5)`,
-		[proposalId, role, agencyIdentity, chosenRouteId, JSON.stringify(eliminatedRoutes)],
+		[
+			proposalId,
+			role,
+			agencyIdentity,
+			chosenRouteId,
+			JSON.stringify(eliminatedRoutes),
+		],
 	);
 }
 
@@ -934,7 +955,9 @@ async function logRouteDecision({
  *   2. If hint has no passing route: warn and fall back to provider default
  *   3. If no hint: pick cheapest enabled route passing all 5 layers
  */
-async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & { eliminatedRoutes: EliminatedRoute[] }> {
+async function resolveModelRoute(
+	opts: ResolveRouteOpts,
+): Promise<ModelRoute & { eliminatedRoutes: EliminatedRoute[] }> {
 	const {
 		provider,
 		projectId = null,
@@ -971,7 +994,7 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 
 	let tierFilter = "";
 	let tierParamValue: string | null = requiredTier;
-	
+
 	if (role && (role.includes("frontier-review") || role.includes("audit"))) {
 		tierParamValue = "frontier";
 	}
@@ -981,7 +1004,12 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 	}
 
 	// P771/P773/P1435: shared params for all route queries: $3=host, $4=projectId, $5=agencyIdentity, $6=roleProfileId
-	const policyParams = [AGENTHIVE_HOST, projectId, agencyIdentity, roleProfileId] as const;
+	const policyParams = [
+		AGENTHIVE_HOST,
+		projectId,
+		agencyIdentity,
+		roleProfileId,
+	] as const;
 	const policyFilters = `
           AND ${hostPolicyFilterSql(3, "mr")}
           AND ${projectPolicyFilterSql(4, "mr")}
@@ -1058,8 +1086,19 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 		if (rows.length > 0) {
 			const route = toModelRoute(rows[0]);
 			assertResolvedRouteMetadata(provider, route);
-			void logRouteDecision({ provider, chosenRouteId: rows[0].id, proposalId, role, agencyIdentity, projectId, roleProfileId }).catch((err) => {
-				console.warn("[P772] route_decision_log write failed (non-blocking):", err instanceof Error ? err.message : String(err));
+			void logRouteDecision({
+				provider,
+				chosenRouteId: rows[0].id,
+				proposalId,
+				role,
+				agencyIdentity,
+				projectId,
+				roleProfileId,
+			}).catch((err) => {
+				console.warn(
+					"[P772] route_decision_log write failed (non-blocking):",
+					err instanceof Error ? err.message : String(err),
+				);
 			});
 			return { ...route, eliminatedRoutes: [] };
 		}
@@ -1080,7 +1119,12 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
           AND ${budgetFilterSql(3, "mr")}
           AND ${cooldownFilterSql("mr")}${tierFilter}`;
 	// P771: policy params without a leading modelName param (for default-selection queries)
-	const defaultPolicyParams = [AGENTHIVE_HOST, projectId, agencyIdentity, roleProfileId] as const;
+	const defaultPolicyParams = [
+		AGENTHIVE_HOST,
+		projectId,
+		agencyIdentity,
+		roleProfileId,
+	] as const;
 
 	// Default: use DB is_default flag first, then cheapest enabled as fallback.
 	// P742+P771: all 5 policy layers applied so a policy-excluded default is never returned.
@@ -1121,8 +1165,19 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 	if (rows.length > 0) {
 		const route = toModelRoute(rows[0]);
 		assertResolvedRouteMetadata(provider, route);
-		void logRouteDecision({ provider, chosenRouteId: rows[0].id, proposalId, role, agencyIdentity, projectId, roleProfileId }).catch((err) => {
-			console.warn("[P772] route_decision_log write failed (non-blocking):", err instanceof Error ? err.message : String(err));
+		void logRouteDecision({
+			provider,
+			chosenRouteId: rows[0].id,
+			proposalId,
+			role,
+			agencyIdentity,
+			projectId,
+			roleProfileId,
+		}).catch((err) => {
+			console.warn(
+				"[P772] route_decision_log write failed (non-blocking):",
+				err instanceof Error ? err.message : String(err),
+			);
 		});
 		return { ...route, eliminatedRoutes: [] };
 	}
@@ -1164,8 +1219,19 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 		if (defaultRows.length > 0) {
 			const route = toModelRoute(defaultRows[0]);
 			assertResolvedRouteMetadata(provider, route);
-			void logRouteDecision({ provider, chosenRouteId: defaultRows[0].id, proposalId, role, agencyIdentity, projectId, roleProfileId }).catch((err) => {
-				console.warn("[P772] route_decision_log write failed (non-blocking):", err instanceof Error ? err.message : String(err));
+			void logRouteDecision({
+				provider,
+				chosenRouteId: defaultRows[0].id,
+				proposalId,
+				role,
+				agencyIdentity,
+				projectId,
+				roleProfileId,
+			}).catch((err) => {
+				console.warn(
+					"[P772] route_decision_log write failed (non-blocking):",
+					err instanceof Error ? err.message : String(err),
+				);
 			});
 			return { ...route, eliminatedRoutes: [] };
 		}
@@ -1198,10 +1264,12 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 		if (allThrottled) {
 			console.warn(
 				`[P773] All eligible routes for provider "${provider}" are in cooldown. ` +
-				`They will become eligible again after cooldown_until elapses.`,
+					`They will become eligible again after cooldown_until elapses.`,
 			);
 		}
-		throw new NoPolicyAllowedRoute(AGENTHIVE_HOST, provider, hint ?? null, { all_throttled: allThrottled });
+		throw new NoPolicyAllowedRoute(AGENTHIVE_HOST, provider, hint ?? null, {
+			all_throttled: allThrottled,
+		});
 	}
 
 	throw new Error(
@@ -1249,9 +1317,10 @@ async function buildProposalContextPackage(input: {
 			agent_identity: input.agentIdentity,
 		});
 		const maxChars = Math.max(1000, input.maxTokens * 4);
-		const text = pkg.context_text.length > maxChars
-			? `${pkg.context_text.slice(0, maxChars)}\n...`
-			: pkg.context_text;
+		const text =
+			pkg.context_text.length > maxChars
+				? `${pkg.context_text.slice(0, maxChars)}\n...`
+				: pkg.context_text;
 		return text;
 	} catch {
 		// Fallback to lightweight inline assembly if context_builder fails.
@@ -1338,12 +1407,11 @@ export function renderClosingHint(input: {
  * 5. If all enabled routes exhausted, set provider-level cooldown
  * 6. Return 'provider_exhausted' outcome when max attempts reached
  */
-export async function spawnWithRetry(
-	req: SpawnRequest,
-): Promise<SpawnResult> {
+export async function spawnWithRetry(req: SpawnRequest): Promise<SpawnResult> {
 	let maxAttempts = 3;
 	try {
-		maxAttempts = (await config.getOptional(FlagKeys.SPAWN_PROVIDER_MAX_ATTEMPTS)) ?? 3;
+		maxAttempts =
+			(await config.getOptional(FlagKeys.SPAWN_PROVIDER_MAX_ATTEMPTS)) ?? 3;
 	} catch {
 		// Standalone liaison processes may not initialize the global runtime
 		// config resolver; keep the documented retry default instead of
@@ -1351,7 +1419,8 @@ export async function spawnWithRetry(
 	}
 	let attemptCount = 0;
 	let lastResult: SpawnResult | null = null;
-	const provider = req.provider || (await detectProvider(req.worktree, req.worktreeRoot));
+	const provider =
+		req.provider || (await detectProvider(req.worktree, req.worktreeRoot));
 
 	while (attemptCount < maxAttempts) {
 		attemptCount++;
@@ -1363,7 +1432,11 @@ export async function spawnWithRetry(
 		}
 
 		// Classify the exit to detect quota errors
-		const exitClass = classifyExit(lastResult.stdout, lastResult.stderr, lastResult.exitCode);
+		const exitClass = classifyExit(
+			lastResult.stdout,
+			lastResult.stderr,
+			lastResult.exitCode,
+		);
 
 		// If not a rate-limit error, return immediately
 		if (exitClass.outcome !== "rate_limited") {
@@ -1381,8 +1454,8 @@ export async function spawnWithRetry(
 		// gemini's "reset after 15h56m11s", anthropic's retry-after seconds, etc.
 		const modelName = req.model || exitClass.quotaErrorModel || "unknown";
 		const FALLBACK_COOLDOWN_MINUTES = 60; // 1h per P1359 design when no parsed TTL
-		const MIN_COOLDOWN_MINUTES = 1;        // floor (clock-skew safety)
-		const MAX_COOLDOWN_MINUTES = 24 * 60;  // 24h ceiling
+		const MIN_COOLDOWN_MINUTES = 1; // floor (clock-skew safety)
+		const MAX_COOLDOWN_MINUTES = 24 * 60; // 24h ceiling
 		let cooldownMinutes: number;
 		if (exitClass.resetAt instanceof Date) {
 			const deltaMs = exitClass.resetAt.getTime() - Date.now();
@@ -1397,19 +1470,39 @@ export async function spawnWithRetry(
 		} else {
 			cooldownMinutes = FALLBACK_COOLDOWN_MINUTES;
 		}
-		const cooldownReason = lastResult.stderr?.slice(0, 500) || lastResult.stdout?.slice(0, 500) || "quota_exhausted";
+		const cooldownReason =
+			lastResult.stderr?.slice(0, 500) ||
+			lastResult.stdout?.slice(0, 500) ||
+			"quota_exhausted";
 
 		try {
-			if (exitClass.quotaErrorProvider === "claude") {
-				// P1682: claude CLI subscription limit is account-wide — cool the whole
-				// `claude` CLI route family (routes sharing one OAuth account), not just
-				// the single (provider,model) that happened to be picked this spawn.
-				await setCliFamilyCooldown("claude", cooldownMinutes, cooldownReason);
+			if (
+				exitClass.quotaErrorProvider === "claude" ||
+				exitClass.quotaErrorProvider === "codex"
+			) {
+				// P1682/P1438: subscription CLI limits are account-wide — cool the whole
+				// CLI route family (routes sharing one OAuth account), not just the single
+				// (provider, model) pair. Codex routes use route_provider='openai' but
+				// agent_cli='codex', so a model cooldown keyed by provider='codex' would
+				// update zero rows and keep the exhausted route hot.
+				await setCliFamilyCooldown(
+					exitClass.quotaErrorProvider,
+					cooldownMinutes,
+					cooldownReason,
+				);
 			} else {
-				await setModelCooldown(provider, modelName, cooldownMinutes, cooldownReason);
+				await setModelCooldown(
+					provider,
+					modelName,
+					cooldownMinutes,
+					cooldownReason,
+				);
 			}
 		} catch (err) {
-			console.error(`[P1359] Failed to set model cooldown for ${provider}/${modelName}:`, err);
+			console.error(
+				`[P1359] Failed to set model cooldown for ${provider}/${modelName}:`,
+				err,
+			);
 		}
 
 		// Re-resolve route applying Layer 6 cooldown filter
@@ -1447,7 +1540,11 @@ export async function spawnWithRetry(
 		}
 
 		// Update request with new route for next attempt
-		req = { ...req, provider: nextRoute.routeProvider, model: nextRoute.modelName };
+		req = {
+			...req,
+			provider: nextRoute.routeProvider,
+			model: nextRoute.modelName,
+		};
 
 		// If we've exhausted max attempts, check for provider escalation
 		if (attemptCount >= maxAttempts) {
@@ -1464,7 +1561,10 @@ export async function spawnWithRetry(
 					await setProviderCooldown(provider, "rate_limit", cooldownReason);
 				}
 			} catch (err) {
-				console.error(`[P1359] Failed to escalate to provider cooldown at max attempts:`, err);
+				console.error(
+					`[P1359] Failed to escalate to provider cooldown at max attempts:`,
+					err,
+				);
 			}
 			// Return the last failure; orchestrator will handle provider_exhausted state
 			return lastResult;
@@ -1474,14 +1574,16 @@ export async function spawnWithRetry(
 	}
 
 	// Should not reach here, but return last result as fallback
-	return lastResult || {
-		agentRunId: "unknown",
-		worktree: req.worktree,
-		exitCode: 1,
-		stdout: "",
-		stderr: "Spawn loop exhausted without valid result",
-		durationMs: 0,
-	};
+	return (
+		lastResult || {
+			agentRunId: "unknown",
+			worktree: req.worktree,
+			exitCode: 1,
+			stdout: "",
+			stderr: "Spawn loop exhausted without valid result",
+			durationMs: 0,
+		}
+	);
 }
 
 /**
@@ -1531,9 +1633,9 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 				if (pct < QUOTA_HEADROOM_PCT) {
 					throw new Error(
 						`[P1004] Spawn deferred: ${req.provider} quota at ${Math.round(pct * 100)}% ` +
-						`(${quotaSnap.quota_remaining}/${quotaSnap.quota_limit} remaining, ` +
-						`headroom threshold ${Math.round(QUOTA_HEADROOM_PCT * 100)}%). ` +
-						`Resets at ${quotaSnap.quota_reset_at?.toISOString() ?? "unknown"}.`,
+							`(${quotaSnap.quota_remaining}/${quotaSnap.quota_limit} remaining, ` +
+							`headroom threshold ${Math.round(QUOTA_HEADROOM_PCT * 100)}%). ` +
+							`Resets at ${quotaSnap.quota_reset_at?.toISOString() ?? "unknown"}.`,
 					);
 				}
 			}
@@ -1548,16 +1650,17 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	const provider =
 		providerOverride ?? (await detectProvider(worktree, worktreeRoot));
 	// P235/M026/P771/P772/P226: resolve full route applying all policy layers; logs decision
-	const { eliminatedRoutes: _eliminatedRoutes, ...route } = await resolveModelRoute({
-		provider,
-		projectId: req.projectId ?? null,
-		agencyIdentity: req.agencyIdentity ?? null,
-		roleProfileId: req.roleProfileId ?? null,
-		modelHint,
-		proposalId: req.proposalId ?? null,
-		role: req.stage,
-		requiredTier: req.requiredTier ?? null,
-	});
+	const { eliminatedRoutes: _eliminatedRoutes, ...route } =
+		await resolveModelRoute({
+			provider,
+			projectId: req.projectId ?? null,
+			agencyIdentity: req.agencyIdentity ?? null,
+			roleProfileId: req.roleProfileId ?? null,
+			modelHint,
+			proposalId: req.proposalId ?? null,
+			role: req.stage,
+			requiredTier: req.requiredTier ?? null,
+		});
 	// P797: validate that the resolved model has at least one enabled route before spawning
 	const routeCheck = await validateModelForDispatch(
 		route.modelName,
@@ -1817,12 +1920,20 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	});
 	if (route.routeId) {
 		const selectionReason = modelHint
-			? route.modelName === modelHint ? "hint_match" : "hint_fallback"
+			? route.modelName === modelHint
+				? "hint_match"
+				: "hint_fallback"
 			: "default_route";
 		await obsWriter.writeModelRoutingOutcome({
 			traceId,
 			selectedRouteId: route.routeId,
-			candidateRoutes: [{ routeId: String(route.routeId), modelName: route.modelName, selectionReason }],
+			candidateRoutes: [
+				{
+					routeId: String(route.routeId),
+					modelName: route.modelName,
+					selectionReason,
+				},
+			],
 			selectionReason,
 		});
 	}
@@ -1940,16 +2051,22 @@ export function detectProviderQuotaSignal(
 	// Codex CLI (ChatGPT-backed gpt-5.5): "You've hit your usage limit" + "try again at H:MM AM/PM"
 	// Distinct from the OpenAI API rate_limit_exceeded format below.
 	// TTL: parse "try again at H:MM AM/PM" as local time; fallback 1h.
-	if (/you'?ve\s+hit\s+your\s+usage\s+limit|chatgpt\.com\/codex\/settings\/usage/i.test(hay)) {
+	if (
+		/you'?ve\s+hit\s+your\s+usage\s+limit|chatgpt\.com\/codex\/settings\/usage/i.test(
+			hay,
+		)
+	) {
 		let resetAt = new Date(Date.now() + 60 * 60 * 1000);
 		const m = hay.match(/try\s+again\s+at\s+(\d{1,2}):(\d{2})\s*(am|pm)/i);
 		if (m) {
 			const h12 = parseInt(m[1], 10);
 			const mins = parseInt(m[2], 10);
-			const h24 = (h12 === 12 ? 0 : h12) + (m[3].toLowerCase() === "pm" ? 12 : 0);
+			const h24 =
+				(h12 === 12 ? 0 : h12) + (m[3].toLowerCase() === "pm" ? 12 : 0);
 			const candidate = new Date();
 			candidate.setHours(h24, mins, 0, 0);
-			if (candidate.getTime() < Date.now()) candidate.setDate(candidate.getDate() + 1);
+			if (candidate.getTime() < Date.now())
+				candidate.setDate(candidate.getDate() + 1);
 			resetAt = candidate;
 		}
 		return { provider: "codex", model: "gpt-5.5", resetAt };
@@ -1957,7 +2074,10 @@ export function detectProviderQuotaSignal(
 
 	// OpenAI: "rate_limit_exceeded" or 429 + "quota"
 	// TTL: "Retry-After: X" header or "X-RateLimit-Reset" timestamp
-	if ((/rate_limit_exceeded|429.*quota/i.test(hay)) || (/429/.test(hay) && /quota/i.test(hay))) {
+	if (
+		/rate_limit_exceeded|429.*quota/i.test(hay) ||
+		(/429/.test(hay) && /quota/i.test(hay))
+	) {
 		let resetAt = new Date(Date.now() + 60 * 60 * 1000); // default 1h
 		// Try to extract Retry-After (seconds) or X-RateLimit-Reset (Unix timestamp)
 		const retryMatch = hay.match(/Retry-After[:\s]+(\d+)/i);
@@ -1989,7 +2109,9 @@ export function detectProviderQuotaSignal(
 	// TTL: often contains explicit reset datetime; fallback 7 days
 	if (/weekly\s+rate\s+limit/i.test(hay)) {
 		let resetAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // default 7 days
-		const match = hay.match(/(?:reset|resets)\s+(?:at\s+)?(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[^)\n]*)/i);
+		const match = hay.match(
+			/(?:reset|resets)\s+(?:at\s+)?(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[^)\n]*)/i,
+		);
 		if (match) {
 			const dt = new Date(match[1]);
 			if (!isNaN(dt.getTime())) {
@@ -2246,7 +2368,9 @@ export async function escalateOrNotify(
 	return null;
 }
 
-export function softSortProviderHealthCandidates<T extends { route_provider: string }>(
+export function softSortProviderHealthCandidates<
+	T extends { route_provider: string },
+>(
 	rows: T[],
 	healthFn: (provider: string) => { status: string; checkedAt: number } | null,
 ): T[] {

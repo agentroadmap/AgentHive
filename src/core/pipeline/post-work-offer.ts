@@ -279,7 +279,7 @@ async function postWorkOfferImpl(
 	// without explicit capabilities became permanently un-matchable and clogged
 	// the global inflight cap. Default to ROLE_TO_REQUIRED_CAPABILITIES lookup
 	// when the caller didn't supply caps; fall back to ["develop"] (the broadest
-	// seeded cap, advertised by 9 of 19 dispatchable agencies).
+	// seeded cap, broadly advertised by existing agencies).
 	const caps = input.requiredCapabilities?.length
 		? JSON.stringify(input.requiredCapabilities)
 		: JSON.stringify(ROLE_TO_REQUIRED_CAPABILITIES[input.role.toLowerCase()] ?? ["develop"]);
@@ -450,15 +450,12 @@ async function postWorkOfferImpl(
 		throw new DispatchLoopError(input.proposalId, input.role, recentRuns);
 	}
 
-	// P1289 AC-3 + P1290 AC-1: Pre-flight dispatchability check. Throw
-	// CapabilityMismatchError (and INSERT nothing) if no active agency advertises
-	// the required capabilities. Mirrors the full resolveAgency predicate at
-	// agency-resolver.ts:130 — provider_registry.capabilities->'jobs' AND
-	// v_agency_status.dispatchable (which a2a-host's fn_pulse keeps fresh via
-	// roadmap.agency.presence_state). Checking provider_registry.status alone
-	// was stricter than the matcher and rejected offers the matcher would have
-	// claimed when only the new generic a2a-host (P1132) is running and no
-	// per-agency service updates provider_registry.status.
+	// P1289 AC-3 + P1290 AC-1 + P1438 AC-C6-EMERGENT-1: Pre-flight only
+	// impossible capability vocabulary. Open-pool offers must not depend on
+	// heartbeat-derived dispatchability/presence; availability is revealed by
+	// a later fn_claim_work_offer winner. Checking provider_registry capability
+	// subscription prevents unserviceable typos without suppressing work just
+	// because every eligible AI liaison is currently parked or silent.
 	// checkCaps falls back to ROLE_TO_REQUIRED_CAPABILITIES if the caller didn't
 	// supply requiredCapabilities, so the preflight always has a value to check
 	// against rather than silently skipping.
@@ -470,12 +467,10 @@ async function postWorkOfferImpl(
 			`SELECT count(*)::int AS count
 			   FROM roadmap_workforce.provider_registry pr
 			   JOIN roadmap_workforce.agent_registry ar ON ar.id = pr.agency_id
-			   LEFT JOIN roadmap.v_agency_status vas ON vas.agency_id = ar.agent_identity
 			  WHERE pr.status NOT IN ('offline', 'retired')
 			    AND ar.status = 'active'
 			    AND ar.agent_type <> 'coordinator'
 			    AND ar.agent_identity NOT LIKE 'test/%'
-			    AND (vas.agency_id IS NULL OR vas.dispatchable = true)
 			    AND (pr.capabilities->'jobs') ?| $1::text[]`,
 			[checkCaps],
 		);

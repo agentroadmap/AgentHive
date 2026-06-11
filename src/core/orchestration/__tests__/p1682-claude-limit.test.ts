@@ -36,7 +36,9 @@ describe("P1682: claude-CLI usage-limit detection", () => {
 		expect(sig).not.toBeNull();
 		expect(sig!.provider).toBe("claude");
 		// resetAt should be within 2s of the parsed epoch (no fallback used)
-		expect(Math.abs(sig!.resetAt.getTime() - epochSec * 1000)).toBeLessThan(2000);
+		expect(Math.abs(sig!.resetAt.getTime() - epochSec * 1000)).toBeLessThan(
+			2000,
+		);
 	});
 
 	it("falls back to the configured window for '5-hour limit reached' (no exact time)", () => {
@@ -68,12 +70,16 @@ describe("P1682: claude-CLI usage-limit detection", () => {
 	});
 
 	it("classifyExit returns completed on exit 0 even if stdout mentions a limit", () => {
-		const cls = classifyExit("done; note: usage limit reached yesterday", "", 0);
+		const cls = classifyExit(
+			"done; note: usage limit reached yesterday",
+			"",
+			0,
+		);
 		expect(cls.outcome).toBe("completed");
 	});
 });
 
-describe("P1682: account-wide cooldown targets the claude CLI route family", () => {
+describe("P1438/P1682: subscription cooldown targets CLI route families", () => {
 	it("setCliFamilyCooldown cools WHERE agent_cli = $1 with GREATEST merge", async () => {
 		queryMock.mockClear();
 		await setCliFamilyCooldown("claude", 30, "usage limit reached");
@@ -83,5 +89,28 @@ describe("P1682: account-wide cooldown targets the claude CLI route family", () 
 		expect(call[0]).toContain("GREATEST");
 		expect(call[0]).toContain("model_routes");
 		expect(call[1]).toEqual(["claude"]);
+	});
+
+	it("detects Codex subscription usage limits as provider=codex", () => {
+		const cls = classifyExit(
+			"ERROR: You've hit your usage limit. Upgrade to Pro, visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 3:18 AM.",
+			"",
+			1,
+		);
+		expect(cls.outcome).toBe("rate_limited");
+		expect(cls.quotaErrorProvider).toBe("codex");
+		expect(cls.quotaErrorModel).toBe("gpt-5.5");
+		expect(cls.resetAt instanceof Date).toBe(true);
+	});
+
+	it("setCliFamilyCooldown can cool the Codex CLI family", async () => {
+		queryMock.mockClear();
+		await setCliFamilyCooldown("codex", 60, "codex usage limit");
+		expect(queryMock).toHaveBeenCalled();
+		const call = queryMock.mock.calls[queryMock.mock.calls.length - 1];
+		expect(call[0]).toContain("agent_cli = $1");
+		expect(call[0]).toContain("GREATEST");
+		expect(call[0]).toContain("model_routes");
+		expect(call[1]).toEqual(["codex"]);
 	});
 });

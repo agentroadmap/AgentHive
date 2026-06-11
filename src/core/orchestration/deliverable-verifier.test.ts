@@ -26,7 +26,10 @@ const TEST_ID = `p1439-test-${Date.now()}`;
 test("AC-1: getRoleArtifactMap returns complete role mapping", () => {
 	const map = getRoleArtifactMap();
 
-	assert.ok(map["gate-review"], "gate-review should map to proposal_reviews check");
+	assert.ok(
+		map["gate-review"],
+		"gate-review should map to proposal_reviews check",
+	);
 	assert.ok(map["developer"], "developer should map to agent_runs check");
 	assert.ok(map["enhance"], "enhance should map to AC/discussion check");
 	assert.ok(map["architect"], "architect should map to AC with criterion_text");
@@ -48,7 +51,7 @@ test("AC-2.1: gate-review role fails when no proposal_reviews row exists", async
 		  (status, maturity, title, type, project_id, audit)
 		  VALUES ($1, $2, $3, $4, $5, $6)
 		  RETURNING id`,
-		["Review", "new", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
+		["Review", "new", `Test Proposal ${TEST_ID}`, "feature", 1, "{}"],
 	);
 	const proposalId = proposalRes.rows[0].id;
 
@@ -60,14 +63,20 @@ test("AC-2.1: gate-review role fails when no proposal_reviews row exists", async
 			workerIdentity: "test-reviewer",
 		});
 
-		assert.strictEqual(result.verified, false, "Should NOT verify when no review row exists");
+		assert.strictEqual(
+			result.verified,
+			false,
+			"Should NOT verify when no review row exists",
+		);
 		assert.ok(
 			result.failureReason?.includes("No proposal_reviews row"),
-			"Failure reason should mention missing review row"
+			"Failure reason should mention missing review row",
 		);
 	} finally {
 		// Cleanup
-		await query(`DELETE FROM roadmap_proposal.proposal WHERE id = $1`, [proposalId]);
+		await query(`DELETE FROM roadmap_proposal.proposal WHERE id = $1`, [
+			proposalId,
+		]);
 	}
 });
 
@@ -78,7 +87,7 @@ test("AC-2.2: gate-review role succeeds when proposal_reviews row exists", async
 		  (status, maturity, title, type, project_id, audit)
 		  VALUES ($1, $2, $3, $4, $5, $6)
 		  RETURNING id`,
-		["Review", "new", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
+		["Review", "new", `Test Proposal ${TEST_ID}`, "feature", 1, "{}"],
 	);
 	const proposalId = proposalRes.rows[0].id;
 
@@ -88,7 +97,7 @@ test("AC-2.2: gate-review role succeeds when proposal_reviews row exists", async
 		  (agent_identity, agent_type, trust_tier, status)
 		  VALUES ($1, $2, $3, $4)
 		  ON CONFLICT (agent_identity) DO UPDATE SET status = $4`,
-		["test-reviewer-ac2", "llm", "authority", "active"]
+		["test-reviewer-ac2", "llm", "authority", "active"],
 	);
 
 	try {
@@ -97,7 +106,7 @@ test("AC-2.2: gate-review role succeeds when proposal_reviews row exists", async
 			`INSERT INTO roadmap_proposal.proposal_reviews
 			  (proposal_id, reviewer_identity, verdict, is_blocking, project_id)
 			  VALUES ($1, $2, $3, $4, $5)`,
-			[proposalId, "test-reviewer-ac2", "approve", false, 1]
+			[proposalId, "test-reviewer-ac2", "approve", false, 1],
 		);
 
 		// Verify: Should succeed
@@ -107,12 +116,18 @@ test("AC-2.2: gate-review role succeeds when proposal_reviews row exists", async
 			workerIdentity: "test-reviewer-ac2",
 		});
 
-		assert.strictEqual(result.verified, true, "Should verify when review row exists");
+		assert.strictEqual(
+			result.verified,
+			true,
+			"Should verify when review row exists",
+		);
 		assert.strictEqual(result.artifactType, "proposal_reviews");
 		assert.ok(result.artifactId, "Should return the review ID");
 	} finally {
 		// Cleanup
-		await query(`DELETE FROM roadmap_proposal.proposal WHERE id = $1`, [proposalId]);
+		await query(`DELETE FROM roadmap_proposal.proposal WHERE id = $1`, [
+			proposalId,
+		]);
 	}
 });
 
@@ -123,7 +138,7 @@ test("AC-2.3: developer role fails when no agent_runs row exists", async () => {
 		  (status, maturity, title, type, project_id, audit)
 		  VALUES ($1, $2, $3, $4, $5, $6)
 		  RETURNING id`,
-		["Develop", "new", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
+		["Develop", "new", `Test Proposal ${TEST_ID}`, "feature", 1, "{}"],
 	);
 	const proposalId = proposalRes.rows[0].id;
 
@@ -135,14 +150,20 @@ test("AC-2.3: developer role fails when no agent_runs row exists", async () => {
 			workerIdentity: "test-dev-agent",
 		});
 
-		assert.strictEqual(result.verified, false, "Should NOT verify when no agent_runs");
+		assert.strictEqual(
+			result.verified,
+			false,
+			"Should NOT verify when no agent_runs",
+		);
 		assert.ok(
 			result.failureReason?.includes("No completed agent_runs"),
-			"Failure reason should mention missing agent_runs"
+			"Failure reason should mention missing agent_runs",
 		);
 	} finally {
 		// Cleanup
-		await query(`DELETE FROM roadmap_proposal.proposal WHERE id = $1`, [proposalId]);
+		await query(`DELETE FROM roadmap_proposal.proposal WHERE id = $1`, [
+			proposalId,
+		]);
 	}
 });
 
@@ -153,7 +174,7 @@ test("AC-2.4: developer role succeeds when agent_runs completed exists", async (
 		  (status, maturity, title, type, project_id, audit)
 		  VALUES ($1, $2, $3, $4, $5, $6)
 		  RETURNING id`,
-		["Develop", "new", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
+		["Develop", "new", `Test Proposal ${TEST_ID}`, "feature", 1, "{}"],
 	);
 	const proposalId = proposalRes.rows[0].id;
 
@@ -163,7 +184,14 @@ test("AC-2.4: developer role succeeds when agent_runs completed exists", async (
 			`INSERT INTO roadmap_workforce.agent_runs
 			  (proposal_id, agent_identity, stage, model_used, status, output_summary)
 			  VALUES ($1, $2, $3, $4, $5, $6)`,
-			[proposalId, "test-dev-agent-ac24", "DEVELOP", "test-model", "completed", "Work completed"]
+			[
+				proposalId,
+				"test-dev-agent-ac24",
+				"DEVELOP",
+				"test-model",
+				"completed",
+				"Work completed",
+			],
 		);
 
 		// Verify: Should succeed
@@ -173,12 +201,65 @@ test("AC-2.4: developer role succeeds when agent_runs completed exists", async (
 			workerIdentity: "test-dev-agent-ac24",
 		});
 
-		assert.strictEqual(result.verified, true, "Should verify when agent_runs completed");
+		assert.strictEqual(
+			result.verified,
+			true,
+			"Should verify when agent_runs completed",
+		);
 		assert.strictEqual(result.artifactType, "agent_runs");
 		assert.ok(result.artifactId, "Should return the agent_runs ID");
 	} finally {
 		// Cleanup
-		await query(`DELETE FROM roadmap_proposal.proposal WHERE id = $1`, [proposalId]);
+		await query(`DELETE FROM roadmap_proposal.proposal WHERE id = $1`, [
+			proposalId,
+		]);
+	}
+});
+
+test("AC-2.4b: developer role rejects completed agent_runs with empty output_summary", async () => {
+	const proposalRes = await query(
+		`INSERT INTO roadmap_proposal.proposal
+		  (status, maturity, title, type, project_id, audit)
+		  VALUES ($1, $2, $3, $4, $5, $6)
+		  RETURNING id`,
+		["Develop", "new", `Test Proposal ${TEST_ID}`, "feature", 1, "{}"],
+	);
+	const proposalId = proposalRes.rows[0].id;
+
+	try {
+		await query(
+			`INSERT INTO roadmap_workforce.agent_runs
+			  (proposal_id, agent_identity, stage, model_used, status, output_summary)
+			  VALUES ($1, $2, $3, $4, $5, $6)`,
+			[
+				proposalId,
+				"test-dev-agent-empty-summary",
+				"DEVELOP",
+				"test-model",
+				"completed",
+				"",
+			],
+		);
+
+		const result = await verifyDeliverables({
+			proposalId,
+			dispatchRole: "developer",
+			workerIdentity: "test-dev-agent-empty-summary",
+		});
+
+		assert.strictEqual(
+			result.verified,
+			false,
+			"completed without summary is not delivery evidence",
+		);
+		assert.ok(
+			result.failureReason?.includes("non-empty output_summary"),
+			"Failure reason should mention non-empty output_summary",
+		);
+	} finally {
+		await query(`DELETE FROM roadmap_proposal.proposal WHERE id = $1`, [
+			proposalId,
+		]);
 	}
 });
 
@@ -189,7 +270,7 @@ test("AC-2.5: enhance role fails when no AC or discussion artifacts", async () =
 		  (status, maturity, title, type, project_id, audit)
 		  VALUES ($1, $2, $3, $4, $5, $6)
 		  RETURNING id`,
-		["Draft", "new", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
+		["Draft", "new", `Test Proposal ${TEST_ID}`, "feature", 1, "{}"],
 	);
 	const proposalId = proposalRes.rows[0].id;
 
@@ -201,14 +282,20 @@ test("AC-2.5: enhance role fails when no AC or discussion artifacts", async () =
 			workerIdentity: "test-enhancer",
 		});
 
-		assert.strictEqual(result.verified, false, "Should NOT verify when no AC/discussions");
+		assert.strictEqual(
+			result.verified,
+			false,
+			"Should NOT verify when no AC/discussions",
+		);
 		assert.ok(
 			result.failureReason?.includes("No AC or discussion artifacts"),
-			"Failure reason should mention missing artifacts"
+			"Failure reason should mention missing artifacts",
 		);
 	} finally {
 		// Cleanup
-		await query(`DELETE FROM roadmap_proposal.proposal WHERE id = $1`, [proposalId]);
+		await query(`DELETE FROM roadmap_proposal.proposal WHERE id = $1`, [
+			proposalId,
+		]);
 	}
 });
 
@@ -219,7 +306,7 @@ test("AC-2.6: architect role fails when no AC with criterion_text", async () => 
 		  (status, maturity, title, type, project_id, audit)
 		  VALUES ($1, $2, $3, $4, $5, $6)
 		  RETURNING id`,
-		["Draft", "new", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
+		["Draft", "new", `Test Proposal ${TEST_ID}`, "feature", 1, "{}"],
 	);
 	const proposalId = proposalRes.rows[0].id;
 
@@ -234,11 +321,13 @@ test("AC-2.6: architect role fails when no AC with criterion_text", async () => 
 		assert.strictEqual(result.verified, false, "Should NOT verify when no AC");
 		assert.ok(
 			result.failureReason?.includes("No acceptance criteria"),
-			"Failure reason should mention missing AC"
+			"Failure reason should mention missing AC",
 		);
 	} finally {
 		// Cleanup
-		await query(`DELETE FROM roadmap_proposal.proposal WHERE id = $1`, [proposalId]);
+		await query(`DELETE FROM roadmap_proposal.proposal WHERE id = $1`, [
+			proposalId,
+		]);
 	}
 });
 
@@ -249,7 +338,7 @@ test("AC-2.7: architect role succeeds when AC with criterion_text exists", async
 		  (status, maturity, title, type, project_id, audit)
 		  VALUES ($1, $2, $3, $4, $5, $6)
 		  RETURNING id`,
-		["Draft", "new", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
+		["Draft", "new", `Test Proposal ${TEST_ID}`, "feature", 1, "{}"],
 	);
 	const proposalId = proposalRes.rows[0].id;
 
@@ -259,7 +348,7 @@ test("AC-2.7: architect role succeeds when AC with criterion_text exists", async
 			`INSERT INTO roadmap_proposal.proposal_acceptance_criteria
 			  (proposal_id, item_number, criterion_text, status, project_id)
 			  VALUES ($1, $2, $3, $4, $5)`,
-			[proposalId, 1, "Test AC: should do X", "pending", 1]
+			[proposalId, 1, "Test AC: should do X", "pending", 1],
 		);
 
 		// Verify: Should succeed
@@ -274,7 +363,9 @@ test("AC-2.7: architect role succeeds when AC with criterion_text exists", async
 		assert.ok(result.artifactId, "Should return the AC ID");
 	} finally {
 		// Cleanup
-		await query(`DELETE FROM roadmap_proposal.proposal WHERE id = $1`, [proposalId]);
+		await query(`DELETE FROM roadmap_proposal.proposal WHERE id = $1`, [
+			proposalId,
+		]);
 	}
 });
 
@@ -289,7 +380,7 @@ test("AC-2.8: markDeliverableVerificationFailed sets correct status + failure_cl
 		  (status, maturity, title, type, project_id, audit)
 		  VALUES ($1, $2, $3, $4, $5, $6)
 		  RETURNING id`,
-		["Develop", "new", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
+		["Develop", "new", `Test Proposal ${TEST_ID}`, "feature", 1, "{}"],
 	);
 	const proposalId = proposalRes.rows[0].id;
 
@@ -299,7 +390,7 @@ test("AC-2.8: markDeliverableVerificationFailed sets correct status + failure_cl
 		  (agent_identity, agent_type, trust_tier, status)
 		  VALUES ($1, $2, $3, $4)
 		  ON CONFLICT (agent_identity) DO UPDATE SET status = $4`,
-		["test-worker-ac28", "llm", "authority", "active"]
+		["test-worker-ac28", "llm", "authority", "active"],
 	);
 
 	// Create squad_dispatch
@@ -308,7 +399,15 @@ test("AC-2.8: markDeliverableVerificationFailed sets correct status + failure_cl
 		  (proposal_id, agent_identity, squad_name, dispatch_role, dispatch_status, project_id, required_capabilities)
 		  VALUES ($1, $2, $3, $4, $5, $6, $7)
 		  RETURNING id`,
-		[proposalId, "test-worker-ac28", "test-squad", "developer", "active", 1, '["code"]']
+		[
+			proposalId,
+			"test-worker-ac28",
+			"test-squad",
+			"developer",
+			"active",
+			1,
+			'["code"]',
+		],
 	);
 	const dispatchId = dispatchRes.rows[0].id;
 
@@ -320,21 +419,35 @@ test("AC-2.8: markDeliverableVerificationFailed sets correct status + failure_cl
 		const checkRes = await query(
 			`SELECT dispatch_status, failure_class, failure_is_transient, metadata
 			  FROM roadmap_workforce.squad_dispatch WHERE id = $1`,
-			[dispatchId]
+			[dispatchId],
 		);
 
 		assert.strictEqual(checkRes.rows.length, 1, "Dispatch should still exist");
 		const row = checkRes.rows[0];
-		assert.strictEqual(row.dispatch_status, "failed", "dispatch_status should be 'failed'");
-		assert.strictEqual(row.failure_class, "unknown", "failure_class should be 'unknown' (unattributable hallucination)");
-		assert.strictEqual(row.failure_is_transient, false, "failure_is_transient should be false");
+		assert.strictEqual(
+			row.dispatch_status,
+			"failed",
+			"dispatch_status should be 'failed'",
+		);
+		assert.strictEqual(
+			row.failure_class,
+			"unknown",
+			"failure_class should be 'unknown' (unattributable hallucination)",
+		);
+		assert.strictEqual(
+			row.failure_is_transient,
+			false,
+			"failure_is_transient should be false",
+		);
 		assert.ok(
 			row.metadata?.verification_failed_reason,
-			"Metadata should contain verification_failed_reason"
+			"Metadata should contain verification_failed_reason",
 		);
 	} finally {
 		// Cleanup
-		await query(`DELETE FROM roadmap_proposal.proposal WHERE id = $1`, [proposalId]);
+		await query(`DELETE FROM roadmap_proposal.proposal WHERE id = $1`, [
+			proposalId,
+		]);
 	}
 });
 
@@ -365,7 +478,7 @@ test("AC-3.1: Verifier logic is invoked before maturity change (sanity check)", 
 		  (status, maturity, title, type, project_id, audit)
 		  VALUES ($1, $2, $3, $4, $5, $6)
 		  RETURNING id`,
-		["Review", "new", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
+		["Review", "new", `Test Proposal ${TEST_ID}`, "feature", 1, "{}"],
 	);
 	const proposalId = proposalRes.rows[0].id;
 
@@ -384,7 +497,9 @@ test("AC-3.1: Verifier logic is invoked before maturity change (sanity check)", 
 		// This is a safeguard integration test.
 	} finally {
 		// Cleanup
-		await query(`DELETE FROM roadmap_proposal.proposal WHERE id = $1`, [proposalId]);
+		await query(`DELETE FROM roadmap_proposal.proposal WHERE id = $1`, [
+			proposalId,
+		]);
 	}
 });
 
@@ -399,7 +514,7 @@ test("Unknown role defaults to verified=true with warning", async () => {
 		  (status, maturity, title, type, project_id, audit)
 		  VALUES ($1, $2, $3, $4, $5, $6)
 		  RETURNING id`,
-		["Review", "new", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
+		["Review", "new", `Test Proposal ${TEST_ID}`, "feature", 1, "{}"],
 	);
 	const proposalId = proposalRes.rows[0].id;
 
@@ -412,10 +527,16 @@ test("Unknown role defaults to verified=true with warning", async () => {
 		});
 
 		// Should default to pass (unknown role = skip verification)
-		assert.strictEqual(result.verified, true, "Unknown roles should pass by default");
+		assert.strictEqual(
+			result.verified,
+			true,
+			"Unknown roles should pass by default",
+		);
 		assert.strictEqual(result.artifactType, "unknown-role");
 	} finally {
 		// Cleanup
-		await query(`DELETE FROM roadmap_proposal.proposal WHERE id = $1`, [proposalId]);
+		await query(`DELETE FROM roadmap_proposal.proposal WHERE id = $1`, [
+			proposalId,
+		]);
 	}
 });
