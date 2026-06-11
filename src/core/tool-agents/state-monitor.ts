@@ -12,14 +12,15 @@
  * against GRACE_PERIOD. Prevents race between state-monitor read and gate-agent hold write.
  *
  * AC-4: GRACE_PERIOD read from core.runtime_flag PROPOSAL_STATE_MONITOR_GRACE_PERIOD_SEC
- * (default 300 seconds, 5 min). Hot-reloadable via FeatureFlagService.
+ * (default 300 seconds, 5 min). Hot-reloadable via the core.runtime_flag TTL cache.
  *
  * AC-5: Logs all maturity decisions with clear reason strings for operator audit trail.
  */
 
 import { query } from "../../infra/postgres/pool.ts";
 import { Maturity } from "../workflow/state-names.ts";
-import { FeatureFlagService } from "../../shared/runtime/feature-flag-service.ts";
+import * as runtimeConfig from "../../shared/runtime/config.ts";
+import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 import type { ToolAgent, ToolTask, ToolResult } from "./registry.ts";
 
 interface StateMonitorConfig {
@@ -177,21 +178,15 @@ export class StateMonitor implements ToolAgent {
 	 * Uses FeatureFlagService with 5-second TTL cache.
 	 */
 	private async getGracePeriodSeconds(): Promise<number> {
+		// AC-4: core.runtime_flag PROPOSAL_STATE_MONITOR_GRACE_PERIOD_SEC,
+		// read through the runtime-config TTL cache so operators can tune it
+		// live (UPDATE core.runtime_flag SET value_jsonb='600' ...).
 		try {
-			const flagService = FeatureFlagService.getInstance();
-			const flag = await flagService.resolve(
-				"PROPOSAL_STATE_MONITOR_GRACE_PERIOD_SEC",
+			return await runtimeConfig.get(
+				FlagKeys.PROPOSAL_STATE_MONITOR_GRACE_PERIOD_SEC,
 			);
-
-			// The flag is stored as a string in variant_values; parse it
-			// For now, treat enabled flag as indicating "use the default value"
-			if (flag.enabled) {
-				return 300; // Default 5 minutes
-			}
-			return 300;
-		} catch (err) {
-			console.error(`[StateMonitor] Error reading grace period flag: ${err}`);
-			return 300; // Fail-safe: use 5-minute default
+		} catch {
+			return 300; // fail-safe default (5 min)
 		}
 	}
 

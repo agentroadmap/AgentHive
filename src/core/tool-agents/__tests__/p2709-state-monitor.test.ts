@@ -11,11 +11,9 @@
  * Live DB gated. Creates test proposals + ACs + gate decisions; cleans up.
  */
 
-import { describe, it, expect, beforeAll, afterEach } from "vitest";
-import { query } from "../infra/postgres/pool.ts";
-import { StateMonitor } from "../core/tool-agents/state-monitor.ts";
-import { FeatureFlagService } from "../shared/runtime/feature-flag-service.ts";
-import { getPool } from "../infra/postgres/pool.ts";
+import { describe, it, expect, afterEach } from "vitest";
+import { query } from "../../../infra/postgres/pool.ts";
+import { StateMonitor } from "../state-monitor.ts";
 
 const LIVE = process.env.AGENTHIVE_ALLOW_LIVE_DB === "1";
 describe.skipIf(!LIVE)("P2709 State Monitor — Gate Hold Grace Period", () => {
@@ -23,14 +21,7 @@ describe.skipIf(!LIVE)("P2709 State Monitor — Gate Hold Grace Period", () => {
 	let testProposalId2: number;
 	let testProposalId3: number;
 
-	beforeAll(async () => {
-		// Initialize FeatureFlagService for flag reads
-		try {
-			FeatureFlagService.initialize(getPool());
-		} catch {
-			// Already initialized
-		}
-	});
+
 
 	afterEach(async () => {
 		// Clean up test proposals and related rows
@@ -154,8 +145,8 @@ describe.skipIf(!LIVE)("P2709 State Monitor — Gate Hold Grace Period", () => {
 		// within default grace period of 300 seconds
 		await query(
 			`INSERT INTO roadmap.gate_decision_log
-				(proposal_id, decision, decided_by, created_at)
-			 VALUES ($1, 'hold', 'test-agent', now() - interval '10 seconds')`,
+				(proposal_id, from_state, to_state, gate, decision, decided_by, created_at)
+			 VALUES ($1, 'DEVELOP', 'DEVELOP', 'D3', 'hold', 'system', now() - interval '10 seconds')`,
 			[testProposalId2],
 		);
 
@@ -219,8 +210,8 @@ describe.skipIf(!LIVE)("P2709 State Monitor — Gate Hold Grace Period", () => {
 		// Now create a gate hold
 		await query(
 			`INSERT INTO roadmap.gate_decision_log
-				(proposal_id, decision, decided_by, created_at)
-			 VALUES ($1, 'hold', 'test-agent', now())`,
+				(proposal_id, from_state, to_state, gate, decision, decided_by, created_at)
+			 VALUES ($1, 'DEVELOP', 'DEVELOP', 'D3', 'hold', 'system', now())`,
 			[testProposalId3],
 		);
 
@@ -271,8 +262,8 @@ describe.skipIf(!LIVE)("P2709 State Monitor — Gate Hold Grace Period", () => {
 		// Insert a gate hold from 6+ minutes ago (outside 300s default grace period)
 		await query(
 			`INSERT INTO roadmap.gate_decision_log
-				(proposal_id, decision, decided_by, created_at)
-			 VALUES ($1, 'hold', 'test-agent', now() - interval '400 seconds')`,
+				(proposal_id, from_state, to_state, gate, decision, decided_by, created_at)
+			 VALUES ($1, 'DEVELOP', 'DEVELOP', 'D3', 'hold', 'system', now() - interval '400 seconds')`,
 			[testProposalId],
 		);
 
@@ -370,8 +361,8 @@ describe.skipIf(!LIVE)("P2709 State Monitor — Gate Hold Grace Period", () => {
 		// Insert a gate hold from 2 seconds ago (well within 300s grace period)
 		await query(
 			`INSERT INTO roadmap.gate_decision_log
-				(proposal_id, decision, decided_by, created_at)
-			 VALUES ($1, 'hold', 'test-agent', now() - interval '2 seconds')`,
+				(proposal_id, from_state, to_state, gate, decision, decided_by, created_at)
+			 VALUES ($1, 'DEVELOP', 'DEVELOP', 'D3', 'hold', 'system', now() - interval '2 seconds')`,
 			[testProposalId],
 		);
 
@@ -390,8 +381,8 @@ describe.skipIf(!LIVE)("P2709 State Monitor — Gate Hold Grace Period", () => {
 		// Insert hold from 400s ago (outside 300s grace period)
 		await query(
 			`INSERT INTO roadmap.gate_decision_log
-				(proposal_id, decision, decided_by, created_at)
-			 VALUES ($1, 'hold', 'test-agent', now() - interval '400 seconds')`,
+				(proposal_id, from_state, to_state, gate, decision, decided_by, created_at)
+			 VALUES ($1, 'DEVELOP', 'DEVELOP', 'D3', 'hold', 'system', now() - interval '400 seconds')`,
 			[testProposalId],
 		);
 
