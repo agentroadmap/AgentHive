@@ -414,6 +414,7 @@ export class PgProposalHandlers {
 							issuer: author,
 							rationale: summary,
 							priority: resolvedPriority,
+							conflicts: detectedConflicts,
 						}),
 					],
 				);
