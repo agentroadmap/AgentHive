@@ -62,6 +62,22 @@ function makeAgencyCandidate(
 	};
 }
 
+async function mockDispatcherQuery(sql: string) {
+	if (sql.includes("role_early_exit_predicate")) {
+		return { rows: [], rowCount: 0 };
+	}
+	if (sql.includes("roadmap_proposal.proposal")) {
+		return { rows: [], rowCount: 0 };
+	}
+	if (sql.includes("proposal_role_pause")) {
+		return {
+			rows: [{ new_failure_count: 1, pause_cycle: 1, paused: false }],
+			rowCount: 1,
+		};
+	}
+	return { rows: [], rowCount: 0 };
+}
+
 describe("OrchestratorOfferDispatcher.dispatch", () => {
 	it("sends an offer_dispatch message with claim_token and dispatch_id", async () => {
 		const { OrchestratorOfferDispatcher } = await import(
@@ -70,7 +86,6 @@ describe("OrchestratorOfferDispatcher.dispatch", () => {
 
 		const logger = makeLogger();
 		const sentMessages: unknown[] = [];
-		const routedOffers: unknown[][] = [];
 
 		const dispatcher = new OrchestratorOfferDispatcher({
 			orchestratorIdentity: "test-orchestrator",
@@ -81,10 +96,7 @@ describe("OrchestratorOfferDispatcher.dispatch", () => {
 				sentMessages.push(msg);
 			},
 			dispatch_queryAgentIdentity: async () => "agency-alpha",
-			dispatch_queryAgencyProvider: async () => "codex",
-			dispatch_markOfferRouted: async (...args) => {
-				routedOffers.push(args);
-			},
+			dispatch_query: mockDispatcherQuery,
 		});
 
 		const claim = makeClaim();
@@ -102,15 +114,10 @@ describe("OrchestratorOfferDispatcher.dispatch", () => {
 			payload.dispatch_id !== undefined,
 			"payload must include dispatch_id",
 		);
-		assert.equal(payload.route_hint, "codex");
-		assert.deepEqual(
-			routedOffers[0]?.slice(1),
-			["agency-alpha", "codex"],
-			"routed metadata should record target agency and route",
-		);
+		assert.equal(payload.route_hint, "claude");
 	});
 
-	it("honors an explicit route hint when resolving and dispatching", async () => {
+	it("honors an explicit route hint and passes role capabilities to resolver", async () => {
 		const { OrchestratorOfferDispatcher } = await import(
 			"../../src/core/orchestration/offer-dispatch.ts"
 		);
@@ -131,15 +138,14 @@ describe("OrchestratorOfferDispatcher.dispatch", () => {
 				sentMessages.push(msg);
 			},
 			dispatch_queryAgentIdentity: async () => "agency-alpha",
-			dispatch_queryAgencyProvider: async () => "codex",
-			dispatch_markOfferRouted: async () => {},
+			dispatch_query: mockDispatcherQuery,
 		});
 
 		await dispatcher.dispatch(
 			makeClaim({ metadata: { route_hint: "gemini" } }),
 		);
 
-		assert.equal(resolverArgs[0]?.[2], "gemini");
+		assert.deepEqual(resolverArgs[0]?.[2], ["develop"]);
 		const msg = sentMessages[0] as Record<string, unknown>;
 		const payload = msg.payload as Record<string, unknown>;
 		assert.equal(payload.route_hint, "gemini");
@@ -161,7 +167,7 @@ describe("OrchestratorOfferDispatcher.dispatch", () => {
 			dispatch_sendMessage: async (msg) => {
 				sentMessages.push(msg);
 			},
-			dispatch_markOfferFailed: async () => {},
+			dispatch_query: mockDispatcherQuery,
 		});
 
 		await dispatcher.dispatch(makeClaim());

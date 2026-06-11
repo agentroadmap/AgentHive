@@ -5,8 +5,7 @@ import { test } from "node:test";
 const queryCalls: Array<{ sql: string; params: unknown[] }> = [];
 let mockRows: Record<string, unknown>[] = [];
 
-const discordCalls: Array<{ from: string; message: string; level: string }> =
-	[];
+const notificationCalls: Array<Record<string, unknown>> = [];
 
 const {
 	resolveAgency,
@@ -17,7 +16,7 @@ const {
 	THROTTLE_THRESHOLD,
 	OFFLINE_ALERT_THRESHOLD_MINUTES,
 	_setQueryForTest,
-	_setDiscordForTest,
+	_setNotificationForTest,
 } = await import(
 	"../../src/core/orchestration/resolvers/agency-resolver.ts"
 );
@@ -28,8 +27,9 @@ _setQueryForTest(async (sql: string, params: unknown[] = []) => {
 	return { rows: mockRows, rowCount: mockRows.length } as any;
 });
 
-_setDiscordForTest(async (from: string, message: string, level = "info") => {
-	discordCalls.push({ from, message, level });
+_setNotificationForTest(async (args: Record<string, unknown>) => {
+	notificationCalls.push(args);
+	return notificationCalls.length;
 });
 
 test("THROTTLE_THRESHOLD is 3", () => {

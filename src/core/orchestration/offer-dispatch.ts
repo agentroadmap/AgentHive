@@ -35,6 +35,7 @@ import * as config from "../../shared/runtime/config.ts";
 import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 
 const obs = new ObservabilityWriter("agency:offer-dispatch");
+type QueryFn = typeof query;
 
 const ORCHESTRATOR_HOST = process.env.AGENTHIVE_HOST ?? hostname();
 void ORCHESTRATOR_HOST; // reserved for future host-aware agency filtering
@@ -105,6 +106,8 @@ export interface OfferDispatcherOptions {
 	dispatch_sendMessage?: typeof sendMessage;
 	/** Override for test injection — resolves agencyId → agent_identity string. */
 	dispatch_queryAgentIdentity?: (agencyId: bigint) => Promise<string | null>;
+	/** Override for test injection. */
+	dispatch_query?: QueryFn;
 }
 
 /**
@@ -118,6 +121,7 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 	private readonly briefingAssembleFn: typeof briefingAssemble;
 	private readonly sendMessageFn: typeof sendMessage;
 	private readonly queryAgentIdentityFn: (agencyId: bigint) => Promise<string | null>;
+	private readonly queryFn: QueryFn;
 
 	constructor(opts: OfferDispatcherOptions) {
 		this.orchestratorIdentity = opts.orchestratorIdentity;
@@ -126,10 +130,11 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 		this.briefingAssembleFn =
 			opts.dispatch_briefingAssemble ?? briefingAssemble;
 		this.sendMessageFn = opts.dispatch_sendMessage ?? sendMessage;
+		this.queryFn = opts.dispatch_query ?? query;
 		this.queryAgentIdentityFn =
 			opts.dispatch_queryAgentIdentity ??
 			(async (agencyId) => {
-				const { rows } = await query<{ agent_identity: string }>(
+				const { rows } = await this.queryFn<{ agent_identity: string }>(
 					`SELECT agent_identity FROM roadmap_workforce.agent_registry WHERE id = $1`,
 					[agencyId.toString()],
 				);
@@ -154,11 +159,11 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 			);
 			// P1289: record failure immediately so the dispatch-loop circuit breaker
 			// (post-work-offer.ts) can observe it without waiting for lease expiry.
-			await query(
+			await this.queryFn(
 				`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, 'failed')`,
 				[claim.dispatchId, this.orchestratorIdentity, claim.claimToken],
 			);
-			await query(
+			await this.queryFn(
 				`UPDATE roadmap_workforce.squad_dispatch
 				    SET failure_class = 'no_eligible_agency',
 				        failure_is_transient = true,
@@ -282,7 +287,7 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 	private async tryRoleEarlyExit(claim: ClaimedOffer): Promise<boolean> {
 		let predicateName: string | null = null;
 		try {
-			const { rows } = await query<{ predicate_name: string | null }>(
+			const { rows } = await this.queryFn<{ predicate_name: string | null }>(
 				`SELECT predicate_name FROM roadmap_proposal.role_early_exit_predicate
 				 WHERE role = $1`,
 				[claim.role.toLowerCase()],
@@ -304,7 +309,7 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 		let exitReason = "unknown";
 		try {
 			// Dynamically invoke the predicate function (e.g., roadmap_proposal.v_architect_early_exit)
-			const { rows } = await query<{ ok: boolean }>(
+			const { rows } = await this.queryFn<{ ok: boolean }>(
 				`SELECT ${predicateName}($1) AS ok`,
 				[claim.proposalId],
 			);
@@ -326,7 +331,7 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 
 		let agentRunId: string | null = null;
 		try {
-			const { rows } = await query<{ id: number }>(
+			const { rows } = await this.queryFn<{ id: number }>(
 				`INSERT INTO agent_runs
 				   (proposal_id, display_id, agent_identity, stage, model_used,
 				    status, activity, started_at)
@@ -336,7 +341,7 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 				[claim.proposalId, this.orchestratorIdentity, claim.role],
 			);
 			agentRunId = String(rows[0].id);
-			await query(
+			await this.queryFn(
 				`UPDATE agent_runs
 				    SET status         = 'completed',
 				        duration_ms    = 0,
@@ -352,7 +357,7 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 			);
 		}
 
-		await query(
+		await this.queryFn(
 			`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, 'success')`,
 			[claim.dispatchId, this.orchestratorIdentity, claim.claimToken],
 		);
@@ -371,7 +376,7 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 		let projectId = extractProjectId(claim.metadata);
 		if (!projectId && claim.proposalId) {
 			try {
-				const { rows } = await query<{ project_id: number | null }>(
+				const { rows } = await this.queryFn<{ project_id: number | null }>(
 					`SELECT project_id FROM roadmap_proposal.proposal WHERE id = $1`,
 					[claim.proposalId],
 				);
@@ -390,7 +395,6 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 		const candidate = await this.resolveAgencyFn(
 			projectId ?? "",
 			claim.role,
-			undefined,
 			requiredCaps,
 		);
 		if (!candidate) return null;
@@ -447,7 +451,7 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 		dispatchId: number,
 	): Promise<void> {
 		// First attempt: INSERT or increment failure_count if already exists.
-		const { rows } = await query<{
+		const { rows } = await this.queryFn<{
 			new_failure_count: number;
 			pause_cycle: number;
 			paused: boolean;
@@ -472,18 +476,17 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 
 		const newFailureCount = row.new_failure_count;
 		const pauseCycle = row.pause_cycle;
-		const wasUpdate = row.paused; // true if ON CONFLICT branch executed
 
 		// If we hit the threshold, update expires_at to activate the pause.
 		if (newFailureCount >= threshold) {
 			// Compute expiry: BASE * 2^(cycle - 1), capped at MAX.
 			const expiryMs = Math.min(
-				baseBackoffMs * Math.pow(multiplier, pauseCycle - 1),
+				baseBackoffMs * multiplier ** (pauseCycle - 1),
 				maxBackoffMs,
 			);
 			const expiryInterval = `${expiryMs} milliseconds`;
 
-			await query(
+			await this.queryFn(
 				`UPDATE roadmap_workforce.proposal_role_pause
 				   SET expires_at = now() + $1::interval,
 				       failure_count = 0,
@@ -493,7 +496,7 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 			);
 
 			// Emit NOTIFY for dashboard/operator visibility.
-			await query(`SELECT pg_notify('proposal_role_paused', $1)`, [
+			await this.queryFn(`SELECT pg_notify('proposal_role_paused', $1)`, [
 				JSON.stringify({
 					proposal_id: proposalId,
 					role,

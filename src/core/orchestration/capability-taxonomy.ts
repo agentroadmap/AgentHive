@@ -49,6 +49,18 @@ export const CAPABILITY_TAXONOMY = {
   provider: "Preferred LLM provider (claude, codex, gemini, etc.)",
 } as const;
 
+function normalizeCapabilities(
+  value: unknown,
+): Record<string, unknown> | null {
+  if (Array.isArray(value)) {
+    return { jobs: value };
+  }
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
 /**
  * Validate that required_capabilities conform to the taxonomy.
  * Returns { valid: true } or { valid: false, errors: string[] }.
@@ -59,11 +71,11 @@ export const CAPABILITY_TAXONOMY = {
 export function validateCapabilitiesAgainstTaxonomy(
   requiredCapabilities: unknown,
 ): { valid: boolean; errors: string[] } {
-  if (!requiredCapabilities || typeof requiredCapabilities !== "object") {
+  const obj = normalizeCapabilities(requiredCapabilities);
+  if (!obj) {
     return { valid: true, errors: [] };
   }
 
-  const obj = requiredCapabilities as Record<string, unknown>;
   const errors: string[] = [];
 
   // Check top-level keys
@@ -132,18 +144,13 @@ export function isCapabilitySubsetMatch(
   agencyCapabilities: unknown,
   requiredCapabilities: unknown,
 ): boolean {
+  const agency = normalizeCapabilities(agencyCapabilities);
+  const required = normalizeCapabilities(requiredCapabilities);
+
   // Treat missing capabilities as "no constraints"
-  if (
-    !agencyCapabilities ||
-    typeof agencyCapabilities !== "object" ||
-    !requiredCapabilities ||
-    typeof requiredCapabilities !== "object"
-  ) {
+  if (!agency || !required) {
     return true;
   }
-
-  const agency = agencyCapabilities as Record<string, unknown>;
-  const required = requiredCapabilities as Record<string, unknown>;
 
   // Check jobs: agency must have all required jobs
   if (Array.isArray(required.jobs)) {
@@ -178,17 +185,12 @@ export function describeMissingCapabilities(
   agencyCapabilities: unknown,
   requiredCapabilities: unknown,
 ): string {
-  if (
-    !agencyCapabilities ||
-    typeof agencyCapabilities !== "object" ||
-    !requiredCapabilities ||
-    typeof requiredCapabilities !== "object"
-  ) {
+  const agency = normalizeCapabilities(agencyCapabilities);
+  const required = normalizeCapabilities(requiredCapabilities);
+
+  if (!agency || !required) {
     return "no capability constraints";
   }
-
-  const agency = agencyCapabilities as Record<string, unknown>;
-  const required = requiredCapabilities as Record<string, unknown>;
   const missing: string[] = [];
 
   // Missing jobs

@@ -17,7 +17,10 @@
  */
 
 import { query as _pgQuery } from "../../../infra/postgres/pool.ts";
-import { enqueueNotification } from "../../notifications/enqueue.ts";
+import {
+	enqueueNotification as _enqueueNotification,
+	type EnqueueArgs,
+} from "../../notifications/enqueue.ts";
 
 export const THROTTLE_THRESHOLD = 3; // failures before throttled
 export const DORMANT_SILENCE_MINUTES = 5;
@@ -34,6 +37,12 @@ function query(...args: Parameters<QueryFn>) {
 	return _query(...args);
 }
 
+type EnqueueNotificationFn = (args: EnqueueArgs) => Promise<number>;
+let enqueueNotification: EnqueueNotificationFn = _enqueueNotification;
+export function _setNotificationForTest(fn: EnqueueNotificationFn): void {
+	enqueueNotification = fn;
+}
+
 export interface AgencyCandidate {
 	id: bigint;
 	agencyId: bigint;
@@ -46,6 +55,19 @@ export interface AgencyCandidate {
 	inFlightCount: number;
 	/** P1351 AC-6: agency chain for nested agencies [parent_id, ..., leaf_id] */
 	agencyChain?: string[];
+}
+
+interface AgencyResolverRow {
+	id: string | number | bigint;
+	agency_id: string | number | bigint;
+	project_id: string | null;
+	capabilities: Record<string, unknown>;
+	status: string;
+	throttle_count: number;
+	last_seen_at: Date | null;
+	max_in_flight: number;
+	agency_identity: string;
+	in_flight_count: string | number;
 }
 
 /**
@@ -108,66 +130,74 @@ export async function resolveAgency(
 	// re-dispatch them — they must never be a dispatch target.
 	// Belt-and-suspenders against status drift: the resolver checks
 	// provider_registry.status, but operators retire via roadmap.agency.status.
-	// LEFT JOIN agency lets retired agencies be excluded even if their
-	// provider_registry.status hasn't been synced. Legacy registry rows
-	// without a matching agency row (a.status IS NULL) continue to qualify.
-	const { rows } = await query(
+	// A dispatch target must have a registered roadmap.agency row; registry-only
+	// identities are not bootable by the liaison layer.
+	const { rows } = await query<AgencyResolverRow>(
 		`SELECT pr.id, pr.agency_id, pr.project_id, pr.capabilities,
 		        pr.status, pr.throttle_count, pr.last_seen_at, pr.max_in_flight,
 		        pr.agency_identity,
 		        COALESCE(inf.in_flight_count, 0) AS in_flight_count
 		 FROM roadmap_workforce.provider_registry pr
 		 JOIN roadmap_workforce.agent_registry ar ON ar.id = pr.agency_id
-		 LEFT JOIN roadmap.agency a ON a.agency_id = ar.agent_identity
+		 JOIN roadmap.agency a ON a.agency_id = ar.agent_identity
 		 LEFT JOIN roadmap_workforce.v_agency_in_flight inf
 		   ON inf.provider_registry_id = pr.id
 		 WHERE pr.status NOT IN ('offline', 'retired')
-		   AND (a.status IS NULL OR a.status <> 'retired')
+		   AND a.status NOT IN ('offline', 'retired')
 		   AND ar.agent_type <> 'coordinator'
 		   AND ar.agent_identity NOT LIKE 'test/%'
 		   AND (pr.project_id IS NULL OR pr.project_id = $1)
 		   AND COALESCE(inf.in_flight_count, 0) < pr.max_in_flight
 		 ORDER BY pr.throttle_count ASC, pr.last_seen_at DESC NULLS LAST
-		 LIMIT 1`,
+		 LIMIT 50`,
 		[projectId],
 	);
 
 	if (!rows.length) return null;
 
-	const row = rows[0];
-
 	// V3-C8 (P1440): Apply capability subset matching if required_capabilities are specified.
 	if (requiredCapabilities) {
+		const capabilityTaxonomy = await import("../capability-taxonomy.ts");
 		const {
 			isCapabilitySubsetMatch,
 			describeMissingCapabilities,
-		} = await import("../capability-taxonomy.ts");
+		} = capabilityTaxonomy.default ?? capabilityTaxonomy;
 
-		if (!isCapabilitySubsetMatch(row.capabilities, requiredCapabilities)) {
-			// Log escalation for operator visibility
-			const reason = describeMissingCapabilities(
-				row.capabilities,
-				requiredCapabilities,
-			);
-			try {
-				await query(
-					`INSERT INTO roadmap.escalation_log
-					 (obstacle_type, agent_identity, escalated_to, severity, resolution_note)
-					 VALUES ('CAPABILITY_MISMATCH', $1, 'orchestrator', 'medium', $2)`,
-					[row.agency_identity, reason],
-				);
-			} catch (err) {
-				// Non-blocking: escalation log failure does not block dispatch
-				console.warn(
-					`[agency-resolver] Failed to write CAPABILITY_MISMATCH escalation:`,
-					err,
-				);
-			}
-			// Agency does not meet capability requirements
-			return null;
+		const row = rows.find((candidate) =>
+			isCapabilitySubsetMatch(candidate.capabilities, requiredCapabilities),
+		);
+		if (row) {
+			return buildCandidate(row);
 		}
+
+		// Log one escalation for the best-ranked candidate so operators can see
+		// why otherwise-live agencies were skipped.
+		const top = rows[0];
+		const reason = describeMissingCapabilities(
+			top.capabilities,
+			requiredCapabilities,
+		);
+		try {
+			await query(
+				`INSERT INTO roadmap.escalation_log
+				 (obstacle_type, agent_identity, escalated_to, severity, resolution_note)
+				 VALUES ('CAPABILITY_MISMATCH', $1, 'orchestrator', 'medium', $2)`,
+				[top.agency_identity, reason],
+			);
+		} catch (err) {
+			// Non-blocking: escalation log failure does not block dispatch
+			console.warn(
+				`[agency-resolver] Failed to write CAPABILITY_MISMATCH escalation:`,
+				err,
+			);
+		}
+		return null;
 	}
 
+	return buildCandidate(rows[0]);
+}
+
+async function buildCandidate(row: AgencyResolverRow): Promise<AgencyCandidate> {
 	// P1351 AC-6: build agency chain for nested agencies
 	const agencyChain = await buildAgencyChain(row.agency_identity);
 

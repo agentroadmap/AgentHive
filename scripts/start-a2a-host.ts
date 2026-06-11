@@ -248,22 +248,27 @@ async function loadActiveAgencies(): Promise<AgencyRow[]> {
 	let filterSql = "";
 	if (includeList.length > 0) {
 		params.push(includeList);
-		filterSql += ` AND agent_identity = ANY($${params.length}::text[])`;
+		filterSql += ` AND ar.agent_identity = ANY($${params.length}::text[])`;
 	}
 	if (excludeList.length > 0) {
 		params.push(excludeList);
-		filterSql += ` AND agent_identity <> ALL($${params.length}::text[])`;
+		filterSql += ` AND ar.agent_identity <> ALL($${params.length}::text[])`;
 	}
 
 	const { rows } = await query<AgencyRow>(
-		`SELECT agent_identity, preferred_provider
-		   FROM roadmap_workforce.agent_registry
-		  WHERE (host_affinity = $1 OR host_affinity IS NULL OR host_affinity = '')
-		    AND agent_type    IN ('agency', 'llm')
-		    AND status        IN ('active','dormant')
-		    AND coalesce(preferred_provider, '') <> ''
+		`SELECT DISTINCT ar.agent_identity, ar.preferred_provider
+		   FROM roadmap_workforce.agent_registry ar
+		   JOIN roadmap.agency a ON a.agency_id = ar.agent_identity
+		   JOIN roadmap_workforce.provider_registry pr ON pr.agency_id = ar.id
+		  WHERE (ar.host_affinity = $1 OR ar.host_affinity IS NULL OR ar.host_affinity = '')
+		    AND ar.agent_type    IN ('agency', 'llm')
+		    AND ar.status        IN ('active','dormant')
+		    AND a.status         IN ('active','dormant')
+		    AND pr.status        NOT IN ('offline','retired')
+		    AND pr.is_active     = true
+		    AND coalesce(ar.preferred_provider, '') <> ''
 		    ${filterSql}
-		  ORDER BY agent_identity`,
+		  ORDER BY ar.agent_identity`,
 		params,
 	);
 	if (includeList.length > 0 || excludeList.length > 0) {
