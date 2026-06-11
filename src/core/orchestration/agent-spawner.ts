@@ -450,6 +450,7 @@ function buildClaudeArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
 	const argv = [
 		route.cliPath ?? "claude",
 		"--print", // non-interactive: print response and exit
+		"--dangerously-skip-permissions", // spawned agents need Write/Bash to do real work
 		"--model",
 		route.modelName,
 		req.task,
