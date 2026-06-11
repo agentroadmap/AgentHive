@@ -1273,6 +1273,9 @@ export class RoadmapServer {
 				if (parts.length === 5 && parts[4] === "demote") {
 					if (method === "POST") return await this.handleDemoteProposal(id);
 				}
+				if (parts.length === 5 && parts[4] === "schema-drift-resolve") {
+					if (method === "POST") return await this.handleSchemaDriftResolve(req, id);
+				}
 			}
 
 			// GET /api/proposals/:id/notes - Discussion notes for a proposal
@@ -2191,6 +2194,49 @@ export class RoadmapServer {
 			const message =
 				error instanceof Error ? error.message : "Failed to demote proposal";
 			console.error("Error demoting proposal:", error);
+			return Response.json({ error: message }, { status: 500 });
+		}
+	}
+
+	private async handleSchemaDriftResolve(
+		req: Request,
+		proposalId: string,
+	): Promise<Response> {
+		try {
+			const body = await req.json();
+			const fingerprint = body.fingerprint;
+
+			if (!fingerprint) {
+				return Response.json(
+					{ error: "fingerprint is required" },
+					{ status: 400 },
+				);
+			}
+
+			// Get agenthive database connection (P674, P675 create tables here)
+			const result = await this.db.query(
+				`UPDATE roadmap.schema_drift_seen
+         SET resolved_at = now()
+         WHERE fingerprint = $1 AND hotfix_proposal_id = $2`,
+				[fingerprint, proposalId],
+			);
+
+			if (result.rowCount === 0) {
+				return Response.json(
+					{ error: "No matching schema drift record found" },
+					{ status: 404 },
+				);
+			}
+
+			// Broadcast update to clients
+			this.broadcastProposalsUpdated();
+			return Response.json({ success: true, resolved: true });
+		} catch (error) {
+			const message =
+				error instanceof Error
+					? error.message
+					: "Failed to resolve schema drift";
+			console.error("Error resolving schema drift:", error);
 			return Response.json({ error: message }, { status: 500 });
 		}
 	}
