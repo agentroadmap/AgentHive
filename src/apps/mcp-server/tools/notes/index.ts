@@ -18,7 +18,7 @@ export function registerNoteTools(
 		{
 			name: "create_note",
 			description:
-				"Create a note/discussion/review attached to a proposal. Supports markdown content and multiple note types (discussion, review, decision, question, general).",
+				"Create a note/discussion/review attached to a proposal. Supports markdown content and multiple note types (discussion, review, decision, question, general). Content must be non-empty; empty or whitespace-only content is rejected (P1371).",
 			inputSchema: noteCreateSchema,
 		},
 		noteCreateSchema,
