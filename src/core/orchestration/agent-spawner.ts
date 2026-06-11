@@ -42,6 +42,7 @@ import {
 } from "./provider-cooldown.ts";
 import { HotfixStates, RfcStates, isTerminal } from "../workflow/state-names.ts";
 import { isWithinCapacity } from "./resolvers/capacity-guard.ts";
+import { checkAgencyCapacity } from "./capacity-filter.ts";
 import { sanitizeExtraEnv } from "./spawn-env-sanitizer.ts";
 import {
 	buildBaseName,
@@ -1587,6 +1588,23 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	}
 	// P245: enforce host-level spawn policy before launching any CLI subprocess.
 	await assertSpawnAllowed(AGENTHIVE_HOST, route, proposalId, worktree);
+
+	// P1365-AC4/AC8: Check agency capacity for the resolved provider/model
+	// Reject hard-throttled agencies; soft-throttled ones proceed but with audit log
+	if (req.agencyIdentity) {
+		const { isHardThrottled } = await checkAgencyCapacity(
+			req.agencyIdentity,
+			route.agentProvider,
+			route.modelName,
+			req.projectId,
+		);
+		if (isHardThrottled) {
+			throw new Error(
+				`[P1365] Cannot spawn agent: agency "${req.agencyIdentity}" is hard-throttled for ${route.agentProvider}/${route.modelName}. Requests are being rate-limited; retrying in ~${route.modelName} reset window.`,
+			);
+		}
+	}
+
 	const agentEnv = await loadEnvAgent(worktree, worktreeRoot);
 	let assembledTask = task;
 

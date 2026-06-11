@@ -169,3 +169,42 @@ export async function isModelInCooldown(
 	);
 	return rows[0]?.in_cooldown ?? false;
 }
+
+/**
+ * P1365-AC9: Apply soft-throttle backoff to model_routes.cooldown_until.
+ * When an agency enters soft-throttle state (headroom < 25%), apply a cooldown
+ * proportional to the headroom level so the route is deprioritized until capacity recovers.
+ * Uses GREATEST() to preserve longer existing windows from P1359 quota cooldowns.
+ *
+ * Headroom ranges map to cooldown windows:
+ * - 20-25%: 30 seconds (gentle backoff)
+ * - 10-20%: 2 minutes (moderate backoff)
+ * - <10%: 5 minutes (aggressive backoff)
+ */
+export async function setSoftThrottleCooldown(
+	routeProvider: string,
+	modelName: string,
+	headroomPct: number | null,
+): Promise<void> {
+	if (headroomPct === null || headroomPct === undefined || headroomPct >= 25) {
+		// No throttle needed if headroom is healthy
+		return;
+	}
+
+	// Map headroom ranges to cooldown windows
+	let cooldownMinutes: number;
+	if (headroomPct >= 20) {
+		cooldownMinutes = 0.5; // 30 seconds
+	} else if (headroomPct >= 10) {
+		cooldownMinutes = 2; // 2 minutes
+	} else {
+		cooldownMinutes = 5; // 5 minutes
+	}
+
+	await query(
+		`UPDATE roadmap.model_routes
+	     SET cooldown_until = GREATEST(COALESCE(cooldown_until, 'epoch'::timestamptz), NOW() + interval '${cooldownMinutes} minutes')
+	     WHERE route_provider = $1 AND model_name = $2`,
+		[routeProvider, modelName],
+	);
+}
