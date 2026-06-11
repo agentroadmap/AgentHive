@@ -55,6 +55,17 @@ interface Violation {
 	context: string;
 }
 
+// P677 AC-19: unparseable/unanalyzable SQL fragments are reported as warn
+// lines in the JSON output but never affect the exit code — only schema
+// mismatches (Violation) cause exit 1.
+interface AuditWarning {
+	level: "warn";
+	file: string;
+	line: number;
+	reason: string;
+	context: string;
+}
+
 function parseArgs(argv: string[]): { paths: string[]; verbose: boolean } {
 	const paths: string[] = [];
 	let verbose = false;
@@ -76,6 +87,16 @@ function parseArgs(argv: string[]): { paths: string[]; verbose: boolean } {
 }
 
 function* walkFiles(start: string): Generator<string> {
+	// A --paths argument may be a single file, not a directory (AC-19 fixture
+	// runs use this); readdirSync on a file throws and used to silently skip it.
+	try {
+		if (fs.statSync(start).isFile()) {
+			if (FILE_EXTS.test(path.basename(start))) yield start;
+			return;
+		}
+	} catch {
+		return;
+	}
 	const stack = [start];
 	while (stack.length) {
 		const dir = stack.pop()!;
@@ -357,6 +378,7 @@ async function main(): Promise<void> {
 	const allow = loadAllowlist();
 
 	const violations: Violation[] = [];
+	const warnings: AuditWarning[] = [];
 	let scannedFiles = 0;
 	let scannedBlocks = 0;
 	let scannedColumns = 0;
@@ -370,7 +392,39 @@ async function main(): Promise<void> {
 			const blocks = extractSqlBlocks(file, source);
 			for (const blk of blocks) {
 				scannedBlocks++;
-				const candidates = extractCandidates(blk.body, index);
+				// AC-19: a structurally truncated fragment (unbalanced parens —
+				// typical of concatenated/interpolated SQL) cannot be analyzed
+				// reliably; report it as a warn and skip, never fail on it.
+				let depth = 0;
+				for (const ch of blk.body) {
+					if (ch === "(") depth++;
+					else if (ch === ")") depth--;
+				}
+				if (depth !== 0) {
+					warnings.push({
+						level: "warn",
+						file: path.relative(ROOT, blk.file),
+						line: blk.startLine,
+						reason: `unparseable SQL fragment: unbalanced parentheses (depth ${depth})`,
+						context: blk.body.slice(0, 120).replace(/\s+/g, " "),
+					});
+					continue;
+				}
+				let candidates: ReturnType<typeof extractCandidates>;
+				try {
+					candidates = extractCandidates(blk.body, index);
+				} catch (err) {
+					// AC-19: a fragment the analyzer cannot parse is a warn,
+					// never a failure (regex analyzer v1; WASM parser is v2).
+					warnings.push({
+						level: "warn",
+						file: path.relative(ROOT, blk.file),
+						line: blk.startLine,
+						reason: `unparseable SQL fragment: ${(err as Error).message}`,
+						context: blk.body.slice(0, 120).replace(/\s+/g, " "),
+					});
+					continue;
+				}
 				for (const [, c] of candidates) {
 					scannedColumns++;
 					// Try each candidate qualifier as table or schema.table.
@@ -406,6 +460,12 @@ async function main(): Promise<void> {
 	console.log(
 		`audit-sql-columns: scanned ${scannedFiles} files, ${scannedBlocks} SQL blocks, ${scannedColumns} qualified column refs.`,
 	);
+
+	// AC-19: warn lines appear in the JSON report but never flip the exit code.
+	if (warnings.length > 0) {
+		console.log(`audit-sql-columns: ${warnings.length} warn(s) — unparseable fragments skipped:`);
+		console.log(JSON.stringify(warnings, null, 2));
+	}
 
 	if (violations.length === 0) {
 		console.log("audit-sql-columns: no unknown column references found.");
