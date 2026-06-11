@@ -144,15 +144,11 @@ async function fetchPeers(
             WHERE (sd.worker_identity = ar.agent_identity
                    OR sd.agent_identity = ar.agent_identity)
               AND sd.dispatch_status IN ('assigned','active','blocked','posted','claimed','running','retry_wait')
+              AND sd.offer_status NOT IN ('expired','failed','cancelled')
               AND sd.project_id = ar.project_id),
            0
          ) AS active_claim_count,
-         ARRAY(
-           SELECT DISTINCT ac.capability
-           FROM roadmap_workforce.agent_capability ac
-           WHERE ac.agent_id = ar.id
-           ORDER BY ac.capability
-         ) AS capabilities
+         ar.capabilities
       FROM roadmap_workforce.v_liaison_context ar
       LEFT JOIN roadmap_workforce.agency_capacity ac_cap ON ac_cap.agency_id = ar.agent_identity
       WHERE ar.project_id = $1 AND ar.agent_identity <> $2`,
@@ -174,7 +170,7 @@ export async function hydrateLiaisonContext(
 		// Query 1: self-record from v_liaison_context
 		const selfResult = await query(
 			`SELECT
-         agency_identity, agency_style, llm_variant, provider, host_id, project_id,
+         agent_identity AS agency_identity, agency_style, llm_variant, provider, host_id, project_id,
          presence_state, last_heartbeat_at, provider_cooldown_until,
          requests_remaining, tokens_remaining, capacity_reset_at, throttle_action, capacity_last_sampled_at,
          spent_today_usd, spent_week_usd, cumulative_usd, daily_cap_usd,
@@ -241,15 +237,15 @@ export async function hydrateLiaisonContext(
 			},
 
 			spending: {
-				spent_today_usd: self.spent_today_usd,
-				spent_week_usd: self.spent_week_usd,
-				cumulative_usd: self.cumulative_usd,
-				daily_cap_usd: self.daily_cap_usd,
+				spent_today_usd: Number(self.spent_today_usd ?? 0),
+				spent_week_usd: Number(self.spent_week_usd ?? 0),
+				cumulative_usd: Number(self.cumulative_usd ?? 0),
+				daily_cap_usd: self.daily_cap_usd != null ? Number(self.daily_cap_usd) : null,
 			},
 
 			capabilities: self.capabilities ?? [],
-			max_concurrent_claims: self.max_concurrent_claims,
-			active_claim_count: self.active_claim_count,
+			max_concurrent_claims: Number(self.max_concurrent_claims),
+			active_claim_count: Number(self.active_claim_count),
 
 			paused_proposal_roles: pausedRoles,
 			peers,

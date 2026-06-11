@@ -450,6 +450,7 @@ function buildClaudeArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
 	const argv = [
 		route.cliPath ?? "claude",
 		"--print", // non-interactive: print response and exit
+		"--dangerously-skip-permissions", // spawned agents need Write/Bash to do real work
 		"--model",
 		route.modelName,
 		req.task,
@@ -2221,18 +2222,13 @@ function runProcess(
 		let stdout = "";
 		let stderr = "";
 
-		child.stdout?.on("data", (d: Buffer) => {
-			stdout += d.toString();
-		});
-		child.stderr?.on("data", (d: Buffer) => {
-			stderr += d.toString();
-		});
-
 		// P1730 AC-1: instrument MCP init with separate timeout
+		// Must be set up BEFORE attaching stdout/stderr listeners so we can
+		// disarm the timeout on first stdout (model responding = MCP init done).
 		let cleanupMcpTimeout: (() => void) | null = null;
 		if (opts?.agentRunId && opts?.worktree && env.MCP_URL) {
 			const mcpConnectTimeout = Number(
-				env.AGENTHIVE_MCP_CONNECT_TIMEOUT_MS ?? "90000",
+				process.env.AGENTHIVE_MCP_CONNECT_TIMEOUT_MS ?? "90000",
 			);
 			console.error(
 				`[AgentSpawner] P1730: MCP connect timeout enabled: ${mcpConnectTimeout}ms`,
@@ -2244,6 +2240,19 @@ function runProcess(
 				mcpConnectTimeout,
 			);
 		}
+
+		child.stdout?.on("data", (d: Buffer) => {
+			stdout += d.toString();
+			// First stdout means the model is responding — MCP init must have succeeded.
+			// Disarm the MCP init timeout so a slow-but-working spawn isn't killed early.
+			if (cleanupMcpTimeout) {
+				cleanupMcpTimeout();
+				cleanupMcpTimeout = null;
+			}
+		});
+		child.stderr?.on("data", (d: Buffer) => {
+			stderr += d.toString();
+		});
 
 		if (stdin !== undefined) {
 			child.stdin?.end(stdin);

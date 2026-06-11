@@ -491,7 +491,7 @@ async function matchAgentsForState(state: string): Promise<MatchedAgent[]> {
 				score: scoreAgentForRole(a, slot),
 				activity: slot.activity,
 			}))
-			.filter((s) => s.score > 0) // must have at least some capability match
+			.filter((s) => s.score > 0 || slot.requiredCapabilities.length === 0) // empty requirements = any agent eligible
 			.sort((a, b) => b.score - a.score);
 
 		// Pick top N agents for this slot
@@ -1797,6 +1797,7 @@ async function claimImplicitGateReady(
            FROM roadmap_proposal.proposal_lease pl
           WHERE pl.proposal_id = p.id
             AND pl.released_at IS NULL
+            AND (pl.expires_at IS NULL OR pl.expires_at > now())
           ORDER BY pl.claimed_at DESC
           LIMIT 1
        ) lease ON true
