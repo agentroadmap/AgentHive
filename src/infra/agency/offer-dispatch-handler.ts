@@ -43,7 +43,7 @@ import {
 	recordProviderHardLimit,
 } from "./subscription-policy.ts";
 import { recordSpawnUsage } from "./record-spawn-usage.ts";
-import { classifyExit, detectProviderQuotaSignal } from "../../core/orchestration/agent-spawner.ts";
+import { classifyExit } from "../../core/orchestration/agent-spawner.ts";
 
 const obs = new ObservabilityWriter("agency:offer-dispatch-handler");
 
