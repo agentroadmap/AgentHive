@@ -113,9 +113,9 @@ describe("P1859 → P1699 Integration Demo (unit-only, no live DB)", () => {
 		});
 
 		it("should handle quota exhaustion (quota limiting factor)", () => {
-			// Scenario: Quota remaining is very low
-			const quota_remaining = 100; // tokens (low!)
-			const quota_limit = 200000;
+			// Scenario: Quota remaining is very low, making it the binding constraint
+			const quota_remaining = 8; // Only 8% left (very tight!)
+			const quota_limit = 100; // percentage scale
 			const max_in_flight = 10;
 			const target_quota_pct = 0.80;
 
@@ -132,7 +132,8 @@ describe("P1859 → P1699 Integration Demo (unit-only, no live DB)", () => {
 			});
 
 			// When quota is low, effective_cap is limited by quota, not max_in_flight
-			expect(effective_cap).toBe(Math.floor(100 * 0.8)); // 80 tokens
+			// floor(8 * 0.80) = floor(6.4) = 6
+			expect(effective_cap).toBe(6);
 			expect(effective_cap).toBeLessThan(max_in_flight);
 		});
 

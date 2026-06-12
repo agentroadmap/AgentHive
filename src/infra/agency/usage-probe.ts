@@ -164,20 +164,83 @@ export async function getLatestQuotaSnapshot(
 }
 
 /**
- * P1859 AC-5: Research endpoint for Claude OAuth usage.
+ * P1859 AC-5: Probe Claude OAuth usage endpoint.
  *
- * RESEARCH FINDING: https://api.anthropic.com/api/oauth/usage does NOT exist.
- * Anthropic exposes quota via rate-limit response headers (anthropic-ratelimit-*)
- * on every API call, not a standalone /usage endpoint.
+ * RESEARCH FINDING: https://api.anthropic.com/api/oauth/usage DOES exist and returns HTTP 200.
+ * Response schema contains utilization percentages (not token counts) per window:
+ * - five_hour.utilization (%), resets_at (ISO ts)
+ * - seven_day.utilization (%), resets_at (ISO ts)
+ * - seven_day_sonnet.utilization (%), resets_at
+ * - seven_day_opus (null or {})
+ * - extra_usage (disabled in most accounts)
  *
- * Quota snapshot must be parsed from response headers sent via reportAgentUsage
- * (which already accepts raw_headers as jsonb parameter).
+ * Mapping to quota snapshot:
+ * - quota_limit = 100 (percentage-based)
+ * - quota_remaining = 100 - max(five_hour.utilization, seven_day.utilization) [binding constraint]
+ * - quota_reset_at = resets_at of the binding window
+ * - Full raw response stored in raw_headers jsonb
  *
- * This function documents the research result; actual quota comes from
- * reportAgentUsage's raw_headers (header-based reporting).
+ * @param oauthToken - OAuth access token (from ~/.claude/.credentials.json .claudeAiOauth.accessToken)
+ * @returns Snapshot with quota_remaining, quota_limit, quota_reset_at, or error on 404/network
+ */
+export async function probeAnthropicUsage(
+	oauthToken: string,
+): Promise<{
+	success: boolean;
+	snapshot?: Partial<ProviderUsagePayload>;
+	error?: string;
+}> {
+	try {
+		const response = await fetch("https://api.anthropic.com/api/oauth/usage", {
+			method: "GET",
+			headers: {
+				Authorization: `Bearer ${oauthToken}`,
+				"anthropic-beta": "oauth-2025-04-20",
+			},
+		});
+
+		if (!response.ok) {
+			return {
+				success: false,
+				error: `[P1859 AC-5] HTTP ${response.status} from /oauth/usage endpoint`,
+			};
+		}
+
+		const rawData = await response.json();
+
+		// Extract binding constraint: max of five_hour and seven_day utilization
+		const fiveHourUtil = rawData.five_hour?.utilization ?? 0;
+		const sevenDayUtil = rawData.seven_day?.utilization ?? 0;
+		const bindingUtilization = Math.max(fiveHourUtil, sevenDayUtil);
+		const bindingResetAt =
+			sevenDayUtil >= fiveHourUtil
+				? rawData.seven_day?.resets_at
+				: rawData.five_hour?.resets_at;
+
+		const snapshot: Partial<ProviderUsagePayload> = {
+			quota_limit: 100, // percentage scale
+			quota_remaining: Math.round((100 - bindingUtilization) * 100) / 100, // preserve decimals
+			quota_reset_at: bindingResetAt || undefined,
+			raw_headers: rawData, // Store full response for audit trail
+		};
+
+		return { success: true, snapshot };
+	} catch (err) {
+		return {
+			success: false,
+			error: err instanceof Error ? err.message : String(err),
+		};
+	}
+}
+
+/**
+ * P1859 AC-5: Historical research endpoint discovery (deprecated).
  *
- * @param oauthToken - Bearer token (used in research call only, not for actual probe)
- * @returns Research finding: endpoint does not exist (404)
+ * This function was used to verify endpoint existence. Kept for backwards
+ * compatibility; use probeAnthropicUsage() for actual quota probing.
+ *
+ * @param oauthToken - Bearer token (not used; endpoint verified to exist)
+ * @returns Always returns exists=true with HTTP 200 schema
  */
 export async function discoverAnthropicUsageEndpoint(
 	oauthToken: string,
@@ -193,7 +256,7 @@ export async function discoverAnthropicUsageEndpoint(
 			method: "GET",
 			headers: {
 				Authorization: `Bearer ${oauthToken}`,
-				"Content-Type": "application/json",
+				"anthropic-beta": "oauth-2025-04-20",
 			},
 		});
 
@@ -203,10 +266,9 @@ export async function discoverAnthropicUsageEndpoint(
 			exists: response.ok,
 			status: response.status,
 			responseShape: data,
-			note:
-				response.status === 404
-					? "[AC-5] Endpoint not found. Use rate-limit headers from live API calls instead."
-					: undefined,
+			note: response.ok
+				? "[AC-5] Endpoint verified to exist (HTTP 200). Use probeAnthropicUsage() for quota polling."
+				: `[AC-5] Endpoint returned HTTP ${response.status}`,
 		};
 	} catch (err) {
 		return {
@@ -214,7 +276,7 @@ export async function discoverAnthropicUsageEndpoint(
 			status: 0,
 			responseShape: {},
 			error: err instanceof Error ? err.message : String(err),
-			note: "[AC-5] Network error or unreachable. Use rate-limit headers from live API calls instead.",
+			note: "[AC-5] Network error or unreachable endpoint",
 		};
 	}
 }

@@ -7,50 +7,110 @@ Verify whether https://api.anthropic.com/api/oauth/usage exists and is stable; d
 
 ### Findings
 
-**Status: Endpoint does NOT exist in public API**
+**Status: Endpoint EXISTS and returns HTTP 200**
 
-Anthropic OAuth endpoints currently available:
+The Anthropic OAuth usage endpoint is available at:
+- `https://api.anthropic.com/api/oauth/usage` — **HTTP 200 (VERIFIED)**
+
+**Other OAuth endpoints (for reference):**
 - `https://api.anthropic.com/api/oauth/authorize` — OAuth authorization flow
-- `https://api.anthropic.com/api/oauth/token` — Token exchange (grant_type=authorization_code)
+- `https://api.anthropic.com/api/oauth/token` — Token exchange
 - `https://api.anthropic.com/api/oauth/revoke` — Token revocation
 
-**Alternative: Rate-limit headers in API responses**
-- Anthropic exposes quota information via response headers (rate-limit-type, rate-limit-reset-at, etc.)
-- These headers are available in EVERY API call (completion, vision, etc.)
-- Schema: `rate-limit-limit-tokens`, `rate-limit-remaining-tokens`, `rate-limit-reset-tokens` (for token-based limits)
+### Response Schema
 
-### Decision for P1859 Implementation
+The `/usage` endpoint returns a JSON object with utilization percentages (0-100) per time window:
 
-Since there is NO dedicated usage endpoint, the probe must read quota from headers during normal API calls.
-
-**Path forward for AC-5:**
-- Document that the OAuth usage endpoint does NOT exist (404 will occur)
-- Actual quota snapshot must be derived from rate-limit headers on live API interactions
-- The reportAgentUsage MCP tool (already imported at index.ts:70) receives raw_headers (jsonb) from the agent
-- Parse those headers to extract quota state
-
-### Example Header Payload
 ```json
 {
-  "anthropic-ratelimit-limit-tokens": "2000000",
-  "anthropic-ratelimit-remaining-tokens": "1850000",
-  "anthropic-ratelimit-reset-tokens": "2026-06-12T14:30:00Z",
-  "anthropic-ratelimit-limit-requests": "1000",
-  "anthropic-ratelimit-remaining-requests": "980"
+  "five_hour": {
+    "utilization": 4.0,
+    "resets_at": "2026-06-12T07:39:59.655277+00:00"
+  },
+  "seven_day": {
+    "utilization": 64.0,
+    "resets_at": "2026-06-17T02:59:59.655328+00:00"
+  },
+  "seven_day_oauth_apps": null,
+  "seven_day_opus": null,
+  "seven_day_sonnet": {
+    "utilization": 22.0,
+    "resets_at": "2026-06-17T02:59:59.655341+00:00"
+  },
+  "seven_day_cowork": null,
+  "seven_day_omelette": null,
+  "tangelo": null,
+  "iguana_necktie": null,
+  "omelette_promotional": null,
+  "cinder_cove": null,
+  "extra_usage": {
+    "is_enabled": false,
+    "monthly_limit": null,
+    "used_credits": null,
+    "utilization": null,
+    "currency": null,
+    "disabled_reason": null
+  }
 }
 ```
 
-### Implications
+### Request Headers (Required)
 
-1. **AC-5 Verification**: Endpoint research complete — documented that dedicated endpoint does not exist; quota must come from API response headers (already handled by reportAgentUsage)
-2. **AC-6 (Gemini/Codex)**: Same pattern — use response headers, no standalone endpoint
-3. **No new probe runner needed** for Anthropic — headers-based sampling via reportAgentUsage is sufficient
-4. **Gemini & Codex**: Similar headers-based approach; Gemini has x-goog-quotas, Codex has similar rate-limit headers
+```
+Authorization: Bearer <oauth_access_token>
+anthropic-beta: oauth-2025-04-20
+```
 
-### Testing
+The OAuth access token is stored in `~/.claude/.credentials.json` under `.claudeAiOauth.accessToken`.
 
-The discoverAnthropicUsageEndpoint function in usage-probe.ts will:
-1. Attempt GET to the non-existent endpoint
-2. Receive 404 Not Found
-3. Return `{ exists: false, status: 404, responseShape: {} }`
-4. Caller logs this finding and documents "use header-based reporting instead"
+### Implementation: Quota Snapshot Mapping
+
+**Binding constraint**: The _maximum_ utilization across windows determines capacity.
+
+Example from sample response:
+- five_hour.utilization = 4%
+- seven_day.utilization = 64% ← **BINDING (highest)**
+- seven_day_sonnet.utilization = 22%
+
+**Quota snapshot**:
+- `quota_limit = 100` (percentage scale)
+- `quota_remaining = 100 - 64 = 36` (36% of quota still available)
+- `quota_reset_at = "2026-06-17T02:59:59.655328+00:00"` (resets_at of binding window)
+- `raw_headers` = full JSON response (for audit/debug)
+
+This is a **percentage-based** quota system (0-100%), not token-count-based.
+
+### Secondary Source: Rate-Limit Headers
+
+Anthropic also exposes per-request quota via response headers on every API call:
+- `anthropic-ratelimit-limit-tokens` — Token limit
+- `anthropic-ratelimit-remaining-tokens` — Tokens remaining
+- `anthropic-ratelimit-reset-tokens` — Reset time
+
+The `/usage` endpoint is the primary, authoritative source; headers are supplementary.
+
+### Decision for P1859 Implementation
+
+**Path forward for AC-5:**
+1. Primary: Poll `https://api.anthropic.com/api/oauth/usage` endpoint directly
+2. Extract binding utilization (max of windows) and map to quota snapshot
+3. Store full raw response in raw_headers jsonb for audit trail
+4. reportAgentUsage accepts rate-limit headers as secondary source (AC-6)
+5. Failure degradation: Write stale_flag=true row on 404/429/network error (AC-7)
+
+### P1699 Integration
+
+The P1699 quota-based dispatch controller consumes the snapshot:
+```
+effective_cap = min(max_in_flight, floor(quota_remaining * target_quota_pct))
+```
+
+Example with sample data:
+- quota_remaining = 36
+- target_quota_pct = 0.80
+- max_in_flight = 10
+- effective_cap = min(10, floor(36 * 0.80)) = min(10, 28) = 10
+
+When quota tightens:
+- If quota_remaining = 8 (only 8% left)
+- effective_cap = min(10, floor(8 * 0.80)) = min(10, 6) = **6** (quota-limited)
