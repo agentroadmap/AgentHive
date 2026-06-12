@@ -2038,7 +2038,7 @@ export async function dispatchImplicitGate(
 			role,
 			task: buildImplicitGateTask(proposal, gate),
 			stage: `gate:${gate.toStage}`,
-			worktreeHint: worktree,
+			worktreeHint: null,
 			requiredCapabilities: ROLE_TO_REQUIRED_CAPABILITIES[role.toLowerCase()] ?? ["develop"],
 			gateRole: role,
 			gateFromStage: proposal.status,
@@ -2283,7 +2283,7 @@ Without set_maturity=mature, the gate will not re-run and your work remains invi
 			stage: target.status,
 			phase: "enhance",
 			timeoutMs: roleTimeoutMs("enhancer"),
-			worktreeHint: selectedWorktree,
+			worktreeHint: null,
 			requiredCapabilities:
 				requiredCapabilities.length > 0 ? requiredCapabilities : ["enhancer"],
 		});
