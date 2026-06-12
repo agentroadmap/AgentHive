@@ -219,21 +219,10 @@ async function getModelRouteRows(args: {
 }
 
 /**
- * P1359 quota gating: agent-spawner expects this export to check provider
- * quota before spawning. The full implementation is mid-flight in a sibling
- * branch; this stub returns null so the existing null-guard in
- * agent-spawner.ts (which silently skips gating on missing data) proceeds
- * unchanged. Remove when P1359 lands the real implementation.
+ * P1859: Re-export from usage-probe module for backward compatibility.
+ * This was a null stub; now calls real implementation.
  */
-export async function getLatestQuotaSnapshot(
-	_provider: string,
-): Promise<{
-	quota_remaining: number | null;
-	quota_limit: number | null;
-	quota_reset_at: Date | null;
-} | null> {
-	return null;
-}
+export { reportAgentUsage, getLatestQuotaSnapshot } from "../../../../infra/agency/usage-probe.ts";
 
 /**
  * P797: Validate that a model has at least one enabled route in roadmap.model_routes.
