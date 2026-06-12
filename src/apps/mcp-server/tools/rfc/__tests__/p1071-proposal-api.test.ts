@@ -39,15 +39,21 @@ describe("P1071: Proposal API - References, Parent, Routing", { skip: !skipIfNoL
 	const testAgentId = `test-claude-p1071-${Date.now()}`;
 	const testAgentIds = [testAgentId, "operator-gary", "different-agent", "test-user", "test", "test-setter"];
 
+	const createdAgentIds: string[] = [];
+
 	before(async () => {
-		// Register all test agents in agent_registry (required for FK on uploaded_by)
+		// Register all test agents in agent_registry (required for FK on uploaded_by).
+		// Track which rows WE inserted so teardown removes exactly those and never
+		// a pre-existing identity that happens to share a name.
 		for (const agentId of testAgentIds) {
-			await query(
+			const { rows } = await query<{ agent_identity: string }>(
 				`INSERT INTO agent_registry (agent_identity, agent_type, created_at)
 				 VALUES ($1, 'llm', now())
-				 ON CONFLICT (agent_identity) DO NOTHING`,
+				 ON CONFLICT (agent_identity) DO NOTHING
+				 RETURNING agent_identity`,
 				[agentId],
 			);
+			if (rows.length > 0) createdAgentIds.push(rows[0].agent_identity);
 		}
 
 		// Create test proposals
@@ -79,6 +85,12 @@ describe("P1071: Proposal API - References, Parent, Routing", { skip: !skipIfNoL
 		}
 		if (childProposalId) {
 			await query(`DELETE FROM roadmap_proposal.proposal WHERE id = $1`, [childProposalId]);
+		}
+		// Remove only the agent_registry rows this suite created
+		for (const agentId of createdAgentIds) {
+			await query(`DELETE FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`, [
+				agentId,
+			]);
 		}
 	});
 
