@@ -220,53 +220,74 @@ export async function discoverAnthropicUsageEndpoint(
 }
 
 /**
- * P1859 AC-6: Gemini adapter with fallback.
- * Explicit adapter interface: either working endpoint or documented unsupported-fallback.
+ * P1859 AC-6: Parse rate-limit headers from Anthropic API responses.
+ * Headers format: anthropic-ratelimit-limit-tokens, anthropic-ratelimit-remaining-tokens, etc.
+ *
+ * @param rawHeaders JSONB dict of response headers from an Anthropic API call
+ * @returns Extracted quota snapshot or null if headers missing
  */
-export async function probeGeminiUsage(
-	apiKey: string,
-): Promise<{ success: boolean; snapshot: Partial<ProviderUsagePayload> | null; error?: string }> {
+export function parseAnthropicRateLimitHeaders(
+	rawHeaders: Record<string, string | string[]> | null | undefined,
+): Partial<ProviderUsagePayload> | null {
+	if (!rawHeaders) return null;
+
 	try {
-		// Gemini doesn't have a standard usage endpoint yet.
-		// This is an explicit unsupported fallback.
+		const headers = rawHeaders as Record<string, string | string[]>;
+		const limitTokens = headers["anthropic-ratelimit-limit-tokens"];
+		const remainingTokens = headers["anthropic-ratelimit-remaining-tokens"];
+		const resetTokens = headers["anthropic-ratelimit-reset-tokens"];
+
+		if (!limitTokens || !remainingTokens) {
+			return null;
+		}
+
+		const limit = typeof limitTokens === "string" ? parseInt(limitTokens, 10) : null;
+		const remaining = typeof remainingTokens === "string" ? parseInt(remainingTokens, 10) : null;
+		const resetAt = typeof resetTokens === "string" ? resetTokens : null;
+
+		if (limit === null || remaining === null) return null;
+
 		return {
-			success: false,
-			snapshot: null,
-			error:
-				"[P1859] Gemini usage endpoint not yet documented/available; writing stale row for AC-7 degradation",
+			quota_limit: limit,
+			quota_remaining: remaining,
+			quota_reset_at: resetAt || undefined,
 		};
 	} catch (err) {
-		return {
-			success: false,
-			snapshot: null,
-			error: err instanceof Error ? err.message : String(err),
-		};
+		console.error("[P1859] Failed to parse Anthropic rate-limit headers:", err);
+		return null;
 	}
 }
 
 /**
- * P1859 AC-6: Codex adapter with fallback.
- * Explicit adapter interface: either working endpoint or documented unsupported-fallback.
+ * P1859 AC-6: Gemini adapter with explicit fallback.
+ * Gemini has x-goog-quotas headers but no standalone usage endpoint.
+ * Quote probing: Only via response headers on live API calls, no dedicated endpoint.
+ */
+export async function probeGeminiUsage(
+	apiKey: string,
+): Promise<{ success: boolean; snapshot: Partial<ProviderUsagePayload> | null; error?: string }> {
+	return {
+		success: false,
+		snapshot: null,
+		error:
+			"[P1859 AC-6] Gemini has no dedicated usage endpoint; quota must be parsed from x-goog-quotas response headers on live API calls. Falling back to stale-row degradation.",
+	};
+}
+
+/**
+ * P1859 AC-6: Codex adapter with explicit fallback.
+ * Codex (OpenAI GPT-4 code-interpreter) has no exposed usage endpoint.
+ * Quote probing: Only via response headers, no dedicated endpoint.
  */
 export async function probeCodexUsage(
 	apiKey: string,
 ): Promise<{ success: boolean; snapshot: Partial<ProviderUsagePayload> | null; error?: string }> {
-	try {
-		// Codex (gpt-4-code-interpreter) doesn't expose usage endpoint.
-		// This is an explicit unsupported fallback.
-		return {
-			success: false,
-			snapshot: null,
-			error:
-				"[P1859] Codex usage endpoint not documented/available; writing stale row for AC-7 degradation",
-		};
-	} catch (err) {
-		return {
-			success: false,
-			snapshot: null,
-			error: err instanceof Error ? err.message : String(err),
-		};
-	}
+	return {
+		success: false,
+		snapshot: null,
+		error:
+			"[P1859 AC-6] Codex has no exposed usage endpoint; quota state available only from response headers. No dedicated polling endpoint exists. Falling back to stale-row degradation.",
+	};
 }
 
 /**
