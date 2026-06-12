@@ -40,10 +40,11 @@ if (!LIVE_DB_ENABLED) {
 					`DELETE FROM roadmap_workforce.agent_usage_snapshot WHERE credential_key = $1`,
 					[testCredKey],
 				);
-				// Remove capacity rows (use credential_key as agency_id for Phase 1)
+				// Remove capacity rows — the suite's provider is unique per run, so
+				// deleting by provider removes every row this suite created.
 				await query(
-					`DELETE FROM roadmap_workforce.agency_capacity WHERE provider = $1 AND agency_id = $2`,
-					[provider, testCredKey],
+					`DELETE FROM roadmap_workforce.agency_capacity WHERE provider = $1`,
+					[provider],
 				);
 			} catch (err) {
 				console.error("Cleanup failed:", err);
@@ -68,12 +69,12 @@ if (!LIVE_DB_ENABLED) {
 				// Give async sync time to complete
 				await new Promise((r) => setTimeout(r, 100));
 
-				// Query capacity table for this credential
+				// Query capacity table — bridge writes one row per (provider, '*', agent_identity)
 				const { rows } = await query(
 					`SELECT throttle_action, p_skip, headroom_pct
          FROM roadmap_workforce.agency_capacity
          WHERE provider = $1 AND model = '*' AND agency_id = $2`,
-					[provider, testCredKey],
+					[provider, "test-agent"],
 				);
 
 				expect(rows.length).toBe(1);
@@ -225,10 +226,21 @@ if (!LIVE_DB_ENABLED) {
 				expect(rows.length).toBe(0);
 			});
 
-			it("syncSnapshotToCapacity should handle invalid credentialKey", async () => {
-				const result = await syncSnapshotToCapacity("invalid-key-no-colon");
-				expect(result.success).toBe(false);
-				expect(result.message).toContain("Invalid credentialKey format");
+			it("syncSnapshotToCapacity skips when quota_limit is zero/invalid", async () => {
+				await syncSnapshotToCapacity(
+					{
+						provider,
+						agent_identity: "test-agent-zerolimit",
+						quota_remaining: 50,
+						quota_limit: 0,
+					},
+					osUser,
+				);
+				const { rows } = await query(
+					`SELECT 1 FROM roadmap_workforce.agency_capacity WHERE agency_id = $1`,
+					["test-agent-zerolimit"],
+				);
+				expect(rows.length).toBe(0);
 			});
 		});
 

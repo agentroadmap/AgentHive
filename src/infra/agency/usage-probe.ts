@@ -13,6 +13,7 @@
  */
 
 import { query } from "../../postgres/pool.ts";
+import { throttleFromHeadroom } from "../llm/capacity-tracker.ts";
 
 export interface QuotaSnapshot {
 	quota_remaining: number | null;
@@ -70,7 +71,10 @@ export async function reportAgentUsage(
         credential_key, stale_flag
       )
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, false)
-      ON CONFLICT (id) DO UPDATE SET
+      ON CONFLICT (credential_key) WHERE credential_key IS NOT NULL DO UPDATE SET
+        provider = EXCLUDED.provider,
+        agent_identity = EXCLUDED.agent_identity,
+        stale_flag = false,
         tokens_in = COALESCE($4, agent_usage_snapshot.tokens_in),
         tokens_out = COALESCE($5, agent_usage_snapshot.tokens_out),
         cache_creation_tokens = COALESCE($6, agent_usage_snapshot.cache_creation_tokens),
@@ -98,6 +102,13 @@ export async function reportAgentUsage(
 			],
 		);
 
+		// P1365-AC2: bridge the snapshot into agency_capacity so the spawn-path
+		// soft-throttle (capacity-filter) sees probe-derived quota. Fire-and-forget:
+		// a bridge failure must not fail the usage write itself.
+		void syncSnapshotToCapacity(payload, osUser).catch((err) => {
+			console.error("syncSnapshotToCapacity failed:", err);
+		});
+
 		return {
 			success: true,
 			message: `Recorded usage for ${payload.provider} credential "${credentialKey}"`,
@@ -109,6 +120,56 @@ export async function reportAgentUsage(
 			message: `Failed to report usage: ${err instanceof Error ? err.message : String(err)}`,
 		};
 	}
+}
+
+/**
+ * P1365-AC2: bridge a P1859 usage snapshot into roadmap_workforce.agency_capacity.
+ *
+ * The claude CLI never surfaces HTTP rate-limit headers, so the header-driven
+ * CapacityTracker path is inert for subscription spawns. The oauth /usage probe
+ * (P1859) is the live signal source instead: quota is PERCENT-based
+ * (quota_limit=100, quota_remaining = 100 - max utilization), so
+ * headroom_pct = quota_remaining directly.
+ *
+ * Row shape matches the reader (capacity-filter computeCapacityScoreMultiplier):
+ * one row per (provider, model='*', agency_id=<agent_identity>). model='*'
+ * means provider-level quota; the reader falls back to '*' when no exact
+ * model row exists. p_skip/action come from the SAME curve as CapacityTracker
+ * (throttleFromHeadroom) so the two write paths cannot drift.
+ */
+export async function syncSnapshotToCapacity(
+	payload: ProviderUsagePayload,
+	osUser: string = "default",
+): Promise<void> {
+	if (payload.quota_remaining == null || payload.quota_limit == null || payload.quota_limit <= 0) {
+		return; // nothing to bridge — probe had no quota data (stale/failed path)
+	}
+	const headroomPct = (payload.quota_remaining / payload.quota_limit) * 100;
+	const { action, p_skip } = throttleFromHeadroom(headroomPct);
+
+	await query(
+		`INSERT INTO roadmap_workforce.agency_capacity (
+       provider, model, agency_id,
+       reset_at, last_sampled_at,
+       throttle_action, p_skip, headroom_pct, updated_at
+     )
+     VALUES ($1, '*', $2, $3, now(), $4, $5, $6, now())
+     ON CONFLICT (provider, model, agency_id) DO UPDATE SET
+       reset_at = EXCLUDED.reset_at,
+       last_sampled_at = now(),
+       throttle_action = EXCLUDED.throttle_action,
+       p_skip = EXCLUDED.p_skip,
+       headroom_pct = EXCLUDED.headroom_pct,
+       updated_at = now()`,
+		[
+			payload.provider,
+			payload.agent_identity,
+			payload.quota_reset_at || null,
+			action,
+			p_skip,
+			headroomPct,
+		],
+	);
 }
 
 /**

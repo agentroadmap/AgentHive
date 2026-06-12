@@ -33,6 +33,34 @@ interface TrackedEntry {
   updated_at: Date;
 }
 
+/**
+ * P1365 throttle curve as a pure function of headroom percentage.
+ * p_skip INCREASES as headroom DECREASES, continuous at band boundaries:
+ *   >=50%  -> none, p_skip 0
+ *   25-50% -> soft, p_skip 0 .. 0.25
+ *   10-25% -> soft, p_skip 0.25 .. 0.70
+ *   <10%   -> hard, p_skip 1
+ * Shared by CapacityTracker.computeThrottle (header-driven path) and the
+ * P1859 snapshot bridge (oauth-usage probe path) so both paths can never drift.
+ */
+export function throttleFromHeadroom(headroom_pct: number): {
+  action: 'none' | 'soft' | 'hard';
+  p_skip: number;
+} {
+  if (headroom_pct >= 50) {
+    return { action: 'none', p_skip: 0 };
+  }
+  if (headroom_pct >= 25) {
+    const band_pct = 50 - headroom_pct; // 0..25
+    return { action: 'soft', p_skip: (band_pct / 25) * 0.25 };
+  }
+  if (headroom_pct >= 10) {
+    const band_pct = 25 - headroom_pct; // 0..15
+    return { action: 'soft', p_skip: 0.25 + (band_pct / 15) * 0.45 };
+  }
+  return { action: 'hard', p_skip: 1 };
+}
+
 export class CapacityTracker {
   private entries = new Map<string, TrackedEntry>();
   private readonly burnRateAlpha: number;
@@ -163,29 +191,7 @@ export class CapacityTracker {
     }
 
     const headroom_pct = Math.min(...headrooms);
-
-    // Apply throttle curve (p_skip INCREASES as headroom DECREASES)
-    let action: 'none' | 'soft' | 'hard';
-    let p_skip: number;
-
-    if (headroom_pct >= 50) {
-      action = 'none';
-      p_skip = 0;
-    } else if (headroom_pct >= 25) {
-      // soft: 25-50%, p_skip = linear 0..0.25 (0 at 50%, 0.25 at 25%)
-      const band_pct = 50 - headroom_pct; // 0..25 (inverted: 0 at upper bound, 25 at lower bound)
-      p_skip = (band_pct / 25) * 0.25;
-      action = 'soft';
-    } else if (headroom_pct >= 10) {
-      // soft: 10-25%, p_skip = 0.25 + linear 0..0.45 (0.25 at 25%, 0.70 at 10%)
-      const band_pct = 25 - headroom_pct; // 0..15 (inverted: 0 at upper bound, 15 at lower bound)
-      p_skip = 0.25 + (band_pct / 15) * 0.45;
-      action = 'soft';
-    } else {
-      // < 10%
-      action = 'hard';
-      p_skip = 1;
-    }
+    const { action, p_skip } = throttleFromHeadroom(headroom_pct);
 
     return {
       action,
