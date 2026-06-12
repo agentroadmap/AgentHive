@@ -159,6 +159,23 @@ function isParamConsumed(
 }
 
 /**
+ * Return the balanced { ... } block starting at `openIdx` (which must point
+ * at an opening brace), inclusive. Returns null if unbalanced.
+ */
+function extractBracedBlock(source: string, openIdx: number): string | null {
+	if (source[openIdx] !== "{") return null;
+	let depth = 0;
+	for (let i = openIdx; i < source.length; i++) {
+		if (source[i] === "{") depth++;
+		else if (source[i] === "}") {
+			depth--;
+			if (depth === 0) return source.slice(openIdx, i + 1);
+		}
+	}
+	return null;
+}
+
+/**
  * Main linter: walk tool definitions and check param fidelity
  */
 async function checkMcpParamFidelity(): Promise<boolean> {
@@ -187,6 +204,17 @@ async function checkMcpParamFidelity(): Promise<boolean> {
 	}
 
 	const handlerFiles = findHandlers(toolsDir);
+
+	// P1389 baseline ratchet: pre-existing findings recorded 2026-06-12 are
+	// tolerated (pending triage); anything NEW fails the gate.
+	const baselinePath = path.join(
+		process.cwd(),
+		"scripts/ci/mcp-param-fidelity-baseline.json",
+	);
+	const baseline: Record<string, string[]> = fs.existsSync(baselinePath)
+		? JSON.parse(fs.readFileSync(baselinePath, "utf-8")).baseline
+		: {};
+	let baselined = 0;
 
 	// Read consolidated.ts to get action -> tool name mappings
 	const consolidatedPath = path.join(toolsDir, "consolidated.ts");
@@ -224,27 +252,48 @@ async function checkMcpParamFidelity(): Promise<boolean> {
 
 		const schemasSource = fs.readFileSync(schemasPath, "utf-8");
 
-		// Find all exported schemas
-		const schemaRegex = /export\s+const\s+(\w+?)[Ss]chema\s*=\s*(\{[\s\S]*?\}(?=\n\s*(?:export|$)))/g;
-		let schemaMatch;
+		// Find all exported schemas. Tolerates an optional type annotation
+		// (export const fooSchema: JsonSchema = { ... }) — the original regex
+		// silently skipped every annotated schema, making the gate a no-op.
+		const schemaHeadRegex =
+			/export\s+const\s+(\w+?)[Ss]chema\s*(?::\s*[\w.$<>\[\]| ]+)?\s*=\s*\{/g;
+		let schemaMatch: RegExpExecArray | null;
 
-		while ((schemaMatch = schemaRegex.exec(schemasSource)) !== null) {
+		while ((schemaMatch = schemaHeadRegex.exec(schemasSource)) !== null) {
 			const schemaName = schemaMatch[1];
-			const schemaBody = schemaMatch[2];
+			const bodyStart = schemaHeadRegex.lastIndex - 1; // points at the opening brace
+			const schemaBody = extractBracedBlock(schemasSource, bodyStart);
+			if (!schemaBody) continue;
 
-			// Extract property names from the schema
-			// This is a simplistic approach; a proper AST parser would be better.
-			const propRegex = /(\w+)\s*:\s*\{[^}]*type/g;
-			let propMatch;
+			// Only inspect the properties: { ... } block, top-level keys.
+			const propsIdx = schemaBody.search(/\bproperties\s*:\s*\{/);
 			const foundProps = new Set<string>();
-
-			while ((propMatch = propRegex.exec(schemaBody)) !== null) {
-				foundProps.add(propMatch[1]);
+			if (propsIdx >= 0) {
+				const propsOpen = schemaBody.indexOf("{", propsIdx + "properties".length);
+				const propsBlock = extractBracedBlock(schemaBody, propsOpen);
+				if (propsBlock) {
+					// Top-level keys: at brace depth 1 within the properties block.
+					let depth = 0;
+					const keyRegex = /(\w+)\s*:\s*\{/g;
+					let km: RegExpExecArray | null;
+					while ((km = keyRegex.exec(propsBlock)) !== null) {
+						depth = 0;
+						for (let i = 0; i < km.index; i++) {
+							if (propsBlock[i] === "{") depth++;
+							else if (propsBlock[i] === "}") depth--;
+						}
+						if (depth === 1) foundProps.add(km[1]);
+					}
+				}
 			}
 
 			// Check if each property is consumed in the handler
 			for (const prop of foundProps) {
 				if (!isParamConsumed(handlerSource, prop, schemaName)) {
+					if (baseline[schemaName]?.includes(prop)) {
+						baselined++;
+						continue; // pre-existing finding, ratcheted (see baseline JSON)
+					}
 					errors.push(
 						`Tool '${schemaName}': parameter '${prop}' declared in schema but not consumed in handler (${handlerPath})`,
 					);
@@ -265,7 +314,7 @@ async function checkMcpParamFidelity(): Promise<boolean> {
 	}
 
 	console.log(
-		"[GATE] audit:mcp-param-fidelity (P1389 AC-4) PASSED: All schema params are consumed.",
+		`[GATE] audit:mcp-param-fidelity (P1389 AC-4) PASSED: no NEW unconsumed schema params (${baselined} pre-existing baselined, pending triage).`,
 	);
 	return true;
 }

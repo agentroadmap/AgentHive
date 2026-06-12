@@ -1,0 +1,160 @@
+{
+ "_comment": "P1389 AC-4 baseline ratchet (2026-06-12): pre-existing unconsumed-param findings, pending triage (true drops vs heuristic false positives). New findings NOT in this list fail CI. Shrink this file, never grow it.",
+ "baseline": {
+  "agencyResume": [
+   "agency_id"
+  ],
+  "agencyStart": [
+   "worktree"
+  ],
+  "agentAssign": [
+   "priority",
+   "proposalId",
+   "ttlMinutes"
+  ],
+  "agentForceReleaseAlias": [
+   "force"
+  ],
+  "agentHeartbeat": [
+   "claimsCount",
+   "latencyMs",
+   "latencyMs",
+   "load"
+  ],
+  "agentList": [
+   "capabilities",
+   "include_metadata",
+   "include_terminal",
+   "limit",
+   "template"
+  ],
+  "agentPgRegister": [
+   "agent_cli",
+   "agent_type",
+   "display_alias",
+   "display_name",
+   "host_affinity",
+   "preferred_provider",
+   "role",
+   "skills"
+  ],
+  "agentRegister": [
+   "agent_cli",
+   "capabilities",
+   "config",
+   "display_name",
+   "host_affinity",
+   "machineId",
+   "model",
+   "preferred_provider",
+   "template",
+   "workspace"
+  ],
+  "agentRegisterModel": [
+   "agent_cli",
+   "base_url",
+   "cost_per_1k_input",
+   "cost_per_1k_input",
+   "cost_per_1k_output",
+   "cost_per_1k_output",
+   "plan_type",
+   "plan_type",
+   "priority",
+   "probe",
+   "probe",
+   "route_provider"
+  ],
+  "agentRename": [
+   "alias",
+   "alias",
+   "force",
+   "operator"
+  ],
+  "agentRetire": [
+   "releaseClaims"
+  ],
+  "agentSpawn": [
+   "capabilities",
+   "model",
+   "targetProposalId",
+   "template",
+   "timeoutMs",
+   "worktree"
+  ],
+  "dispatchList": [
+   "limit"
+  ],
+  "documentList": [
+   "search"
+  ],
+  "federationSync": [
+   "hostname",
+   "since"
+  ],
+  "proposalList": [
+   "assignee",
+   "labels"
+  ],
+  "proposalListRolePauses": [
+   "proposal_id"
+  ],
+  "proposalMerge": [
+   "sourceId",
+   "targetId"
+  ],
+  "proposalMove": [
+   "targetIndex"
+  ],
+  "proposalPickup": [
+   "dryRun"
+  ],
+  "proposalPruneClaims": [
+   "timeoutMinutes"
+  ],
+  "proposalRequestEnrichment": [
+   "topic"
+  ],
+  "proposalResumeRole": [
+   "proposal_id",
+   "reason",
+   "role"
+  ],
+  "protocolSendWithMention": [
+   "priority",
+   "replyTo"
+  ],
+  "protocolThreadGet": [
+   "messageId"
+  ],
+  "protocolThreadReply": [
+   "priority"
+  ],
+  "teamCharterCreate": [
+   "createdBy",
+   "norms",
+   "proposalIds",
+   "teamName"
+  ],
+  "teamDisputeLog": [
+   "escalationLevel",
+   "initiatorAgent",
+   "initiatorPosition",
+   "positionA",
+   "positionB",
+   "resolutionNote",
+   "respondentAgent",
+   "respondentPosition"
+  ],
+  "teamGovernanceArchive": [
+   "archivedBy"
+  ],
+  "teamNormsSet": [
+   "normKey",
+   "normValue",
+   "setBy"
+  ],
+  "worktreeSync": [
+   "notify_agents"
+  ]
+ }
+}
