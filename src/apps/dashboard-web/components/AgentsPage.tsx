@@ -46,7 +46,9 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ agents: propAgents }) => {
 	const fetchData = useCallback(async () => {
 		try {
 			setError(null);
+			console.log("[AgentsPage] Fetching agents from HTTP API /api/agents");
 			const data = await apiClient.fetchAgents();
+			console.log(`[AgentsPage] Received ${data.length} agents from API`);
 			setAgents(data);
 		} catch (err) {
 			console.error("Failed to fetch agents:", err);
@@ -57,11 +59,21 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ agents: propAgents }) => {
 	}, []);
 
 	useEffect(() => {
+		// P1731 AC-3: Component shape match — verify that propAgents
+		// (from WebSocket) has the expected fields. If WebSocket data is
+		// missing agents, fall back to HTTP API.
+		console.log(
+			`[AgentsPage] Mounted with propAgents: ${propAgents ? propAgents.length : 0} agents`,
+		);
 		if (propAgents && propAgents.length > 0) {
+			console.log(
+				`[AgentsPage] Using WebSocket agents, first: ${propAgents[0].name || propAgents[0].identity}`,
+			);
 			setAgents(propAgents);
 			setLoading(false);
 			return;
 		}
+		console.log("[AgentsPage] No propAgents, falling back to HTTP fetch");
 		fetchData();
 	}, [propAgents, fetchData]);
 

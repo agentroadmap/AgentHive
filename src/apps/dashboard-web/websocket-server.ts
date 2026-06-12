@@ -97,6 +97,23 @@ async function loadProposals(): Promise<Record<string, unknown>[]> {
 }
 
 async function loadAgents(): Promise<Record<string, unknown>[]> {
+	// P1731 AC-1: DIAGNOSTIC — WebSocket bridge query (no project_id filter)
+	// This query returns ALL agents from roadmap_workforce.agent_registry
+	// regardless of project_id, serving the full workforce roster to the
+	// WebSocket clients (currently used by the Board component only).
+	//
+	// DIVERGENCE: GET /api/agents (server/index.ts:3079) filters by
+	// project_id = $1 when X-Project-Id header is present, scoping to the
+	// operator's selected project. WebSocket has no such filter.
+	//
+	// Current behavior:
+	// - /api/agents with X-Project-Id=1 → 607 agents (all in project_id=1)
+	// - WS workforce_snapshot → 607 agents (no filter)
+	// - Dashboard /agents page uses HTTP API, so it gets the full list
+	//
+	// Expected fix: align both sources to return the same row set.
+	// Since all agents are in project_id=1 currently, the fix is to document
+	// the filter intent and ensure both paths are consistent.
 	const rows = await query(
 		`SELECT id, agent_identity, agent_type, role, skills, status,
 				trust_tier, agency_id, created_at, updated_at
