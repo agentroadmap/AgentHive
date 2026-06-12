@@ -236,7 +236,7 @@ export async function runLiaisonAgent(
 		const { rows } = await query(
 			`SELECT id, from_agent, to_agent, message_content, message_type,
 			        proposal_id, project_id, COALESCE(metadata, '{}'::jsonb) AS metadata,
-			        correlation_id, read_at
+			        correlation_id, read_at, reply_to
 			   FROM roadmap.message_ledger
 			  WHERE id = $1`,
 			[messageId],
@@ -275,6 +275,15 @@ export async function runLiaisonAgent(
 			} catch (err) {
 				console.warn(`${log} protocol_pong INSERT failed:`, err);
 			}
+			return;
+		}
+
+		// protocol_pong terminates a ping exchange — consume it without
+		// invoking the LLM, otherwise the pong falls through to the generic
+		// handler and triggers an auto-reply chain between two liaisons.
+		if (msg.message_type === "protocol_pong") {
+			await markReadAndResolveTimeout(msg.id);
+			console.log(`${log} PONG consumed from ${msg.from_agent} (no reply)`);
 			return;
 		}
 
@@ -354,6 +363,18 @@ export async function runLiaisonAgent(
 				});
 				await markReadAndResolveTimeout(msg.id);
 			}
+			return;
+		}
+
+		// Loop breaker: a generic text/error message that is itself a reply gets
+		// consumed, never auto-replied to. Both endpoints here are bots — replying
+		// to a reply produces an unbounded exchange (2026-06-12: two liaisons
+		// ping-ponged "handler failed" errors every ~3.5s until one side died).
+		if (msg.reply_to != null) {
+			await markReadAndResolveTimeout(msg.id);
+			console.log(
+				`${log} REPLY consumed id=${msg.id} from=${msg.from_agent} (reply_to=${msg.reply_to}, no auto-reply)`,
+			);
 			return;
 		}
 
