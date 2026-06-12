@@ -1554,6 +1554,386 @@ export async function recordGateDecision(args: {
 	}
 }
 
+// ─── P1071: References and Parent Management ────────────────────────────────
+
+export async function addReference(args: {
+	proposal_id: string;
+	url_or_path: string;
+	label?: string;
+	description?: string;
+}): Promise<CallToolResult> {
+	try {
+		const proposalId = await resolveProposalId(args.proposal_id);
+		if (proposalId === null) {
+			return {
+				content: [
+					{ type: "text", text: `Proposal ${args.proposal_id} not found.` },
+				],
+			};
+		}
+
+		// Validation: url_or_path must be non-empty and not start with javascript: or data:
+		if (!args.url_or_path || !args.url_or_path.trim()) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: "❌ url_or_path is required and must be non-empty.",
+					},
+				],
+			};
+		}
+
+		const normalizedPath = args.url_or_path.trim();
+		if (
+			normalizedPath.toLowerCase().startsWith("javascript:") ||
+			normalizedPath.toLowerCase().startsWith("data:")
+		) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `❌ url_or_path validation failed: '${normalizedPath.slice(0, 50)}' starts with a disallowed scheme (javascript: or data:).`,
+					},
+				],
+			};
+		}
+
+		if (normalizedPath.length > 2048) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `❌ url_or_path exceeds max length (2048 chars): ${normalizedPath.length}`,
+					},
+				],
+			};
+		}
+
+		// Get active agent identity from context
+		const { agentContextStorage } = await import(
+			"../../../../shared/identity/agent-context.ts"
+		);
+		const ctx = agentContextStorage.getStore();
+		if (!ctx?.verified) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: "❌ NO_IDENTITY_CONTEXT: Bearer token required to upload a reference.",
+					},
+				],
+			};
+		}
+
+		const uploadedBy = ctx.verified.principal_id;
+
+		// Derive file_name from label or last path segment
+		let fileName = args.label || normalizedPath.split("/").pop() || "reference";
+		if (!fileName.trim()) {
+			fileName = "reference";
+		}
+
+		// Insert into attachment_registry
+		const { rows } = await query<{ id: bigint; created_at: string }>(
+			`INSERT INTO roadmap.attachment_registry
+			 (proposal_id, file_name, relative_path, uploaded_by, vision_summary, created_at)
+			 VALUES ($1, $2, $3, $4, $5, now())
+			 RETURNING id, created_at`,
+			[proposalId, fileName, normalizedPath, uploadedBy, args.description || null],
+		);
+
+		const ref = rows[0];
+		return {
+			content: [
+				{
+					type: "text",
+					text: `✅ Reference added: id=${ref.id} proposal=${args.proposal_id} file_name="${fileName}"`,
+				},
+			],
+		};
+	} catch (err) {
+		return errorResult("Failed to add reference", err);
+	}
+}
+
+export async function removeReference(args: {
+	proposal_id: string;
+	reference_id: string | number;
+}): Promise<CallToolResult> {
+	try {
+		const proposalId = await resolveProposalId(args.proposal_id);
+		if (proposalId === null) {
+			return {
+				content: [
+					{ type: "text", text: `Proposal ${args.proposal_id} not found.` },
+				],
+			};
+		}
+
+		const referenceId = Number(args.reference_id);
+		if (isNaN(referenceId)) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `❌ reference_id must be a number, got: ${args.reference_id}`,
+					},
+				],
+			};
+		}
+
+		// Check if reference exists and get its uploaded_by
+		const { rows: refRows } = await query<{ uploaded_by: string | null }>(
+			`SELECT uploaded_by FROM roadmap.attachment_registry WHERE id = $1 AND proposal_id = $2`,
+			[referenceId, proposalId],
+		);
+
+		if (refRows.length === 0) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `❌ reference_not_found: No reference #${referenceId} on proposal ${args.proposal_id}`,
+					},
+				],
+			};
+		}
+
+		// Authority check: caller must be the uploader or an operator
+		const { agentContextStorage } = await import(
+			"../../../../shared/identity/agent-context.ts"
+		);
+		const ctx = agentContextStorage.getStore();
+		const callerId = ctx?.verified?.principal_id;
+
+		const uploadedBy = refRows[0].uploaded_by;
+		const isOperator = ctx?.verified?.principal_kind === "operator";
+		const isUploader = callerId === uploadedBy;
+
+		if (!isOperator && !isUploader) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `❌ unauthorized: Only the uploader or an operator can remove this reference.`,
+					},
+				],
+			};
+		}
+
+		// Delete the reference
+		const { rowCount } = await query(
+			`DELETE FROM roadmap.attachment_registry WHERE id = $1 AND proposal_id = $2`,
+			[referenceId, proposalId],
+		);
+
+		if (rowCount === 0) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `❌ reference_not_found: Could not delete reference #${referenceId}`,
+					},
+				],
+			};
+		}
+
+		return {
+			content: [
+				{
+					type: "text",
+					text: `✅ Reference #${referenceId} removed from ${args.proposal_id}`,
+				},
+			],
+		};
+	} catch (err) {
+		return errorResult("Failed to remove reference", err);
+	}
+}
+
+export async function listReferences(args: {
+	proposal_id: string;
+}): Promise<CallToolResult> {
+	try {
+		const proposalId = await resolveProposalId(args.proposal_id);
+		if (proposalId === null) {
+			return {
+				content: [
+					{ type: "text", text: `Proposal ${args.proposal_id} not found.` },
+				],
+			};
+		}
+
+		const { rows } = await query<{
+			id: bigint;
+			file_name: string;
+			relative_path: string;
+			uploaded_by: string | null;
+			created_at: string;
+			vision_summary: string | null;
+		}>(
+			`SELECT id, file_name, relative_path, uploaded_by, created_at, vision_summary
+			 FROM roadmap.attachment_registry
+			 WHERE proposal_id = $1
+			 ORDER BY created_at DESC`,
+			[proposalId],
+		);
+
+		if (rows.length === 0) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `No references on ${args.proposal_id}`,
+					},
+				],
+			};
+		}
+
+		const lines = rows.map(
+			(r) =>
+				`- id=${r.id} file="${r.file_name}" path="${r.relative_path}" uploaded_by="${r.uploaded_by}" created=${r.created_at}${r.vision_summary ? ` summary="${r.vision_summary}"` : ""}`,
+		);
+
+		return {
+			content: [
+				{
+					type: "text",
+					text: `References for ${args.proposal_id}:\n${lines.join("\n")}`,
+				},
+			],
+		};
+	} catch (err) {
+		return errorResult("Failed to list references", err);
+	}
+}
+
+// Helper: check if setting parent_id would create a cycle
+async function checkParentCycle(childId: number, candidateParentId: number): Promise<boolean> {
+	const { rows } = await query<{ cycle_exists: boolean }>(
+		`SELECT EXISTS(
+			WITH RECURSIVE ancestor_chain(id) AS (
+				SELECT parent_id FROM roadmap_proposal.proposal WHERE id = $2 AND parent_id IS NOT NULL
+				UNION ALL
+				SELECT p.parent_id FROM roadmap_proposal.proposal p
+				JOIN ancestor_chain a ON p.id = a.id
+				WHERE p.parent_id IS NOT NULL
+			)
+			SELECT 1 FROM ancestor_chain WHERE id = $1
+		) AS cycle_exists`,
+		[childId, candidateParentId],
+	);
+	return rows[0]?.cycle_exists ?? false;
+}
+
+export async function setParent(args: {
+	id: string;
+	parent_id?: string | null;
+}): Promise<CallToolResult> {
+	try {
+		const proposalId = await resolveProposalId(args.id);
+		if (proposalId === null) {
+			return {
+				content: [
+					{ type: "text", text: `Proposal ${args.id} not found.` },
+				],
+			};
+		}
+
+		// Resolve parent_id if provided
+		let parentId: number | null = null;
+		if (args.parent_id !== undefined && args.parent_id !== null) {
+			parentId = await resolveProposalId(args.parent_id);
+			if (parentId === null) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `❌ parent_not_found: Parent proposal ${args.parent_id} not found.`,
+						},
+					],
+				};
+			}
+		}
+
+		// Validation: no self-parent
+		if (parentId === proposalId) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `❌ A proposal cannot be its own parent.`,
+					},
+				],
+			};
+		}
+
+		// Validation: check for cycles if parent_id is non-null
+		if (parentId !== null) {
+			const hasCycle = await checkParentCycle(proposalId, parentId);
+			if (hasCycle) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `❌ cycle_detected: Setting parent to ${args.parent_id} would create a cycle in the proposal hierarchy.`,
+						},
+					],
+				};
+			}
+		}
+
+		// Get the old parent_id for audit
+		const { rows: oldRows } = await query<{ parent_id: number | null }>(
+			`SELECT parent_id FROM roadmap_proposal.proposal WHERE id = $1`,
+			[proposalId],
+		);
+		const oldParentId = oldRows[0]?.parent_id ?? null;
+
+		// Update the proposal
+		await query(
+			`UPDATE roadmap_proposal.proposal SET parent_id = $2 WHERE id = $1`,
+			[proposalId, parentId],
+		);
+
+		// Get the active agent identity for audit
+		const { agentContextStorage } = await import(
+			"../../../../shared/identity/agent-context.ts"
+		);
+		const ctx = agentContextStorage.getStore();
+		const agentId = ctx?.verified?.principal_id ?? "system";
+
+		// Append to audit JSONB
+		await query(
+			`UPDATE roadmap_proposal.proposal
+			 SET audit = audit || $2::jsonb
+			 WHERE id = $1`,
+			[
+				proposalId,
+				JSON.stringify({
+					ts: new Date().toISOString(),
+					agent: agentId,
+					activity: "SetParent",
+					from_parent_id: oldParentId,
+					to_parent_id: parentId,
+				}),
+			],
+		);
+
+		return {
+			content: [
+				{
+					type: "text",
+					text: `✅ Parent updated for ${args.id}: ${oldParentId ?? "none"} → ${parentId ?? "none"}`,
+				},
+			],
+		};
+	} catch (err) {
+		return errorResult("Failed to set parent", err);
+	}
+}
+
 // ─── Class definition for server registration ───────────────────────────────
 
 export class RfcWorkflowHandlers {
@@ -1891,9 +2271,97 @@ export class RfcWorkflowHandlers {
 			handler: (args: any) => recordGateDecision(args),
 		});
 
+		// P1071: References and parent management
+		this.server.addTool({
+			name: "add_reference",
+			description:
+				"Add a reference (file, URL, or artifact) to a proposal. " +
+				"Pass url_or_path as the location (file path or URL), optional label for display name, " +
+				"and optional description for vision/context. " +
+				"url_or_path must not start with javascript: or data:. Caller identity (from bearer token) recorded as uploaded_by.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					proposal_id: { type: "string" },
+					url_or_path: {
+						type: "string",
+						description: "Required: URL or relative file path. Max 2048 chars. Not javascript: or data:.",
+					},
+					label: {
+						type: "string",
+						description: "Optional: display label. Defaults to last path segment of url_or_path.",
+					},
+					description: {
+						type: "string",
+						description: "Optional: vision summary or context for the reference.",
+					},
+				},
+				required: ["proposal_id", "url_or_path"],
+			},
+			handler: (args: any) => addReference(args),
+		});
+
+		this.server.addTool({
+			name: "remove_reference",
+			description:
+				"Remove a reference from a proposal. " +
+				"Authority: caller must be the uploader or an operator.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					proposal_id: { type: "string" },
+					reference_id: {
+						type: ["string", "number"],
+						description: "Numeric reference id from list_references.",
+					},
+				},
+				required: ["proposal_id", "reference_id"],
+			},
+			handler: (args: any) => removeReference(args),
+		});
+
+		this.server.addTool({
+			name: "list_references",
+			description:
+				"List all references attached to a proposal. " +
+				"Returns array of {id, file_name, relative_path, uploaded_by, created_at, vision_summary}, ordered by created_at DESC.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					proposal_id: { type: "string" },
+				},
+				required: ["proposal_id"],
+			},
+			handler: (args: any) => listReferences(args),
+		});
+
+		this.server.addTool({
+			name: "set_parent",
+			description:
+				"Set the parent proposal of this proposal. " +
+				"parent_id can be a numeric ID, display_id (e.g. P1024), or null to clear. " +
+				"Validates: parent exists (if non-null), no self-parent, no cycles. " +
+				"Change is recorded in proposal.audit JSONB.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					id: {
+						type: "string",
+						description: "Proposal display_id or numeric id (required per param-name gotchas).",
+					},
+					parent_id: {
+						type: ["string", "number", "null"],
+						description: "Parent proposal id/display_id, or null to clear.",
+					},
+				},
+				required: ["id"],
+			},
+			handler: (args: any) => setParent(args),
+		});
+
 		// eslint-disable-next-line no-console
 		console.error(
-			"[MCP] Registered 13 RFC workflow tools (state machine, AC, deps, reviews, discussions, gate_decision)",
+			"[MCP] Registered 17 RFC workflow tools (state machine, AC, deps, reviews, discussions, gate_decision, references, parent_management)",
 		);
 	}
 }
