@@ -139,20 +139,31 @@ export class MemoryService {
   }
 
   /**
-   * Return all non-expired memory entries for an agent+layer, keyed by key.
+   * Return non-expired memory entries for an agent+layer, keyed by key.
    * Uses the v_active_memory view which filters expired rows.
+   * Optionally limits to top-K entries by importance_score (P1352 AC-6).
+   *
+   * @param agentIdentity - The agent to retrieve memory for
+   * @param layer - The memory layer (episodic|semantic|working|procedural)
+   * @param limit - Optional limit to top-K entries by importance_score; if not provided, returns all
    */
   async getAgentMemory(
     agentIdentity: string,
     layer: MemoryLayer,
+    limit?: number,
   ): Promise<Record<string, unknown>> {
-    const { rows } = await query<{ key: string; value: string }>(
-      `SELECT key, value
+    let sql = `SELECT key, value
        FROM roadmap.v_active_memory
        WHERE agent_identity = $1 AND layer = $2
-       ORDER BY updated_at DESC`,
-      [agentIdentity, layer],
-    );
+       ORDER BY importance_score DESC, updated_at DESC`;
+
+    const params: Array<string | number> = [agentIdentity, layer];
+    if (limit !== undefined && limit > 0) {
+      sql += ` LIMIT $3`;
+      params.push(limit);
+    }
+
+    const { rows } = await query<{ key: string; value: string }>(sql, params as any);
 
     const result: Record<string, unknown> = {};
     for (const row of rows) {
