@@ -656,6 +656,21 @@ Boards are workflow-aware surfaces, not fixed RFC boards.
 - Do not hardcode stage lists in UI, API, TUI, or orchestration code.
 - When workflow metadata changes, boards must reflect the new ordered stages without a code edit.
 
+### 6.0f Dispatch-class selectors must filter `gate_scanner_paused` at SELECT source (P1411)
+
+Proposals marked with `gate_scanner_paused = true` must be excluded from all dispatch, gate, claim, and spawn decision selectors. Exclusion **must happen at the SQL SELECT source**, not deferred to post-dispatch guards.
+
+**Rule:** every dispatch-class query that reads `roadmap_proposal.proposal` must either:
+1. Filter `WHERE gate_scanner_paused = false` explicitly in the query, OR
+2. Read through `v_dispatchable_proposal` (a view that enforces `WHERE gate_scanner_paused = false`), OR
+3. Query by proposal `id` only (by-id lookups are exempt and may return paused proposals for visibility/management).
+
+**Rationale:** P1393 added a defensive `postWorkOffer` guard that refuses to dispatch paused proposals. However, selecting paused proposals into candidate queues wastes compute on readiness assessment, briefing assembly, and gate evaluation. The guard is necessary but insufficient upstream selection must respect the pause flag to avoid pointless work.
+
+**Scope:** applies to `scanQueues()`, gate-selection logic, stall detection, enhancement-revision targeting, and any other production code that shapes work offers. Views `v_dispatchable_proposal` and `v_mature_queue` are the canonical single source of truth for the pause filter.
+
+**Verification:** `npm run audit:dispatch-selects` enforces this rule as a CI gate.
+
 ### 6.1 DDL belongs in `database/ddl/`
 
 Use `database/ddl/` for schema structure:
