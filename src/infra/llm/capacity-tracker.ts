@@ -164,7 +164,7 @@ export class CapacityTracker {
 
     const headroom_pct = Math.min(...headrooms);
 
-    // Apply throttle curve
+    // Apply throttle curve (p_skip INCREASES as headroom DECREASES)
     let action: 'none' | 'soft' | 'hard';
     let p_skip: number;
 
@@ -172,13 +172,13 @@ export class CapacityTracker {
       action = 'none';
       p_skip = 0;
     } else if (headroom_pct >= 25) {
-      // soft: 25-50%, p_skip = linear 0..0.25
-      const band_pct = headroom_pct - 25; // 0..25
+      // soft: 25-50%, p_skip = linear 0..0.25 (0 at 50%, 0.25 at 25%)
+      const band_pct = 50 - headroom_pct; // 0..25 (inverted: 0 at upper bound, 25 at lower bound)
       p_skip = (band_pct / 25) * 0.25;
       action = 'soft';
     } else if (headroom_pct >= 10) {
-      // soft: 10-25%, p_skip = 0.25 + linear 0..0.45
-      const band_pct = headroom_pct - 10; // 0..15
+      // soft: 10-25%, p_skip = 0.25 + linear 0..0.45 (0.25 at 25%, 0.70 at 10%)
+      const band_pct = 25 - headroom_pct; // 0..15 (inverted: 0 at upper bound, 15 at lower bound)
       p_skip = 0.25 + (band_pct / 15) * 0.45;
       action = 'soft';
     } else {
@@ -214,8 +214,8 @@ export class CapacityTracker {
           requests_remaining, tokens_remaining,
           requests_limit, tokens_limit,
           reset_at, last_sampled_at,
-          burn_rate_per_sec, throttle_action, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+          burn_rate_per_sec, throttle_action, p_skip, headroom_pct, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
         ON CONFLICT (provider, model, agency_id) DO UPDATE SET
           requests_remaining = EXCLUDED.requests_remaining,
           tokens_remaining = EXCLUDED.tokens_remaining,
@@ -225,6 +225,8 @@ export class CapacityTracker {
           last_sampled_at = EXCLUDED.last_sampled_at,
           burn_rate_per_sec = EXCLUDED.burn_rate_per_sec,
           throttle_action = EXCLUDED.throttle_action,
+          p_skip = EXCLUDED.p_skip,
+          headroom_pct = EXCLUDED.headroom_pct,
           updated_at = EXCLUDED.updated_at;
       `;
 
@@ -241,6 +243,8 @@ export class CapacityTracker {
         latest.sampled_at,
         entry.burn_rate_per_sec,
         throttle.action,
+        throttle.p_skip,
+        throttle.headroom_pct,
         entry.updated_at,
       ]);
     }
