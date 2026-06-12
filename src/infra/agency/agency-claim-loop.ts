@@ -28,6 +28,7 @@ import { query as defaultQuery } from "../postgres/pool.ts";
 import {
 	handleOfferDispatch,
 	type OfferDispatchHandlerDeps,
+	readAgencyMaxInFlight,
 } from "./offer-dispatch-handler.ts";
 import { isProviderAuthDown } from "../../core/orchestration/provider-auth.ts";
 import type { LiaisonMessage } from "./liaison-message-types.ts";
@@ -253,6 +254,30 @@ export class AgencyClaimLoop {
 						err instanceof Error ? err.message : err,
 					);
 				});
+				return null;
+			}
+
+			// P1698 AC-8: Check max_in_flight capacity before claiming
+			const maxInFlight = await readAgencyMaxInFlight(
+				this.agencyIdentity,
+				sqlExec,
+				this.logger,
+			);
+			const inFlightResult = (await this.query(
+				`SELECT COALESCE(inf.in_flight_count, 0) AS in_flight_count
+				 FROM roadmap_workforce.provider_registry pr
+				 JOIN roadmap_workforce.agent_registry ar ON ar.id = pr.agency_id
+				 LEFT JOIN roadmap_workforce.v_agency_in_flight inf ON inf.provider_registry_id = pr.id
+				 WHERE ar.agent_identity = $1
+				 LIMIT 1`,
+				[this.agencyIdentity],
+			)) as { rows: Array<{ in_flight_count: number }> };
+			const inFlightCount = inFlightResult.rows[0]?.in_flight_count ?? 0;
+
+			if (inFlightCount >= maxInFlight) {
+				this.logger.warn(
+					`[AgencyClaim:${this.agencyIdentity}] at capacity: in_flight=${inFlightCount} >= max=${maxInFlight}; skipping claim`,
+				);
 				return null;
 			}
 

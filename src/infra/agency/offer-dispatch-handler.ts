@@ -738,7 +738,7 @@ export function _resetMaxInFlightCacheForTest(): void {
 	maxInFlightCache.clear();
 }
 
-async function readAgencyMaxInFlight(
+export async function readAgencyMaxInFlight(
 	agencyId: string,
 	exec: SqlExec,
 	logger: Pick<Console, "log" | "warn" | "error">,

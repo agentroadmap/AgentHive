@@ -252,3 +252,147 @@ export const workerRegisterHandler: ToolHandler = async (args) => {
 		],
 	};
 };
+
+/**
+ * P1698 AC-1/5: List all agencies with current dispatch capacity.
+ * Returns: [{agency_identity, project_id, max_in_flight, in_flight_count, status}]
+ */
+export const agencyCapListHandler: ToolHandler = async () => {
+	const result = await query(
+		`SELECT ar.agent_identity,
+		        pr.project_id,
+		        pr.max_in_flight,
+		        COALESCE(inf.in_flight_count, 0) AS in_flight_count,
+		        pr.status
+		 FROM roadmap_workforce.provider_registry pr
+		 JOIN roadmap_workforce.agent_registry ar ON ar.id = pr.agency_id
+		 LEFT JOIN roadmap_workforce.v_agency_in_flight inf ON inf.provider_registry_id = pr.id
+		 ORDER BY ar.agent_identity, pr.project_id NULLS LAST`,
+	);
+
+	const lines = result.rows.map(
+		(r: any) =>
+			`${r.agent_identity} (project=${r.project_id ?? "all"}): max=${r.max_in_flight}, in_flight=${r.in_flight_count}, status=${r.status}`,
+	);
+
+	return {
+		content: [
+			{
+				type: "text" as const,
+				text: lines.length > 0 ? lines.join("\n") : "No agencies found.",
+			},
+		],
+	};
+};
+
+/**
+ * P1698 AC-2/6: Set max_in_flight capacity for an agency.
+ * Validates agency exists, max_in_flight >= 0.
+ * Writes audit row to message_ledger, fires NOTIFY core_changed.
+ */
+export const agencyCapSetHandler: ToolHandler = async (args) => {
+	const { agencyIdentity, maxInFlight, projectId } = args as {
+		agencyIdentity: string;
+		maxInFlight: number;
+		projectId?: string;
+	};
+
+	// Validate input
+	if (maxInFlight < 0) {
+		return {
+			content: [
+				{
+					type: "text" as const,
+					text: `Error: max_in_flight must be >= 0, got ${maxInFlight}`,
+				},
+			],
+		};
+	}
+
+	// Check if agency exists in agent_registry
+	const agencyCheck = await query(
+		`SELECT id FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
+		[agencyIdentity],
+	);
+	if (agencyCheck.rows.length === 0) {
+		return {
+			content: [
+				{
+					type: "text" as const,
+					text: `Error: Agency '${agencyIdentity}' not found in agent_registry`,
+				},
+			],
+		};
+	}
+
+	const agencyId = agencyCheck.rows[0].id;
+
+	// Get current max_in_flight before update
+	let oldMaxInFlight: number | null = null;
+	const currentResult = await query(
+		`SELECT max_in_flight FROM roadmap_workforce.provider_registry
+		 WHERE agency_id = $1 AND (project_id = $2 OR ($2 IS NULL AND project_id IS NULL))
+		 LIMIT 1`,
+		[agencyId, projectId ?? null],
+	);
+	if (currentResult.rows.length > 0) {
+		oldMaxInFlight = currentResult.rows[0].max_in_flight;
+	}
+
+	// Update provider_registry
+	const updateResult = await query(
+		`UPDATE roadmap_workforce.provider_registry
+		 SET max_in_flight = $1, updated_at = now()
+		 WHERE agency_id = $2 AND (project_id = $3 OR ($3 IS NULL AND project_id IS NULL))
+		 RETURNING id`,
+		[maxInFlight, agencyId, projectId ?? null],
+	);
+
+	if (updateResult.rows.length === 0) {
+		return {
+			content: [
+				{
+					type: "text" as const,
+					text: `Error: No provider_registry entry found for agency '${agencyIdentity}' (project=${projectId ?? "all"})`,
+				},
+			],
+		};
+	}
+
+	// Write audit row to message_ledger
+	try {
+		await query(
+			`INSERT INTO roadmap.message_ledger
+			 (from_agent, channel, message_type, metadata, project_id)
+			 VALUES ('system:agency_cap_manager', 'system:audit', $1, $2, $3)`,
+			[
+				"agency_cap_change",
+				JSON.stringify({
+					actor: "claude-bot-gary-gating",
+					agency_identity: agencyIdentity,
+					old_max_in_flight: oldMaxInFlight,
+					new_max_in_flight: maxInFlight,
+					project_id: projectId ?? null,
+				}),
+				1, // project_id
+			],
+		);
+
+		// Fire NOTIFY core_changed
+		await query("SELECT pg_notify('core_changed', $1)", [
+			JSON.stringify({ type: "agency_cap_change", agency_identity: agencyIdentity }),
+		]);
+	} catch (err) {
+		console.error("[agencyCapSetHandler] Audit write or notify failed:", err);
+		// Continue anyway — capacity change is the critical update
+	}
+
+	return {
+		content: [
+			{
+				type: "text" as const,
+				text: `Agency capacity updated: ${agencyIdentity} max_in_flight ${oldMaxInFlight ?? "?"} → ${maxInFlight} (project=${projectId ?? "all"})`,
+			},
+		],
+	};
+};
