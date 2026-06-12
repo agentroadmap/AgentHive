@@ -110,6 +110,10 @@ function toSharedAgent(agent: WebSocketAgent): SharedAgent {
 		trustScore: 0,
 		lastSeen: agent.lastSeenAt,
 		status: agent.isActive ? "active" : "offline",
+		// P1731 AC-3: Component shape match — WebSocket Agent lacks costClass
+		// and other HTTP-only fields. HTTP endpoint provides these via fallback.
+		// This transformation is minimal; full agent profile comes from HTTP.
+		costClass: undefined,
 	};
 }
 
