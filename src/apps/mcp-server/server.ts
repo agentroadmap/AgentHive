@@ -2012,6 +2012,27 @@ export async function createMcpServer(
 		handler: (a) => workforce.workerRegisterHandler(a),
 	});
 
+	// P1698 AC-1/5: agency_cap_list — read current dispatch capacity
+	server.addTool({
+		name: "agency_cap_list",
+		description:
+			"List all agencies with current dispatch capacity: max_in_flight, in_flight_count, and status. " +
+			"Read-only snapshot from provider_registry and v_agency_in_flight.",
+		inputSchema: workforceSchemas.agencyCapListSchema,
+		handler: (a) => workforce.agencyCapListHandler(a),
+	});
+
+	// P1698 AC-2/6: agency_cap_set — set max_in_flight with audit trail
+	server.addTool({
+		name: "agency_cap_set",
+		description:
+			"Set max_in_flight capacity for an agency (P1698). Validates agency exists, " +
+			"max_in_flight >= 0 required (0 = paused, all claims blocked). Writes audit row to " +
+			"message_ledger with message_type='agency_cap_change'; fires NOTIFY core_changed.",
+		inputSchema: workforceSchemas.agencyCapSetSchema,
+		handler: (a) => workforce.agencyCapSetHandler(a),
+	});
+
 	// P917: Agency lifecycle tools — liaison registration, project join/leave, status
 	const liaisonHandlers = await import(
 		"./tools/agency/liaison-pg-handlers.ts"

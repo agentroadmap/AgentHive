@@ -125,3 +125,39 @@ export const workerRegisterSchema: JsonSchema = {
 	required: ["workerIdentity", "agencyIdentity"],
 	additionalProperties: false,
 };
+
+export const agencyCapListSchema: JsonSchema = {
+	type: "object",
+	description:
+		"List all agencies with their current dispatch capacity: max_in_flight, " +
+		"in_flight_count, and status. Read-only; shows live capacity state from " +
+		"provider_registry and v_agency_in_flight.",
+	properties: {},
+	additionalProperties: false,
+};
+
+export const agencyCapSetSchema: JsonSchema = {
+	type: "object",
+	description:
+		"Set max_in_flight capacity for an agency (P1698 AC-2/6). Validates " +
+		"agency exists in agent_registry. max_in_flight >= 0 required (0 = paused). " +
+		"Audit writes to message_ledger; fires NOTIFY core_changed.",
+	properties: {
+		agencyIdentity: {
+			type: "string",
+			minLength: 1,
+			description: "Agency identity — must exist in agent_registry",
+		},
+		maxInFlight: {
+			type: "integer",
+			minimum: 0,
+			description: "New max_in_flight value (0 = paused, all claims blocked)",
+		},
+		projectId: {
+			type: "string",
+			description: "Optional project_id filter (if null, sets cap for all projects)",
+		},
+	},
+	required: ["agencyIdentity", "maxInFlight"],
+	additionalProperties: false,
+};
