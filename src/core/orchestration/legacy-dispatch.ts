@@ -681,6 +681,69 @@ function normalizeWorktreeIdentity(value: string): string {
  * Worktrees are filesystem contexts, not provider constraints.
  */
 
+/**
+ * P1360 Change 3: Check if the worktree's provider auth is accessible.
+ * Maps worktree prefix (e.g., 'codex-*') to provider and checks for auth files/env vars.
+ * Returns true if auth is accessible, false if not.
+ */
+async function checkProviderAuthAccessible(worktree: string): Promise<boolean> {
+	const prefix = worktree.split("-")[0]; // e.g., 'codex-one' → 'codex'
+	const homeDir = process.env.HOME ?? "/root";
+
+	const authChecks: Record<string, string[]> = {
+		codex: [
+			`${homeDir}/.codex/auth.json`,
+			`${homeDir}/.openai/settings.json`,
+		],
+		gemini: [`${homeDir}/.gemini/settings.json`],
+		claude: [`${homeDir}/.claude/settings.json`],
+		copilot: [`${homeDir}/.config/github-copilot/auth.json`],
+	};
+
+	// If no known prefix mapping, assume auth exists (fail-open)
+	if (!(prefix in authChecks)) return true;
+
+	const authPaths = authChecks[prefix];
+	for (const authPath of authPaths) {
+		try {
+			await access(authPath, fsConstants.R_OK);
+			return true; // Found at least one usable auth file
+		} catch {
+			// This path is not accessible; try next
+		}
+	}
+
+	// If no auth file found, also check env vars as override
+	const envVarMap: Record<string, string[]> = {
+		codex: ["OPENAI_API_KEY", "CODEX_API_KEY"],
+		gemini: ["GEMINI_API_KEY"],
+		claude: ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"],
+		copilot: ["GH_COPILOT_TOKEN"],
+	};
+
+	if (prefix in envVarMap) {
+		const envVars = envVarMap[prefix];
+		for (const envVar of envVars) {
+			if (process.env[envVar]) return true;
+		}
+	}
+
+	return false; // No auth accessible for this provider/worktree
+}
+
+// Log provider auth unavailability once per worktree per restart
+const loggedAuthUnavailable = new Set<string>();
+function logProviderAuthUnavailable(worktree: string): void {
+	if (!loggedAuthUnavailable.has(worktree)) {
+		const prefix = worktree.split("-")[0];
+		const currentUser = process.env.USER ?? "unknown";
+		logger.warn(
+			`[selectExecutorWorktree] ${prefix} worktrees not usable by ${currentUser} — auth not accessible (no ${prefix}-auth file or env var set). Worktree: ${worktree}`,
+		);
+		loggedAuthUnavailable.add(worktree);
+	}
+}
+
 async function scoreUsableWorktree(
 	worktree: string,
 	source: string,
@@ -694,19 +757,48 @@ async function scoreUsableWorktree(
 		await access(join(dir, ".env.agent"), fsConstants.R_OK);
 		await access(dir, fsConstants.R_OK | fsConstants.W_OK | fsConstants.X_OK);
 
+		// P1360 Change 3: Check provider-auth accessibility before returning a usable candidate
+		const providerAuthOk = await checkProviderAuthAccessible(normalized);
+		if (!providerAuthOk) {
+			logProviderAuthUnavailable(normalized);
+			return null; // This worktree is not usable due to auth inaccessibility
+		}
+
 		const currentUid =
 			typeof process.getuid === "function" ? process.getuid() : null;
 		const ownedByCurrentUser =
 			currentUid !== null && dirStat.uid === currentUid;
 		const currentWorktree = normalized === basename(process.cwd());
+
+		let baseScore =
+			(ownedByCurrentUser ? 100 : 0) +
+			(currentWorktree ? 20 : 0) +
+			(source === "metadata" ? 15 : 0) +
+			(source === "env" ? 10 : 0);
+
+		// P1360 Change 2: Query recent failures for this worktree and apply penalty
+		try {
+			const { rows: failureRows } = await query<{ failure_count: number }>(
+				`SELECT COUNT(*)::int AS failure_count
+				 FROM roadmap_workforce.squad_dispatch
+				 WHERE (metadata->>'worktree_hint')::text = $1
+				   AND dispatch_status = 'failed'
+				   AND completed_at >= now() - interval '10 minutes'`,
+				[normalized],
+			);
+			const failureCount = failureRows[0]?.failure_count ?? 0;
+			baseScore -= failureCount * 10; // Each failure = -10 points
+		} catch (queryErr) {
+			logger.warn(
+				`scoreUsableWorktree(${normalized}): failed to query recent failures: ${queryErr instanceof Error ? queryErr.message : queryErr}`,
+			);
+			// Failure to query doesn't block — use base score
+		}
+
 		return {
 			worktree: normalized,
 			source,
-			score:
-				(ownedByCurrentUser ? 100 : 0) +
-				(currentWorktree ? 20 : 0) +
-				(source === "metadata" ? 15 : 0) +
-				(source === "env" ? 10 : 0),
+			score: baseScore,
 		};
 	} catch {
 		return null;

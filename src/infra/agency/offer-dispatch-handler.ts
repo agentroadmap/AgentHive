@@ -44,6 +44,7 @@ import {
 } from "./subscription-policy.ts";
 import { recordSpawnUsage } from "./record-spawn-usage.ts";
 import { classifyExit } from "../../core/orchestration/agent-spawner.ts";
+import { incrementSpawnFailure, THROTTLE_THRESHOLD } from "../../core/orchestration/resolvers/agency-resolver.ts";
 
 const obs = new ObservabilityWriter("agency:offer-dispatch-handler");
 
@@ -144,6 +145,42 @@ export function _activeSpawnCountForTest(agencyId?: string): number {
 	let sum = 0;
 	for (const n of activeSpawnCounts.values()) sum += n;
 	return sum;
+}
+
+/**
+ * P1360 AC-4/11: Classify spawn error messages to structured error classes.
+ * Maps error text patterns to classes used by incrementSpawnFailure for status_reason.
+ *
+ * @param err — The caught spawn error
+ * @returns One of 'auth' | 'spawn' | 'timeout' | 'unknown'
+ */
+function classifySpawnErrorClass(
+	err: Error,
+): "auth" | "spawn" | "timeout" | "unknown" {
+	const msg = err.message.toLowerCase();
+	if (
+		msg.includes("auth") ||
+		msg.includes("permission") ||
+		msg.includes("unauthorized") ||
+		msg.includes("forbidden")
+	) {
+		return "auth";
+	}
+	if (
+		msg.includes("timeout") ||
+		msg.includes("killed") ||
+		msg.includes("sigterm")
+	) {
+		return "timeout";
+	}
+	if (
+		msg.includes("spawn") ||
+		msg.includes("enoent") ||
+		msg.includes("eacces")
+	) {
+		return "spawn";
+	}
+	return "unknown";
 }
 
 const defaultExec: SqlExec = (sql, params) =>
@@ -495,6 +532,18 @@ async function runSpawn(args: {
 		});
 	} catch (err) {
 		spawnError = err instanceof Error ? err : new Error(String(err));
+
+		// P1360 Change 1 / AC-1/8: Wire spawn failure into agency throttle counters
+		// so resolveAgency's ORDER BY throttle_count ASC de-prioritizes repeat failures.
+		const errorClass = classifySpawnErrorClass(spawnError);
+		void incrementSpawnFailure(agencyId, THROTTLE_THRESHOLD, errorClass).catch(
+			(bumpErr) => {
+				logger.warn(
+					`[OfferDispatchHandler] ${agencyId}: failed to bump throttle counter for offer=${payload.offer_id}: ${bumpErr instanceof Error ? bumpErr.message : bumpErr}`,
+				);
+			},
+		);
+
 		// P914: surface the spawn failure cause so operators can diagnose
 		// without grepping; previously the only signal was "exit=n/a".
 		logger.error(
