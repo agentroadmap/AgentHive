@@ -9,28 +9,21 @@ const projectRoot = join(__dirname, "..");
 // P1123: protect the shared pool from stray pool.end() in shared CLI/tool code.
 // Tool handlers use src/infra/postgres/pool.ts transitively.
 //
-// HOTFIX 2026-05-16: node --import jiti/register collapses TS named exports
-// to module.default — same pattern the createMcpServer/handleDirectMcpRequest/
-// getVersion lookups below already defend against. Without this fallback,
-// poolModule.setPoolLifecycleMode is undefined at boot and the MCP service
-// crash-loops with TypeError (NRestarts hit 66 today before this fix).
+// Post-P1128 (bun migration): Module resolution now uses bun runtime which
+// correctly returns named exports without collapsing to module.default.
 const poolModule = await import("../src/infra/postgres/pool.ts");
-const setPoolLifecycleMode =
-	poolModule.setPoolLifecycleMode || poolModule.default?.setPoolLifecycleMode;
+const { setPoolLifecycleMode, query: queryFn } = poolModule;
+
 if (typeof setPoolLifecycleMode !== "function") {
 	console.error("[MCP] Failed to load setPoolLifecycleMode from pool module");
 	process.exit(1);
 }
 setPoolLifecycleMode("long-running");
-// Extract query function for health checks (same jiti fallback pattern)
-const queryFn = poolModule.query || poolModule.default?.query;
 
-// P1123 Phase 3: start the pool watchdog. Same jiti-named-export fallback
-// pattern as setPoolLifecycleMode above.
+// P1123 Phase 3: start the pool watchdog.
 const watchdogModule = await import("../src/infra/postgres/pool-watchdog.ts");
-const startPoolWatchdog =
-	watchdogModule.startPoolWatchdog ||
-	watchdogModule.default?.startPoolWatchdog;
+const { startPoolWatchdog } = watchdogModule;
+
 if (typeof startPoolWatchdog === "function") {
 	startPoolWatchdog("agenthive-mcp");
 }
@@ -38,13 +31,9 @@ if (typeof startPoolWatchdog === "function") {
 const serverModule = await import("../src/apps/mcp-server/server.ts");
 const httpCompatModule = await import("../src/apps/mcp-server/http-compat.ts");
 const versionModule = await import("../src/shared/utils/version.ts");
-const createMcpServer =
-	serverModule.createMcpServer || serverModule.default?.createMcpServer;
-const handleDirectMcpRequest =
-	httpCompatModule.handleDirectMcpRequest ||
-	httpCompatModule.default?.handleDirectMcpRequest;
-const getVersion =
-	versionModule.getVersion || versionModule.default?.getVersion;
+const { createMcpServer } = serverModule;
+const { handleDirectMcpRequest } = httpCompatModule;
+const { getVersion } = versionModule;
 
 if (!createMcpServer) {
 	console.error("[MCP] Failed to load createMcpServer from server module");

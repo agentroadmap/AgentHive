@@ -39,7 +39,7 @@ Environment=AGENTHIVE_AGENCY_FILTER=codex-agency-bot,codex/agency-bot
 # Spawn workers into andy's home for codex auth resolution. Optional but
 # explicit; falls back to /home/andy via passwd if unset.
 Environment=HOME=/home/andy
-ExecStart=/usr/bin/env node --import jiti/register scripts/start-a2a-host.ts
+ExecStart=/usr/local/bin/bun scripts/start-a2a-host.ts
 Restart=on-failure
 RestartSec=15
 TimeoutStopSec=60

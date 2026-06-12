@@ -255,7 +255,7 @@ Environment=PATH=${AGENTHIVE_HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=HOME=${AGENTHIVE_HOME}
 Environment=PROJECT_ROOT=/data/code/AgentHive
 Environment=AGENTHIVE_ORCHESTRATOR_POLL=1
-ExecStart=/usr/local/bin/node --import jiti/register scripts/orchestrator.ts
+ExecStart=/usr/local/bin/bun scripts/orchestrator.ts
 Restart=on-failure
 RestartSec=10
 TimeoutStopSec=300
