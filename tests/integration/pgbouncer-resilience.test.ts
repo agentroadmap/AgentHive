@@ -53,8 +53,8 @@ const QUERY_TIMEOUT_MS = 1000;
  *   - Real-world recovery is faster with connection retry logic in the pool
  *   - We assert recovery happens before the 5s timeout
  */
-describe.skipIf(!LIVE_DB)("AC-13: PgBouncer kill recovery (DESTRUCTIVE)", () => {
-  it.skipIf(!DESTRUCTIVE)("kills pgbouncer, triggers query, verifies recovery < 5s", async () => {
+describe("AC-13: PgBouncer kill recovery (DESTRUCTIVE)", { skip: !LIVE_DB }, () => {
+  it("kills pgbouncer, triggers query, verifies recovery < 5s", { skip: !DESTRUCTIVE }, async () => {
     let pool: Pool | null = null;
 
     try {
@@ -177,7 +177,7 @@ describe.skipIf(!LIVE_DB)("AC-13: PgBouncer kill recovery (DESTRUCTIVE)", () => 
  *   - Verify that SHOW SERVERS shows idle connections exist after close
  *   - Document the 600s reap as config-verified (verified at deployment time)
  */
-describe.skipIf(!LIVE_DB)("AC-19: PgBouncer load test (50 concurrent connections)", () => {
+describe("AC-19: PgBouncer load test (50 concurrent connections)", { skip: !LIVE_DB }, () => {
   it("opens 50 connections, measures memory, verifies idle timeout config", async () => {
     const connectionCount = 50;
     const pools: Pool[] = [];
