@@ -165,10 +165,19 @@ export async function getLatestQuotaSnapshot(
 
 /**
  * P1859 AC-5: Research endpoint for Claude OAuth usage.
- * Makes a single read-only GET to https://api.anthropic.com/api/oauth/usage
  *
- * This is RESEARCH ONLY — called once per run for discovery.
- * Actual probe logic is separate (not auto-called in this file).
+ * RESEARCH FINDING: https://api.anthropic.com/api/oauth/usage does NOT exist.
+ * Anthropic exposes quota via rate-limit response headers (anthropic-ratelimit-*)
+ * on every API call, not a standalone /usage endpoint.
+ *
+ * Quota snapshot must be parsed from response headers sent via reportAgentUsage
+ * (which already accepts raw_headers as jsonb parameter).
+ *
+ * This function documents the research result; actual quota comes from
+ * reportAgentUsage's raw_headers (header-based reporting).
+ *
+ * @param oauthToken - Bearer token (used in research call only, not for actual probe)
+ * @returns Research finding: endpoint does not exist (404)
  */
 export async function discoverAnthropicUsageEndpoint(
 	oauthToken: string,
@@ -177,6 +186,7 @@ export async function discoverAnthropicUsageEndpoint(
 	status: number;
 	responseShape: unknown;
 	error?: string;
+	note?: string;
 }> {
 	try {
 		const response = await fetch("https://api.anthropic.com/api/oauth/usage", {
@@ -193,6 +203,10 @@ export async function discoverAnthropicUsageEndpoint(
 			exists: response.ok,
 			status: response.status,
 			responseShape: data,
+			note:
+				response.status === 404
+					? "[AC-5] Endpoint not found. Use rate-limit headers from live API calls instead."
+					: undefined,
 		};
 	} catch (err) {
 		return {
@@ -200,6 +214,7 @@ export async function discoverAnthropicUsageEndpoint(
 			status: 0,
 			responseShape: {},
 			error: err instanceof Error ? err.message : String(err),
+			note: "[AC-5] Network error or unreachable. Use rate-limit headers from live API calls instead.",
 		};
 	}
 }
