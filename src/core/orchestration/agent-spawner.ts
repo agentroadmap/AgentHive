@@ -76,6 +76,7 @@ import {
 	getMcpInitDiagnosisReport,
 	type McpInitTiming,
 } from "./mcp-init-wrapper.ts";
+import { applySpawnStagger } from "./spawn-stagger.ts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -1616,6 +1617,11 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 			);
 		}
 	}
+
+	// P1730 AC-4: apply spawn-start stagger to mitigate MCP-init thundering herd.
+	// Spreads concurrent spawns across a configurable window (default ~1.5s per spawn)
+	// plus random jitter (default ~500ms) to break synchronized init hangs.
+	await applySpawnStagger();
 
 	// P1004: pre-spawn quota check — defer if provider quota is critically low.
 	// Reads the latest agent_usage_snapshot for the target provider. Missing
