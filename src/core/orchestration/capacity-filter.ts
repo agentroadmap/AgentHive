@@ -37,11 +37,16 @@ export async function computeCapacityScoreMultiplier(
   provider: string,
   model: string
 ): Promise<{ multiplier: number; score: CapacityScore }> {
-  // Query agency_capacity for this (provider, model, agency_id) tuple
+  // Query agency_capacity for this (provider, model, agency_id) tuple.
+  // P1365-AC2: fall back to the provider-level wildcard row (model='*') written
+  // by the P1859 snapshot bridge when no exact model row exists; an exact match
+  // always wins over the wildcard.
   const { rows } = await query(
     `SELECT throttle_action, p_skip, headroom_pct, reset_at
      FROM roadmap_workforce.agency_capacity
-     WHERE provider = $1 AND model = $2 AND agency_id = $3`,
+     WHERE provider = $1 AND (model = $2 OR model = '*') AND agency_id = $3
+     ORDER BY CASE WHEN model = $2 THEN 0 ELSE 1 END
+     LIMIT 1`,
     [provider, model, agencyId]
   );
 

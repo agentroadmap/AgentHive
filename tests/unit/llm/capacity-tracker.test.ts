@@ -319,4 +319,97 @@ describe("CapacityTracker", () => {
 			assert.equal(tracker.getState().size, 0);
 		});
 	});
+
+	describe("throttle curve: boundary conditions (AC-5 fix)", () => {
+		it("should have p_skip=0 at 50% headroom (healthy, upper bound)", () => {
+			const signal: CapacitySignal = {
+				provider: "anthropic",
+				model: "claude-opus-4",
+				requests_remaining: 50,
+				requests_limit: 100,
+				tokens_remaining: null,
+				tokens_limit: null,
+				reset_at: null,
+				sampled_at: now,
+			};
+
+			tracker.recordSignal(signal, "agency-alpha");
+			const throttle = tracker.computeThrottle("anthropic", "claude-opus-4", "agency-alpha");
+
+			assert.equal(throttle.action, "none");
+			assert.equal(throttle.headroom_pct, 50);
+			assert.equal(throttle.p_skip, 0, "p_skip must be 0 at 50% (boundary between healthy and soft throttle)");
+		});
+
+		it("should have p_skip=0.25 at 25% headroom (band boundary)", () => {
+			const signal: CapacitySignal = {
+				provider: "anthropic",
+				model: "claude-opus-4",
+				requests_remaining: 25,
+				requests_limit: 100,
+				tokens_remaining: null,
+				tokens_limit: null,
+				reset_at: null,
+				sampled_at: now,
+			};
+
+			tracker.recordSignal(signal, "agency-alpha");
+			const throttle = tracker.computeThrottle("anthropic", "claude-opus-4", "agency-alpha");
+
+			assert.equal(throttle.action, "soft");
+			assert.equal(throttle.headroom_pct, 25);
+			assert.equal(throttle.p_skip, 0.25, "p_skip must be 0.25 at 25% (lower bound of band 1, upper bound of band 2)");
+		});
+
+		it("should have p_skip=0.70 at 10% headroom (lower bound of band 2)", () => {
+			const signal: CapacitySignal = {
+				provider: "anthropic",
+				model: "claude-opus-4",
+				requests_remaining: 10,
+				requests_limit: 100,
+				tokens_remaining: null,
+				tokens_limit: null,
+				reset_at: null,
+				sampled_at: now,
+			};
+
+			tracker.recordSignal(signal, "agency-alpha");
+			const throttle = tracker.computeThrottle("anthropic", "claude-opus-4", "agency-alpha");
+
+			assert.equal(throttle.action, "soft");
+			assert.equal(throttle.headroom_pct, 10);
+			assert.equal(throttle.p_skip, 0.70, "p_skip must be 0.70 at 10% (lower bound of band 2)");
+		});
+
+		it("should monotonically increase p_skip as headroom decreases through band 1 (49.9% to 25%)", () => {
+			const testPoints = [49.9, 40, 25.1, 25];
+			const pSkipValues: number[] = [];
+
+			for (const headroom of testPoints) {
+				tracker.clearAll();
+				const signal: CapacitySignal = {
+					provider: "anthropic",
+					model: "claude-opus-4",
+					requests_remaining: headroom,
+					requests_limit: 100,
+					tokens_remaining: null,
+					tokens_limit: null,
+					reset_at: null,
+					sampled_at: now,
+				};
+
+				tracker.recordSignal(signal, "agency-alpha");
+				const throttle = tracker.computeThrottle("anthropic", "claude-opus-4", "agency-alpha");
+				pSkipValues.push(throttle.p_skip);
+			}
+
+			// Verify monotonic increase
+			for (let i = 1; i < pSkipValues.length; i++) {
+				assert.ok(
+					pSkipValues[i] >= pSkipValues[i - 1],
+					`p_skip not monotonic: ${pSkipValues[i - 1]} should be <= ${pSkipValues[i]} at indices ${i - 1},${i}`
+				);
+			}
+		});
+	});
 });

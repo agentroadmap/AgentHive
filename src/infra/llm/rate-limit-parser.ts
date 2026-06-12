@@ -95,15 +95,24 @@ function parseOpenaiHeaders(
 
 /**
  * Extract rate-limit signals from Google/Gemini headers
- * Google does not surface rate-limit headers on success; only quota errors on 429
- * Returns null to indicate no signal available
+ * RESCOPED: Google/Gemini does not surface rate-limit headers on success responses.
+ * Quota information is embedded in error responses only (HTTP 429 with body details),
+ * not in response headers. True quota tracking requires:
+ * - Parsing error response body (requires HTTP error interception outside SDK)
+ * - Instrumenting the Gemini CLI wrapper (Phase 2, see AC-11)
+ *
+ * Current behavior: returns null for google provider (falls back to P1359 exit-code
+ * classification, no proactive capacity throttling via P1365).
+ *
+ * Per P1859 precedent: explicit unsupported with documented fallback is honester
+ * than fabricating header names that don't exist in the API.
  */
 function parseGoogleHeaders(
   headers: Record<string, string | string[] | undefined>
 ): Partial<CapacitySignal> | null {
   // Google quota errors are in the error body, not headers
   // On success responses, no rate-limit headers are present
-  // This is a Phase 2 gap (requires error body parsing or HTTP proxy)
+  // Deferred to Phase 2: error body parsing or HTTP proxy instrumentation
   return null;
 }
 
