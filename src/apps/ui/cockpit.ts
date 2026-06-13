@@ -18,14 +18,14 @@ export interface WorkforceAgent {
 	// 'zombie'   = legacy state — unused with new schema
 	status: "active" | "zombie" | "offline" | "throttled";
 	presenceOnline?: boolean; // true when liaison heartbeat is live
-	throttledUntil?: number;  // ms epoch — when throttle clears
+	throttledUntil?: number; // ms epoch — when throttle clears
 	currentProposal?: string;
 	statusMessage: string;
 	lastSeen?: number;
 	// P1365-AC6: Capacity awareness
-	capacityHeadroomPct?: number | null;  // headroom percentage from agency_capacity
-	capacityThrottleAction?: 'none' | 'soft' | 'hard' | null; // throttle action type
-	capacityResetAt?: number | null;      // ms epoch — when capacity resets
+	capacityHeadroomPct?: number | null; // headroom percentage from agency_capacity
+	capacityThrottleAction?: "none" | "soft" | "hard" | null; // throttle action type
+	capacityResetAt?: number | null; // ms epoch — when capacity resets
 }
 
 export interface PipelineProposal {
@@ -134,10 +134,7 @@ export function renderCockpit(
 					width: "100%",
 					// override top per slot:
 					topOverride:
-						slot === 0 ? 3
-						: slot === 1 ? "25%"
-						: slot === 2 ? "50%"
-						: "75%",
+						slot === 0 ? 3 : slot === 1 ? "25%" : slot === 2 ? "50%" : "75%",
 				};
 			}
 			// grid
@@ -239,10 +236,10 @@ export function renderCockpit(
 			.slice()
 			.reverse()
 			.forEach((m) => {
-				const time = new Date(Number(m.timestamp)).toLocaleTimeString(
-					[],
-					{ hour: "2-digit", minute: "2-digit" },
-				);
+				const time = new Date(Number(m.timestamp)).toLocaleTimeString([], {
+					hour: "2-digit",
+					minute: "2-digit",
+				});
 				terminalLog.add(
 					`[{gray-fg}${time}{/}] {bold}${m.sender_identity}{/}: ${m.content}`,
 				);
@@ -257,11 +254,16 @@ export function renderCockpit(
 		terminalLog = container._terminalLog;
 	}
 
-	// Update Dynamic Content. Header bar mirrors the panel counts —
-	// agencies = distinct provider@host groups, agents = total workers.
-	const headerAgencies = new Set(agents.map((a) => a.role || "unknown@?")).size;
+	// Update Dynamic Content. Header bar mirrors the panel counts.
+	// P1377: this set counts distinct provider@host roles (claude@bot, …) — i.e.
+	// PROVIDERS, not agencies (a formal roadmap.agency row). Labelled accordingly
+	// so the header no longer conflates the two. Authoritative agency / registered
+	// / drift counts come from queryWorkforceMetrics
+	// (src/shared/queries/workforce-counts.ts).
+	const headerProviders = new Set(agents.map((a) => a.role || "unknown@?"))
+		.size;
 	headerBox.setContent(
-		`{bold}{cyan-fg}🚀 ENGINEER'S COCKPIT{/} | Agencies: ${headerAgencies} | Agents: ${agents.length} | Pipeline: ${pipelineTotal} | Status: {green-fg}LIVE{/}`,
+		`{bold}{cyan-fg}🚀 ENGINEER'S COCKPIT{/} | Providers: ${headerProviders} | Agents: ${agents.length} | Pipeline: ${pipelineTotal} | Status: {green-fg}LIVE{/}`,
 	);
 
 	// Update Workforce — split into WORKING (has currentProposal) vs AVAILABLE
@@ -272,13 +274,18 @@ export function renderCockpit(
 		workforceBox.setContent("  {gray-fg}No agents registered{/}");
 	} else {
 		const totalAgents = agents.length;
-		// Count distinct provider@host groups — those are the agencies in the
-		// operator's mental model (claude@bot, codex@bot, …). The individual
-		// named entries (alice, ana, …) are workers under each agency.
-		const agencyCount = new Set(agents.map((a) => a.role || "unknown@?")).size;
+		// P1377: distinct provider@host groups = PROVIDERS (claude@bot, codex@bot,
+		// …), NOT agencies. The prior "agencies" label conflated the two; a formal
+		// agency is a roadmap.agency row (see queryWorkforceMetrics).
+		const providerCount = new Set(agents.map((a) => a.role || "unknown@?"))
+			.size;
 		const online = agents.filter((a) => a.presenceOnline).length;
-		const working = agents.filter((a) => a.status === "active" && a.currentProposal);
-		const idle = agents.filter((a) => a.status === "active" && !a.currentProposal);
+		const working = agents.filter(
+			(a) => a.status === "active" && a.currentProposal,
+		);
+		const idle = agents.filter(
+			(a) => a.status === "active" && !a.currentProposal,
+		);
 
 		// P1365-AC6: Split idle agents by capacity headroom
 		// "ready" = healthy headroom (>= 25%), "cooling" = low headroom (< 25%)
@@ -298,9 +305,10 @@ export function renderCockpit(
 
 		const cols = ((screen as any).program?.cols as number | undefined) ?? 160;
 		// Layout is the resolved layout from the caller (FlagKeys.TUI_COCKPIT_LAYOUT).
-		const panelBudget = layout === "stacked"
-			? Math.max(60, cols - 6)
-			: Math.max(40, Math.floor(cols / 2) - 6);
+		const panelBudget =
+			layout === "stacked"
+				? Math.max(60, cols - 6)
+				: Math.max(40, Math.floor(cols / 2) - 6);
 
 		const lines: string[] = [];
 		// Header: agencies + agents counts, liaison responsiveness, dispatch
@@ -308,7 +316,7 @@ export function renderCockpit(
 		// online (liaison responsive, token available or to reset time)".
 		// P1365-AC6: Split "ready" and "cooling" to show capacity awareness.
 		const parts = [
-			`{bold}${agencyCount}{/} agencies`,
+			`{bold}${providerCount}{/} providers`,
 			`{bold}${totalAgents}{/} agents`,
 			`{green-fg}${online}{/} online`,
 			`{bold}${working.length}{/} working`,
@@ -352,9 +360,10 @@ export function renderCockpit(
 			working.forEach((a) => {
 				const role = `{gray-fg}(${a.role}){/}`;
 				const task = a.currentProposal ?? "";
-				const taskFit = task.length > panelBudget - a.id.length - 10
-					? `${task.substring(0, panelBudget - a.id.length - 11)}…`
-					: task;
+				const taskFit =
+					task.length > panelBudget - a.id.length - 10
+						? `${task.substring(0, panelBudget - a.id.length - 11)}…`
+						: task;
 				lines.push(`  {bold}${a.id}{/} ${role} -> {yellow-fg}${taskFit}{/}`);
 			});
 			lines.push("");
@@ -376,9 +385,10 @@ export function renderCockpit(
 					const names = byProvider.get(provider) ?? [];
 					const joined = names.join(", ");
 					const labelLen = provider.length + String(names.length).length + 5;
-					const fit = joined.length > panelBudget - labelLen
-						? `${joined.substring(0, panelBudget - labelLen - 1)}…`
-						: joined;
+					const fit =
+						joined.length > panelBudget - labelLen
+							? `${joined.substring(0, panelBudget - labelLen - 1)}…`
+							: joined;
 					lines.push(`  {gray-fg}${provider}{/} (${names.length}): ${fit}`);
 				});
 			}
@@ -387,16 +397,21 @@ export function renderCockpit(
 			if (cooling.length > 0) {
 				lines.push(`  {yellow-fg}[cooling]{/}`);
 				cooling.forEach((a) => {
-					const headroom = a.capacityHeadroomPct !== undefined ? a.capacityHeadroomPct : null;
+					const headroom =
+						a.capacityHeadroomPct !== undefined ? a.capacityHeadroomPct : null;
 					const resetMs = a.capacityResetAt;
-					const resetTime = resetMs && resetMs > Date.now()
-						? formatRelativeTime(resetMs - Date.now())
-						: "unknown";
-					const headroomStr = headroom !== null && headroom !== undefined
-						? `${headroom.toFixed(1)}%`
-						: "N/A";
+					const resetTime =
+						resetMs && resetMs > Date.now()
+							? formatRelativeTime(resetMs - Date.now())
+							: "unknown";
+					const headroomStr =
+						headroom !== null && headroom !== undefined
+							? `${headroom.toFixed(1)}%`
+							: "N/A";
 					const role = `{gray-fg}(${a.role}){/}`;
-					lines.push(`  {bold}${a.id}{/} ${role} [{yellow-fg}${headroomStr} headroom↓{/} reset ${resetTime}]`);
+					lines.push(
+						`  {bold}${a.id}{/} ${role} [{yellow-fg}${headroomStr} headroom↓{/} reset ${resetTime}]`,
+					);
 				});
 			}
 		}
@@ -408,13 +423,17 @@ export function renderCockpit(
 				const resetIn = a.throttledUntil
 					? formatRelativeTime(a.throttledUntil - Date.now())
 					: "unknown";
-				lines.push(`  {bold}${a.id}{/} {gray-fg}(${a.role}){/} -> reset ${resetIn}`);
+				lines.push(
+					`  {bold}${a.id}{/} {gray-fg}(${a.role}){/} -> reset ${resetIn}`,
+				);
 			});
 		}
 
 		if (offline.length > 0) {
 			lines.push("");
-			lines.push(`{gray-fg}(.) offline: ${offline.map((a) => a.id).join(", ")}{/}`);
+			lines.push(
+				`{gray-fg}(.) offline: ${offline.map((a) => a.id).join(", ")}{/}`,
+			);
 		}
 
 		workforceBox.setContent(lines.join("\n"));
@@ -449,7 +468,9 @@ export function renderCockpit(
 	// proposals is the recent-activity list when the caller pre-sorted by
 	// modified_at DESC; otherwise we degrade to "last 5 from the tail".
 	pipelineLines.push("\nRecent Activity:");
-	const recent = data.pipelineCounts ? proposals : proposals.slice(-5).reverse();
+	const recent = data.pipelineCounts
+		? proposals
+		: proposals.slice(-5).reverse();
 	// Pipeline panel is ~half the screen width. Estimate the usable width
 	// from the terminal columns; minus the "• PXXXX: " prefix and borders,
 	// leaves roughly half - 14. Fall back to a generous 70 if cols unknown.
@@ -457,9 +478,10 @@ export function renderCockpit(
 	const titleBudget = Math.max(20, Math.floor(cols / 2) - 14);
 	recent.forEach((p) => {
 		const title = p.title ?? "";
-		const trimmed = title.length > titleBudget
-			? `${title.substring(0, titleBudget - 1)}…`
-			: title;
+		const trimmed =
+			title.length > titleBudget
+				? `${title.substring(0, titleBudget - 1)}…`
+				: title;
 		pipelineLines.push(`• ${p.display_id}: ${trimmed}`);
 	});
 	// blessed's setContent on this scrollable+tags=true box leaves stale
@@ -472,7 +494,7 @@ export function renderCockpit(
 	if (ledger.length === 0) {
 		ledgerBox.setContent(
 			"  {gray-fg}No spending data in last 7 days.{/}\n" +
-			"  {gray-fg}Budget writers not yet wired (tracked as P1018).{/}",
+				"  {gray-fg}Budget writers not yet wired (tracked as P1018).{/}",
 		);
 	} else {
 		const ledgerLines = ledger.map((l) => {
