@@ -2870,6 +2870,38 @@ export async function createMcpServer(
 		},
 	});
 
+	// P1124: D4 merge-gate validator tool
+	const { d4Validate } = await import(
+		"./tools/ops/d4-validator-tool.ts"
+	);
+	server.addTool({
+		name: "d4_validate",
+		description: "P1124: Manual D4 merge-gate validation. Runs AC verification commands for a proposal and records gate_decision_log. Returns validation verdict + per-AC results.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				proposal_id: {
+					type: "number",
+					description: "Proposal ID to validate (required)",
+				},
+				correlation_id: {
+					type: "string",
+					description: "Optional trace correlation UUID",
+				},
+				force_re_run: {
+					type: "boolean",
+					description: "If true, re-run even if recently validated",
+				},
+			},
+			required: ["proposal_id"],
+		},
+		handler: (args) => {
+			return d4Validate(args as Record<string, unknown>).then((r) => ({
+				content: [{ type: "text", text: JSON.stringify(r, null, 2) }],
+			}));
+		},
+	});
+
 	// P1129: Agency lifecycle tools — agency_start / agency_status
 	// (function API since 1a876799 — agency-ops.ts exports no class; a stale
 	// class-based registration block kept resurfacing through merges and
