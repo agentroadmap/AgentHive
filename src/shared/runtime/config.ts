@@ -25,8 +25,8 @@
  *   config.audit(); // Get access audit log
  */
 
-import { Client } from "pg";
 import type { Pool, PoolClient } from "pg";
+import { Client } from "pg";
 
 export type ConfigClass =
 	| "secret"
@@ -71,11 +71,7 @@ export interface ScopeContext {
 export class RuntimeConfigMissing extends Error {
 	public keyName: string;
 	public keyClass: ConfigClass;
-	constructor(
-		keyName: string,
-		keyClass: ConfigClass,
-		details: string,
-	) {
+	constructor(keyName: string, keyClass: ConfigClass, details: string) {
 		super(
 			`[RuntimeConfig] Required ${keyClass} key not found: ${keyName}\n${details}`,
 		);
@@ -303,7 +299,11 @@ class ConfigResolver {
 			const directPortEnv = process.env.PGPORT_DIRECT;
 			if (directPortEnv) {
 				const directPort = Number(directPortEnv);
-				if (Number.isFinite(directPort) && directPort > 0 && directPort <= 65535) {
+				if (
+					Number.isFinite(directPort) &&
+					directPort > 0 &&
+					directPort <= 65535
+				) {
 					// Create a dedicated direct-Postgres pool (bypasses PgBouncer transaction mode)
 					const { Pool } = await import("pg");
 					const poolOptions = (this.pool as any).options ?? {};
@@ -320,13 +320,19 @@ class ConfigResolver {
 				client = await this.pool.connect();
 			}
 
-			await client.query("LISTEN runtime_config_changed");
+			// P827 AC-4: LISTEN only on runtime_flag_changed. The former
+			// `runtime_config_changed` LISTEN was a DEAD channel — no trigger
+			// emits it — so it never fired and is removed. runtime_endpoint_changed
+			// is intentionally NOT listened here (endpoints.ts owns it).
 			await client.query("LISTEN runtime_flag_changed");
 
 			client.on("notification", (msg) => {
+				// P827 AC-5: targeted eviction lives in handleFlagNotification
+				// (only the matching (flag_name, scope) entry; full flush only on
+				// a malformed payload). The previous unconditional
+				// cache.clear()/dbCache.clear() here DEFEATED that targeting —
+				// every notify wiped the whole cache — so it is removed.
 				this.handleFlagNotification(msg.payload);
-				this.cache.clear();
-				this.dbCache.clear();
 			});
 
 			client.on("error", () => {
@@ -336,7 +342,9 @@ class ConfigResolver {
 			this.notifySubscription = client;
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
-			console.warn(`[ConfigResolver] LISTEN unavailable: hot-reload disabled. ${msg}`);
+			console.warn(
+				`[ConfigResolver] LISTEN unavailable: hot-reload disabled. ${msg}`,
+			);
 		}
 	}
 
@@ -351,7 +359,10 @@ class ConfigResolver {
 			return;
 		}
 		try {
-			const parsed = JSON.parse(payload) as { flag_name?: string; scope?: string };
+			const parsed = JSON.parse(payload) as {
+				flag_name?: string;
+				scope?: string;
+			};
 			if (
 				typeof parsed.flag_name === "string" &&
 				typeof parsed.scope === "string"
@@ -511,13 +522,23 @@ class ConfigResolver {
 		}
 
 		// Step 5: Control DB registry (registry keys)
-		if (value === undefined && key.class === "registry" && key.dbTable && this.pool) {
-			const registryDbValue = await this.getDbValue(key.dbTable, key.dbColumn || key.name, key.name);
+		if (
+			value === undefined &&
+			key.class === "registry" &&
+			key.dbTable &&
+			this.pool
+		) {
+			const registryDbValue = await this.getDbValue(
+				key.dbTable,
+				key.dbColumn || key.name,
+				key.name,
+			);
 			if (registryDbValue !== undefined) {
 				try {
-					const raw = typeof registryDbValue === "string"
-						? registryDbValue
-						: JSON.stringify(registryDbValue);
+					const raw =
+						typeof registryDbValue === "string"
+							? registryDbValue
+							: JSON.stringify(registryDbValue);
 					value = key.parse(raw);
 					source = "db";
 				} catch (err) {
@@ -531,13 +552,23 @@ class ConfigResolver {
 		}
 
 		// Step 6: Feature flags (DB, cached, live-reloadable)
-		if (value === undefined && key.class === "flag" && key.dbTable && this.pool) {
-			const flagDbValue = await this.getDbValue(key.dbTable, key.dbColumn || key.name, key.name);
+		if (
+			value === undefined &&
+			key.class === "flag" &&
+			key.dbTable &&
+			this.pool
+		) {
+			const flagDbValue = await this.getDbValue(
+				key.dbTable,
+				key.dbColumn || key.name,
+				key.name,
+			);
 			if (flagDbValue !== undefined) {
 				try {
-					const raw = typeof flagDbValue === "string"
-						? flagDbValue
-						: JSON.stringify(flagDbValue);
+					const raw =
+						typeof flagDbValue === "string"
+							? flagDbValue
+							: JSON.stringify(flagDbValue);
 					value = key.parse(raw);
 					source = "db";
 				} catch (err) {
@@ -692,7 +723,10 @@ class ConfigResolver {
 	 * Query a runtime flag value by flag_name + scope from core.runtime_flag.
 	 * Caches per (flag_name, scope) key; cache is cleared on runtime_flag_changed notify.
 	 */
-	private async getActiveFlagValue(flagName: string, scope = "global"): Promise<any> {
+	private async getActiveFlagValue(
+		flagName: string,
+		scope = "global",
+	): Promise<any> {
 		if (!this.pool) return undefined;
 		const cacheKey = `runtime_flag:${flagName}:${scope}`;
 		if (this.dbCache.has(cacheKey)) return this.dbCache.get(cacheKey);
@@ -714,7 +748,11 @@ class ConfigResolver {
 	 * Routes core.runtime_flag lookups through getScopedFlagValue() (scoped + TTL cache).
 	 * All other tables use the single-row LIMIT 1 fallback (no TTL, no scope).
 	 */
-	private async getDbValue(table: string, column: string, flagName?: string): Promise<any> {
+	private async getDbValue(
+		table: string,
+		column: string,
+		flagName?: string,
+	): Promise<any> {
 		if (!this.pool) return undefined;
 
 		if (table === RUNTIME_FLAG_TABLE && flagName) {
