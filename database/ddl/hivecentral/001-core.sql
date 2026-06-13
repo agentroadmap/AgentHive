@@ -372,3 +372,62 @@ SELECT
   current_database(),
   'did:hive:bootstrap'
 WHERE NOT EXISTS (SELECT 1 FROM core.installation WHERE lifecycle_status = 'active');
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- P828: core.config_mutation_log — append-only audit trail for config writes.
+-- Every ConfigResolver.set() that passes the authority gate writes one row.
+-- Append-only is enforced two ways (REVOKE + trigger) so breaking one still
+-- leaves the other.
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS core.config_mutation_log (
+  mutation_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  key_name           TEXT NOT NULL,
+  key_class          TEXT NOT NULL CHECK (key_class IN ('flag','registry','structural','secret')),
+  scope              TEXT,
+  old_value          JSONB,
+  new_value          JSONB,
+  caller_did         TEXT NOT NULL,
+  principal_id       BIGINT NOT NULL REFERENCES control_identity.principal(id),
+  mutation_authority TEXT NOT NULL CHECK (mutation_authority IN ('operator','system')),
+  validation_result  TEXT NOT NULL CHECK (validation_result IN ('success','failed')),
+  validation_error   TEXT,
+  mutated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS config_mutation_log_key_time
+  ON core.config_mutation_log (key_name, mutated_at DESC);
+CREATE INDEX IF NOT EXISTS config_mutation_log_principal
+  ON core.config_mutation_log (principal_id, mutated_at DESC);
+
+COMMENT ON TABLE core.config_mutation_log IS
+  'P828: append-only audit of ConfigResolver.set() mutations (who/what/when/old→new).';
+
+-- Append-only enforcement (a): role grants.
+REVOKE UPDATE, DELETE ON core.config_mutation_log FROM PUBLIC;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'agenthive_orchestrator') THEN
+    GRANT INSERT, SELECT ON core.config_mutation_log TO agenthive_orchestrator;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'agenthive_observability') THEN
+    GRANT SELECT ON core.config_mutation_log TO agenthive_observability;
+  END IF;
+END $$;
+
+-- Append-only enforcement (b): trigger rejecting UPDATE/DELETE.
+CREATE OR REPLACE FUNCTION core.deny_config_mutation_log_mutation()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'core.config_mutation_log is append-only';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS config_mutation_log_no_update ON core.config_mutation_log;
+CREATE TRIGGER config_mutation_log_no_update
+  BEFORE UPDATE ON core.config_mutation_log
+  FOR EACH ROW EXECUTE FUNCTION core.deny_config_mutation_log_mutation();
+
+DROP TRIGGER IF EXISTS config_mutation_log_no_delete ON core.config_mutation_log;
+CREATE TRIGGER config_mutation_log_no_delete
+  BEFORE DELETE ON core.config_mutation_log
+  FOR EACH ROW EXECUTE FUNCTION core.deny_config_mutation_log_mutation();
