@@ -644,6 +644,12 @@ export function buildArgsBySpec(
 			return buildHermesArgs(req, route);
 		case "agy":
 			return buildAntigravityArgs(req, route);
+		case "openclaw":
+			// P1029: OpenClaw is a WS daemon, not a subprocess — it has no argv.
+			// spawnAgent intercepts this agent_cli before runProcess and drives the
+			// WebSocket session instead. The empty spec is a sentinel so this
+			// route never falls through to buildOpenAICompatArgs.
+			return { argv: [], env: {} };
 		default:
 			// llm or any other openai-compatible CLI
 			return buildOpenAICompatArgs(req, route);
@@ -669,7 +675,15 @@ export function assertResolvedRouteMetadata(
 			`[P235] Refusing to run "${provider}" route "${route.modelName}" with missing agent_cli.`,
 		);
 	}
-	const knownClis = ["claude", "codex", "hermes", "gemini", "copilot", "agy"];
+	const knownClis = [
+		"claude",
+		"codex",
+		"hermes",
+		"gemini",
+		"copilot",
+		"agy",
+		"openclaw", // P1029: WS-daemon provider, executed via WebSocketAdapter
+	];
 	if (!knownClis.includes(route.agentCli)) {
 		throw new Error(
 			`[P235] Refusing to run "${provider}" route "${route.modelName}" with unknown agent_cli "${route.agentCli}".`,
@@ -2084,24 +2098,60 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	const startMs = Date.now();
 	const cwd = worktreePath;
 
-	const { stdout, stderr, exitCode } = await runProcess(
-		argv,
-		cwd,
-		processEnv,
-		timeoutMs,
-		stdin,
-		{
-			agentRunId,
-			worktree,
-		},
-	).finally(() => {
+	// P1029: OpenClaw routes execute over a WebSocket session instead of a
+	// subprocess. Only the "obtain stdout/stderr/exitCode" step differs — every
+	// downstream concern (token ledger, classifyExit, agent_runs, observability
+	// span) is shared, so existing CLI providers keep a byte-identical path. The
+	// scratch reap stays in finally() exactly as before (runs on success OR throw).
+	let stdout: string;
+	let stderr: string;
+	let exitCode: number | null;
+	try {
+		if (route.agentCli === "openclaw") {
+			const { runOpenClawSession } = await import(
+				"../../infra/agency/agent-adapter.ts"
+			);
+			const gatewayUrl =
+				route.baseUrl ||
+				(route.baseUrlEnv ? processEnv[route.baseUrlEnv] : undefined) ||
+				processEnv.OPENCLAW_GATEWAY_URL ||
+				process.env.OPENCLAW_GATEWAY_URL ||
+				"";
+			if (!gatewayUrl) {
+				({ stdout, stderr, exitCode } = {
+					stdout: "",
+					stderr:
+						"[agent-adapter] no OpenClaw gateway URL (route.base_url / base_url_env / OPENCLAW_GATEWAY_URL all empty)",
+					exitCode: null,
+				});
+			} else {
+				({ stdout, stderr, exitCode } = await runOpenClawSession({
+					gatewayUrl,
+					sessionId: agentRunId,
+					task: spawnReq.task,
+					model: route.modelName,
+					env: processEnv,
+					timeoutMs,
+				}));
+			}
+		} else {
+			({ stdout, stderr, exitCode } = await runProcess(
+				argv,
+				cwd,
+				processEnv,
+				timeoutMs,
+				stdin,
+				{ agentRunId, worktree },
+			));
+		}
+	} finally {
 		// Best-effort immediate reap; the 15-min cron sweep covers SIGKILL/crash cases.
 		reapScratch(scratchUuid).catch((err: unknown) => {
 			console.error(
 				`[AgentSpawner] immediate reap failed for ${scratchUuid}: ${err instanceof Error ? err.message : err}`,
 			);
 		});
-	});
+	}
 	const durationMs = Date.now() - startMs;
 
 	// P1392 AC-5: Append persona name to output_summary for telemetry
