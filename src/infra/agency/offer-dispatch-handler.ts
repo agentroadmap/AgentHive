@@ -484,19 +484,45 @@ async function runSpawn(args: {
 			);
 		}
 
-		// P1113: resolve persona and build the enriched task string.
+		// P1113/P1392: resolve persona and build the enriched task string.
 		// Prefer orchestrator-pre-resolved persona from payload; fall back to DB lookup.
+		// P1392: For Claude, persona is passed separately to use --append-system-prompt.
+		// For other providers, it is prepended to the task.
 		const persona: string | null =
 			typeof payload.persona === "string" && payload.persona.length > 0
 				? payload.persona
 				: await resolvePersonaByRoleName(payload.role, query as never).catch(() => null);
+
+		// P1392: Track persona name/source for telemetry
+		let personaName: string | null = null;
+		if (persona) {
+			// Try to extract persona name from file-based resolver first
+			try {
+				const { resolveFilePersona } = await import(
+					"../../../core/orchestration/file-persona-resolver.ts"
+				);
+				const filePersona = await resolveFilePersona(payload.role);
+				if (filePersona && filePersona.body === persona) {
+					personaName = filePersona.personaName ?? payload.role;
+				}
+			} catch {
+				// Fall back to role name for telemetry
+				personaName = payload.role;
+			}
+			if (!personaName) {
+				personaName = payload.role;
+			}
+		}
 
 		const baseTask: string =
 			typeof payload.task === "string" && payload.task.length > 0
 				? payload.task
 				: `Execute offer ${payload.offer_id} (role: ${payload.role})`;
 
-		const enrichedTask = persona ? `${persona}\n\n${baseTask}` : baseTask;
+		// P1392: Claude builder will use --append-system-prompt; don't prepend for claude
+		const enrichedTask = agencyProvider === "claude" && persona
+			? baseTask // Claude will get persona via --append-system-prompt
+			: persona ? `${persona}\n\n${baseTask}` : baseTask;
 
 		// P2335: ensure cubic worktree exists before spawn
 		if ((payload as any).cubic_id && worktree && worktree.startsWith("/data/code/worktree/")) {
@@ -600,6 +626,9 @@ async function runSpawn(args: {
 			// subprocess claims proposals as "adam", "alan", etc. rather than
 			// an auto-generated P852 structured identity string.
 			agentLabel: agencyId,
+			// P1392: For Claude, pass persona separately for --append-system-prompt injection.
+			// Other providers prepend it to the task above.
+			...(agencyProvider === "claude" && persona ? { persona, personaName } : {}),
 		});
 	} catch (err) {
 		spawnError = err instanceof Error ? err : new Error(String(err));
@@ -718,15 +747,38 @@ async function runSpawn(args: {
 	}
 
 	// P908-B: persist provider_signal on the dispatch row for auditability.
-	if (providerSignal) {
+	// P1392 AC-5: Also persist persona_used in metadata for telemetry.
+	if (providerSignal || personaName) {
 		try {
-			await exec(
-				`UPDATE roadmap_workforce.squad_dispatch
-				    SET provider_signal = $1
-				  WHERE id = $2`,
-				[providerSignal, dispatchId],
+			const updateParts = [];
+			const updateValues = [];
+			if (providerSignal) {
+				updateParts.push("provider_signal = $" + (updateValues.length + 1));
+				updateValues.push(providerSignal);
+			}
+			if (personaName) {
+				updateParts.push(
+					"metadata = metadata || jsonb_build_object('persona_used', $" +
+						(updateValues.length + 1) +
+						")",
+				);
+				updateValues.push(personaName);
+			}
+			updateValues.push(dispatchId);
+
+			if (updateParts.length > 0) {
+				await exec(
+					`UPDATE roadmap_workforce.squad_dispatch
+					    SET ${updateParts.join(", ")}
+					  WHERE id = $${updateValues.length}`,
+					updateValues,
+				);
+			}
+		} catch (err) {
+			logger.warn(
+				`[OfferDispatchHandler] ${agencyId}: failed to update telemetry for dispatch ${dispatchId}:`,
+				err instanceof Error ? err.message : err,
 			);
-		} catch {
 			/* best-effort */
 		}
 	}
