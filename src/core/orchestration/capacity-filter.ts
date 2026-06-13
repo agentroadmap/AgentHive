@@ -94,13 +94,18 @@ export async function computeCapacityScoreMultiplier(
 /**
  * Log a throttle decision to message_ledger for audit/observability
  * Called when a soft-throttle or hard-throttle decision affects spawn ranking
+ *
+ * P1376-AC5: throttle_source='proactive|reactive|both' identifies which cooldown
+ * window(s) contributed to the final throttle decision. Enables audit trails to
+ * distinguish proactive capacity exhaustion from reactive 429/quota backoff.
  */
 export async function logThrottleDecision(
   agencyId: string,
   provider: string,
   model: string,
   score: CapacityScore,
-  projectId: string | null
+  projectId: string | null,
+  throttleSource: 'proactive' | 'reactive' | 'both' | 'none' = 'proactive'
 ): Promise<void> {
   const metadata = {
     agency_id: agencyId,
@@ -110,6 +115,7 @@ export async function logThrottleDecision(
     p_skip: score.p_skip,
     headroom_pct: score.headroom_pct,
     reset_at: score.reset_at?.toISOString() ?? null,
+    throttle_source: throttleSource,
     reason: score.action === 'hard'
       ? 'agency_hard_throttled'
       : score.action === 'soft'

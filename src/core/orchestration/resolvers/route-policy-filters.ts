@@ -121,9 +121,38 @@ export function budgetFilterSql(projectParamIdx: number, alias = "mr"): string {
 	)`;
 }
 
-/** P773 Layer 6: exclude routes with an active upstream throttle cooldown. */
-export function cooldownFilterSql(alias = "mr"): string {
-	return `(${alias}.cooldown_until IS NULL OR ${alias}.cooldown_until <= NOW())`;
+/** P773 Layer 6: exclude routes with an active upstream throttle cooldown.
+ *
+ * P1376 (P1365-D): merges the two throttle windows. The route's own
+ * `cooldown_until` is the REACTIVE window (set on a 429/quota error). The
+ * agency's `agency_capacity.reset_at` is the PROACTIVE window (set by capacity
+ * monitoring before a hard limit is hit). A route is throttled while EITHER
+ * window is in the future — i.e. available only once
+ * `GREATEST(reset_at, cooldown_until) <= NOW()`.
+ *
+ * When `agencyParamIdx` is omitted the layer stays reactive-only (backward
+ * compatible — used by diagnostics and any caller without agency context).
+ */
+export function cooldownFilterSql(
+	alias = "mr",
+	agencyParamIdx?: number,
+): string {
+	const reactive = `(${alias}.cooldown_until IS NULL OR ${alias}.cooldown_until <= NOW())`;
+	if (agencyParamIdx === undefined) return reactive;
+	// Proactive: no agency_capacity row for (this agency, route_provider, model)
+	// whose reset_at is still in the future. NULL agency param open-passes.
+	const proactive = `(
+		$${agencyParamIdx}::text IS NULL
+		OR NOT EXISTS (
+			SELECT 1 FROM roadmap_workforce.agency_capacity ac
+			 WHERE ac.agency_id = $${agencyParamIdx}::text
+			   AND ac.provider = ${alias}.route_provider
+			   AND ac.model = ${alias}.model_name
+			   AND ac.reset_at IS NOT NULL
+			   AND ac.reset_at > NOW()
+		)
+	)`;
+	return `(${reactive} AND ${proactive})`;
 }
 
 /** P1435 Layer 6b: exclude routes with provider auth marked as down (401/403 failure).
@@ -164,7 +193,7 @@ export function buildEliminationDiagnosticSql(
 		    WHEN NOT (${agencyPolicyFilterSql(agencyIdx, alias)}) THEN 'agency_policy'
 		    WHEN NOT (${rolePolicyFilterSql(roleIdx, alias)}) THEN 'role_policy'
 		    WHEN NOT (${budgetFilterSql(projectIdx, alias)}) THEN 'budget_exhausted'
-		    WHEN NOT (${cooldownFilterSql(alias)}) THEN 'throttled'
+		    WHEN NOT (${cooldownFilterSql(alias, agencyIdx)}) THEN 'throttled'
 		    ELSE 'passed'
 		  END AS first_failing_layer
 		FROM roadmap.model_routes ${alias}
