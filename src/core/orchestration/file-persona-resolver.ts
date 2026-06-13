@@ -87,9 +87,13 @@ class FilePersonaResolver {
 				roleMap.set(baseName, baseName);
 
 				// Also add suffix after category prefix (everything after first hyphen)
-				// e.g., 'engineering-software-architect' → 'software-architect'
+				// e.g., 'engineering-software-architect' → 'software-architect'.
+				// ONLY multi-word suffixes: a single-word suffix would let e.g.
+				// 'sales-engineer.md' shadow the generic dispatch role 'engineer'
+				// with a sales persona. Single-word roles must match a file's
+				// full base name exactly.
 				const parts = baseName.split("-");
-				if (parts.length > 1) {
+				if (parts.length > 2) {
 					const suffix = parts.slice(1).join("-"); // everything after first part
 					roleMap.set(suffix, baseName);
 				}

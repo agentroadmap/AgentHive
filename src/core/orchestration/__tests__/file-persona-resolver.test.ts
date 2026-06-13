@@ -250,3 +250,25 @@ test("FilePersonaResolver: handles directories in persona dir", async () => {
 function mkdir(path: string, opts: any) {
 	return import("node:fs/promises").then((fs) => fs.mkdir(path, opts));
 }
+
+test("FilePersonaResolver: single-word suffix must NOT shadow generic roles", async () => {
+	const tempDir = await mkdtemp(join(testDir, "p1392-test-"));
+	try {
+		// 'sales-engineer.md' must not register the bare key 'engineer' —
+		// otherwise every generic 'engineer' dispatch gets a sales persona.
+		await writeFile(join(tempDir, "sales-engineer.md"), "You are a SALES engineer.");
+		const resolver = createTestResolver(tempDir);
+
+		assert.equal(await resolver.resolve("engineer"), null, "bare 'engineer' must not match");
+		const exact = await resolver.resolve("sales-engineer");
+		assert.equal(exact?.source, "file", "full base name still matches");
+
+		// Multi-word suffixes still work (the AC-1 case).
+		await writeFile(join(tempDir, "engineering-software-architect.md"), "Architect persona.");
+		const fresh = createTestResolver(tempDir);
+		const suffix = await fresh.resolve("software-architect");
+		assert.equal(suffix?.personaName, "engineering-software-architect");
+	} finally {
+		await rm(tempDir, { recursive: true, force: true });
+	}
+});
