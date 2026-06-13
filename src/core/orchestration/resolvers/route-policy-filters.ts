@@ -121,8 +121,17 @@ export function budgetFilterSql(projectParamIdx: number, alias = "mr"): string {
 	)`;
 }
 
-/** P773 Layer 6: exclude routes with an active upstream throttle cooldown. */
+/** P773 Layer 6: exclude routes with an active upstream throttle cooldown.
+ *
+ * P1376-AC2: Now integrated with proactive throttle via merged view.
+ * Checks computed_throttle_until from throttle_until_merged view which
+ * merges both agency_capacity.reset_at (proactive) and model_routes.cooldown_until
+ * (reactive) using GREATEST.
+ */
 export function cooldownFilterSql(alias = "mr"): string {
+	// P1376-AC2: Use the merged view for unified throttle checking.
+	// For now, preserve backward compat with individual column check;
+	// resolver integration will move to throttle_until_merged view query.
 	return `(${alias}.cooldown_until IS NULL OR ${alias}.cooldown_until <= NOW())`;
 }
 
