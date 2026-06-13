@@ -27,6 +27,13 @@
 
 import type { Pool, PoolClient } from "pg";
 import { Client } from "pg";
+import {
+	agentContextStorage,
+	type VerifiedPrincipal,
+} from "../identity/agent-context.ts";
+
+/** The principal kinds carried in agentContextStorage. */
+type VerifiedPrincipalKind = VerifiedPrincipal["principal_kind"];
 
 export type ConfigClass =
 	| "secret"
@@ -122,6 +129,51 @@ export class ProjectIdMissing extends Error {
 		this.keyName = keyName;
 		this.name = "ProjectIdMissing";
 		Object.setPrototypeOf(this, ProjectIdMissing.prototype);
+	}
+}
+
+/**
+ * P828: authority a principal holds to MUTATE config.
+ *   operator        → may write all mutable classes (flag, registry, structural)
+ *   system          → may write flag class only (agency principals)
+ *   agent_read_only → may write nothing
+ */
+export type MutationAuthority = "operator" | "system" | "agent_read_only";
+
+/** P828: programmatic reasons a config mutation was refused. */
+export type MutationForbiddenReason =
+	| "NO_IDENTITY_CONTEXT"
+	| "AGENT_READ_ONLY"
+	| "IMMUTABLE_CLASS"
+	| "SYSTEM_REGISTRY_DENIED"
+	| "SYSTEM_STRUCTURAL_DENIED"
+	| "RELOAD_UNAUTHORIZED"
+	| "PRINCIPAL_LOOKUP_FAILED";
+
+/**
+ * RuntimeConfigMutationForbidden: thrown by set()/reload() when the verified
+ * principal in agentContextStorage lacks authority for the requested mutation.
+ * `reason` is an enum for programmatic handling; `authority` is the resolved
+ * MutationAuthority (null when no identity context was present at all).
+ */
+export class RuntimeConfigMutationForbidden extends Error {
+	public keyName: string;
+	public reason: MutationForbiddenReason;
+	public authority: MutationAuthority | null;
+	constructor(
+		keyName: string,
+		reason: MutationForbiddenReason,
+		authority: MutationAuthority | null,
+	) {
+		super(
+			`[RuntimeConfig] mutation of "${keyName}" forbidden: ${reason}` +
+				(authority ? ` (authority=${authority})` : " (no identity context)"),
+		);
+		this.keyName = keyName;
+		this.reason = reason;
+		this.authority = authority;
+		this.name = "RuntimeConfigMutationForbidden";
+		Object.setPrototypeOf(this, RuntimeConfigMutationForbidden.prototype);
 	}
 }
 
@@ -676,7 +728,207 @@ class ConfigResolver {
 	 * Reload from DB on pg_notify event.
 	 */
 	async reload(): Promise<void> {
+		// P828 AC-17: reload() is an operator-only mutation of in-process state.
+		const ctx = agentContextStorage.getStore();
+		if (!ctx?.verified) {
+			throw new RuntimeConfigMutationForbidden(
+				"<reload>",
+				"NO_IDENTITY_CONTEXT",
+				null,
+			);
+		}
+		const authority = ConfigResolver.resolveAuthority(
+			ctx.verified.principal_kind,
+		);
+		if (authority !== "operator") {
+			throw new RuntimeConfigMutationForbidden(
+				"<reload>",
+				"RELOAD_UNAUTHORIZED",
+				authority,
+			);
+		}
 		this.clear();
+	}
+
+	/**
+	 * P828 AC-4/AC-27: single source of truth mapping a verified principal_kind
+	 * to its MutationAuthority. Static so no other call site re-derives it.
+	 *   operator → operator | agency → system | agent → agent_read_only
+	 */
+	static resolveAuthority(kind: VerifiedPrincipalKind): MutationAuthority {
+		switch (kind) {
+			case "operator":
+				return "operator";
+			case "agency":
+				return "system";
+			default:
+				return "agent_read_only";
+		}
+	}
+
+	/**
+	 * P828: mutate a config value, gated by the verified principal's authority.
+	 *
+	 * Identity is read from agentContextStorage (no explicit param — matches the
+	 * P843 carrier / A2A trust gate pattern). Fail-fast authorization order runs
+	 * BEFORE any DB query, so a denied caller never touches the DB and writes no
+	 * audit row:
+	 *   1. no identity context        → NO_IDENTITY_CONTEXT
+	 *   2. authority = agent_read_only → AGENT_READ_ONLY
+	 *   3. class secret | tenant_dsn   → IMMUTABLE_CLASS
+	 *   4. class structural, non-op    → SYSTEM_STRUCTURAL_DENIED
+	 *   5. class registry, authority=system → SYSTEM_REGISTRY_DENIED
+	 * (Note: the design's execution steps make `structural` operator-writable;
+	 *  AC-6's listing of structural as immutable-for-all conflicts with step 5 +
+	 *  AC-41, so the operator-writable interpretation is used.)
+	 *
+	 * On authorization success the runtime_flag upsert + config_mutation_log
+	 * append + pg_notify + synchronous cache eviction are performed. NOTE: the
+	 * DB-write half targets hiveCentral (core.config_mutation_log +
+	 * control_identity.principal), so it is exercised by integration tests, not
+	 * the always-on unit suite.
+	 */
+	async set<T>(key: ConfigKey<T>, value: T): Promise<void> {
+		const ctx = agentContextStorage.getStore();
+		// 1. fail-closed on missing identity.
+		if (!ctx?.verified) {
+			throw new RuntimeConfigMutationForbidden(
+				key.name,
+				"NO_IDENTITY_CONTEXT",
+				null,
+			);
+		}
+		const authority = ConfigResolver.resolveAuthority(
+			ctx.verified.principal_kind,
+		);
+		// 2. agents may never write.
+		if (authority === "agent_read_only") {
+			throw new RuntimeConfigMutationForbidden(
+				key.name,
+				"AGENT_READ_ONLY",
+				authority,
+			);
+		}
+		// 3. secret + tenant_dsn are immutable for everyone.
+		if (key.class === "secret" || key.class === "tenant_dsn") {
+			throw new RuntimeConfigMutationForbidden(
+				key.name,
+				"IMMUTABLE_CLASS",
+				authority,
+			);
+		}
+		// 4. structural is operator-only.
+		if (key.class === "structural" && authority !== "operator") {
+			throw new RuntimeConfigMutationForbidden(
+				key.name,
+				"SYSTEM_STRUCTURAL_DENIED",
+				authority,
+			);
+		}
+		// 5. registry is operator-only (agencies/system may write flag class only).
+		if (key.class === "registry" && authority === "system") {
+			throw new RuntimeConfigMutationForbidden(
+				key.name,
+				"SYSTEM_REGISTRY_DENIED",
+				authority,
+			);
+		}
+
+		// Authorized. Persist + audit (hiveCentral). Kept behind the pool guard so
+		// the unit suite (which exercises the gates above with no pool) never runs
+		// it; integration tests provide a live control pool.
+		if (!this.pool) {
+			throw new RuntimeConfigMissing(
+				key.name,
+				key.class,
+				"[RuntimeConfig] set() requires a control-plane pool (hiveCentral) to persist + audit the mutation.",
+			);
+		}
+		await this.persistMutation(key, value, ctx.verified, authority);
+	}
+
+	/**
+	 * P828: DB half of set() — runtime_flag upsert + config_mutation_log append
+	 * + pg_notify + synchronous local cache eviction. Separated so the
+	 * authorization gates in set() stay pure and unit-testable.
+	 */
+	private async persistMutation<T>(
+		key: ConfigKey<T>,
+		value: T,
+		principal: VerifiedPrincipal,
+		authority: MutationAuthority,
+	): Promise<void> {
+		const pool = this.pool as Pool;
+		// DID + lifecycle lookup (AC-11/AC-43/AC-44): unverifiable principal → deny.
+		const did = await pool.query<{ did: string }>(
+			`SELECT did FROM control_identity.principal
+			  WHERE id = $1 AND lifecycle_status = 'active' LIMIT 1`,
+			[principal.principal_id],
+		);
+		if (did.rows.length === 0) {
+			throw new RuntimeConfigMutationForbidden(
+				key.name,
+				"PRINCIPAL_LOOKUP_FAILED",
+				authority,
+			);
+		}
+		const callerDid = did.rows[0].did;
+		const newJson = JSON.stringify(value);
+		const oldValue = await this.getOptional(
+			key as ConfigKey<T | undefined>,
+		).catch(() => undefined);
+		const scope = "global";
+
+		// Single transaction: runtime_flag upsert + mutation_log append (AC-45).
+		const client = await pool.connect();
+		try {
+			await client.query("BEGIN");
+			await client.query(
+				`INSERT INTO ${RUNTIME_FLAG_TABLE} (flag_name, scope, value_jsonb)
+				 VALUES ($1, $2, $3::jsonb)
+				 ON CONFLICT (flag_name, scope)
+				 DO UPDATE SET value_jsonb = EXCLUDED.value_jsonb, updated_at = now()`,
+				[key.name, scope, newJson],
+			);
+			await client.query(
+				`INSERT INTO core.config_mutation_log
+				   (key_name, key_class, scope, old_value, new_value, caller_did,
+				    principal_id, mutation_authority, validation_result)
+				 VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, $8, 'success')`,
+				[
+					key.name,
+					key.class,
+					scope,
+					oldValue === undefined ? null : JSON.stringify(oldValue),
+					newJson,
+					callerDid,
+					principal.principal_id,
+					authority,
+				],
+			);
+			await client.query("COMMIT");
+		} catch (err) {
+			await client.query("ROLLBACK").catch(() => {});
+			throw err;
+		} finally {
+			client.release();
+		}
+
+		// AC-15: notify carries identifiers only, never values.
+		await pool
+			.query(`SELECT pg_notify('runtime_flag_changed', $1)`, [
+				JSON.stringify({
+					flag_name: key.name,
+					scope,
+					op: "UPDATE",
+					mutated_by_did: callerDid,
+				}),
+			])
+			.catch(() => {});
+
+		// AC-16: synchronous local eviction so the same process re-reads the value.
+		this.cache.delete(key.name);
+		this.dbCache.delete(`runtime_flag:${key.name}:${scope}`);
 	}
 
 	/**
@@ -845,6 +1097,15 @@ function getResolver(): ConfigResolver {
  */
 export async function get<T>(key: ConfigKey<T>): Promise<T> {
 	return getResolver().get(key);
+}
+
+/**
+ * P828: mutate a config value (operator/system authority, audited). Identity is
+ * read from agentContextStorage. Throws RuntimeConfigMutationForbidden when the
+ * caller lacks authority. See ConfigResolver.set().
+ */
+export async function set<T>(key: ConfigKey<T>, value: T): Promise<void> {
+	return getResolver().set(key, value);
 }
 
 /**
