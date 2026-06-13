@@ -252,6 +252,10 @@ export interface SpawnRequest {
 	parentSpanId?: string | null;
 	/** P1068 AC-3: required role slug (e.g., 'engineering/code-reviewer') for role-identity binding */
 	requiredRole?: string | null;
+	/** P1392: resolved persona body for system-prompt injection (provider-aware) */
+	persona?: string | null;
+	/** P1392: persona name/source for telemetry */
+	personaName?: string | null;
 }
 
 export interface SpawnResult {
@@ -454,8 +458,17 @@ function buildClaudeArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
 		"--dangerously-skip-permissions", // spawned agents need Write/Bash to do real work
 		"--model",
 		route.modelName,
-		req.task,
 	];
+
+	// P1392: Claude supports --append-system-prompt for persona injection.
+	// If persona is provided, use it as a system prompt flag instead of prepending to task.
+	if (req.persona) {
+		argv.push("--append-system-prompt", req.persona);
+	}
+
+	// Append the task (which should NOT contain the persona if we used --append-system-prompt)
+	argv.push(req.task);
+
 	const env: Record<string, string> = { ANTHROPIC_MODEL: route.modelName };
 	// DB controls base_url; set env var whenever baseUrlEnv is configured.
 	if (route.baseUrlEnv) {
@@ -495,15 +508,20 @@ function buildHermesArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
  * Build argv + env for the OpenAI Codex CLI.
  * Used when agent_provider = 'codex' (openai spec, `codex` terminal tool).
  * https://github.com/openai/codex
+ *
+ * P1392: For providers without --append-system-prompt support, persona is prepended to task.
  */
 function buildCodexArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
+	// P1392: Prepend persona to task for codex (no --append-system-prompt support)
+	const taskWithPersona = req.persona ? `${req.persona}\n\n${req.task}` : req.task;
+
 	const argv = [
 		route.cliPath ?? "codex",
 		"exec",
 		"--dangerously-bypass-approvals-and-sandbox",
 		"--model",
 		route.modelName,
-		req.task,
+		taskWithPersona,
 	];
 	const env: Record<string, string> = {};
 	// DB controls base_url; set env var whenever baseUrlEnv is configured.
@@ -539,15 +557,22 @@ function buildOpenAICompatArgs(
  * isn't on Gemini's trusted-folders list. The agent-spawner constructs a
  * whitelist-only child env so GEMINI_CLI_TRUST_WORKSPACE doesn't propagate
  * from the parent agency process; the CLI flag is the load-bearing equivalent.
+ *
+ * P1392: For Gemini, persona is prepended to the prompt (via # Role header format).
  */
 function buildGeminiArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
+	// P1392: Prepend persona with # Role header format for gemini
+	const taskWithPersona = req.persona
+		? `# Role\n\n${req.persona}\n\n${req.task}`
+		: req.task;
+
 	const argv = [
 		route.cliPath ?? "gemini",
 		"--skip-trust",
 		"--model",
 		route.modelName,
 		"--prompt",
-		req.task,
+		taskWithPersona,
 	];
 	return { argv, env: {} };
 }
@@ -557,12 +582,19 @@ function buildGeminiArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
  * Used when agent_cli = 'copilot' — auth is read from ~/.copilot/settings.json
  * by the CLI itself; no API key env var is required.
  * cli_path in model_routes controls the binary location (no hardcoding here).
+ *
+ * P1392: For Copilot, persona is prepended to the prompt (via ## Persona header format).
  */
 function buildCopilotArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
+	// P1392: Prepend persona with ## Persona header format for copilot
+	const taskWithPersona = req.persona
+		? `## Persona\n\n${req.persona}\n\n${req.task}`
+		: req.task;
+
 	const argv = [
 		route.cliPath ?? "copilot",
 		"-p",
-		req.task,
+		taskWithPersona,
 		"--yolo",
 		"--model",
 		route.modelName,
@@ -1960,7 +1992,11 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	});
 	const durationMs = Date.now() - startMs;
 
-	const outputSummary = stdout.slice(-1000);
+	// P1392 AC-5: Append persona name to output_summary for telemetry
+	let outputSummary = stdout.slice(-1000);
+	if (req.personaName) {
+		outputSummary = `persona=${req.personaName} ${outputSummary}`;
+	}
 	const errorDetail = stderr.slice(-4000);
 
 	// TODO P1365-AC2: Extract rate-limit headers from response and record signal
