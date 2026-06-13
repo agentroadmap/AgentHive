@@ -380,6 +380,8 @@ const opsRoutes: RouteMap = {
 	capacity_clear: "capacity_clear",
 	// P1511: SLA monitoring and health check
 	health_check: "health_check",
+	// P1124: D4 merge-gate validator
+	d4_validate: "d4_validate",
 };
 
 const projectRoutes: RouteMap = {

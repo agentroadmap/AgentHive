@@ -45,6 +45,7 @@ import {
 import { recordSpawnUsage } from "./record-spawn-usage.ts";
 import { classifyExit } from "../../core/orchestration/agent-spawner.ts";
 import { incrementSpawnFailure, THROTTLE_THRESHOLD } from "../../core/orchestration/resolvers/agency-resolver.ts";
+import { validateProposal } from "../../core/orchestration/d4-validator.ts";
 
 const obs = new ObservabilityWriter("agency:offer-dispatch-handler");
 
@@ -512,6 +513,76 @@ async function runSpawn(args: {
 				}
 			} catch (err: any) {
 				logger.warn(`[OfferDispatchHandler] failed to provision worktree ${worktree}: ${err?.message}`);
+			}
+		}
+
+		// P1124 D4 Validator: Check if this is a gate-reviewer dispatch for a MERGE-stage proposal.
+		// If so, run AC validation before spawning. advance=skip spawn (zero-token);
+		// hold/reject=skip spawn + record decision; inconclusive=fall through to spawn (human review).
+		if (proposalId && payload.role === "gate-reviewer") {
+			try {
+				// Look up proposal status to confirm it's MERGE stage
+				const propRows = await exec(
+					`SELECT status FROM roadmap_proposal.proposal WHERE id = $1`,
+					[proposalId],
+				);
+				const propStatus = (propRows as any)?.rows?.[0]?.status;
+
+				if (propStatus === "Merge") {
+					const validationResult = await validateProposal(proposalId, payload.trace_id ?? undefined);
+
+					logger.log(
+						`[OfferDispatchHandler] ${agencyId}: D4 validation for proposal ${proposalId}: decision=${validationResult.decision}`,
+					);
+
+					// If validator decided to advance, skip spawn entirely (zero-token) and mark completed
+					if (validationResult.decision === "advance") {
+						logger.log(
+							`[OfferDispatchHandler] ${agencyId}: D4 advance → skipping spawn for offer=${payload.offer_id}`,
+						);
+						clearInterval(renewalTimer);
+						await exec(
+							`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, $4)`,
+							[dispatchId, agencyId, claimToken, "delivered"],
+						).catch((err) => {
+							logger.error(
+								`[OfferDispatchHandler] ${agencyId}: fn_complete_work_offer failed on D4-advance:`,
+								err instanceof Error ? err.message : err,
+							);
+						});
+						return;
+					}
+
+					// If validator decided to hold or reject, skip spawn but record the decision
+					if (validationResult.decision === "hold" || validationResult.decision === "reject") {
+						logger.log(
+							`[OfferDispatchHandler] ${agencyId}: D4 ${validationResult.decision} → skipping spawn for offer=${payload.offer_id}`,
+						);
+						clearInterval(renewalTimer);
+						const offerStatus = validationResult.decision === "hold" ? "failed" : "failed";
+						await exec(
+							`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, $4)`,
+							[dispatchId, agencyId, claimToken, offerStatus],
+						).catch((err) => {
+							logger.error(
+								`[OfferDispatchHandler] ${agencyId}: fn_complete_work_offer failed on D4-hold/reject:`,
+								err instanceof Error ? err.message : err,
+							);
+						});
+						return;
+					}
+
+					// If inconclusive, fall through to normal spawn (human review via CLI)
+					logger.log(
+						`[OfferDispatchHandler] ${agencyId}: D4 inconclusive → proceeding to spawn for offer=${payload.offer_id}`,
+					);
+				}
+			} catch (err) {
+				logger.warn(
+					`[OfferDispatchHandler] ${agencyId}: D4 validation failed for proposal ${proposalId}, falling through to spawn:`,
+					err instanceof Error ? err.message : err,
+				);
+				// Fall through to normal spawn on validator error
 			}
 		}
 
