@@ -528,7 +528,8 @@ async function runSpawn(args: {
 				);
 				const propStatus = (propRows as any)?.rows?.[0]?.status;
 
-				if (propStatus === "Merge") {
+				// Status values are stored UPPERCASE (e.g. 'MERGE').
+				if (propStatus === "MERGE") {
 					const validationResult = await validateProposal(proposalId, payload.trace_id ?? undefined);
 
 					logger.log(
@@ -559,10 +560,9 @@ async function runSpawn(args: {
 							`[OfferDispatchHandler] ${agencyId}: D4 ${validationResult.decision} → skipping spawn for offer=${payload.offer_id}`,
 						);
 						clearInterval(renewalTimer);
-						const offerStatus = validationResult.decision === "hold" ? "failed" : "failed";
 						await exec(
 							`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, $4)`,
-							[dispatchId, agencyId, claimToken, offerStatus],
+							[dispatchId, agencyId, claimToken, "failed"],
 						).catch((err) => {
 							logger.error(
 								`[OfferDispatchHandler] ${agencyId}: fn_complete_work_offer failed on D4-hold/reject:`,
