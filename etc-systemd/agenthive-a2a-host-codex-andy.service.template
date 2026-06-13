@@ -1,5 +1,12 @@
 # AgentHive A2A Host — codex-agency-bot under andy (Step 2 of P1140 sibling)
 #
+# RETIRED PATTERN (P1447 closeout, 2026-06-13): bot runs a SINGLE a2a-host
+# (as andy, via zz-codex-andy.conf drop-in) and the AGENTHIVE_AGENCY_EXCLUDE
+# drop-in (p1361-exclude.conf) was removed — agency discovery is now purely
+# registry-driven (roadmap_workforce.agent_registry host_affinity/status/
+# preferred_provider). Re-introduce the sibling split ONLY if two OS users
+# must hold different provider auth on one host again.
+#
 # Purpose: run a second a2a-host process owned by andy so codex-routed work
 # spawns under andy's OS context where /home/andy/.codex/auth.json is reachable.
 # Gary's primary a2a-host EXCLUDES the same identity via AGENTHIVE_AGENCY_EXCLUDE
