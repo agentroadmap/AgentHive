@@ -10,8 +10,8 @@
  */
 
 import { readdir, readFile } from "node:fs/promises";
-import { join, basename, extname } from "node:path";
-import { getPool, closePool } from "../src/infra/postgres/pool.ts";
+import { extname, join } from "node:path";
+import { closePool, getPool } from "../src/infra/postgres/pool.ts";
 
 export interface ImportOptions {
 	localPath?: string;
@@ -19,7 +19,7 @@ export interface ImportOptions {
 }
 
 // Divisions to scan (top-level .md files only)
-const IMPORTABLE_DIVISIONS = [
+export const IMPORTABLE_DIVISIONS = [
 	"academic",
 	"design",
 	"engineering",
@@ -31,11 +31,43 @@ const IMPORTABLE_DIVISIONS = [
 	"sales",
 	"spatial-computing",
 	"specialized",
+	"strategy",
 	"support",
 	"testing",
 ] as const;
 
 type Division = (typeof IMPORTABLE_DIVISIONS)[number];
+
+// Dirs that exist on disk but are deliberately NOT imported. `finance` was
+// added to the catalog after the P1358 spec (14 divisions / 167 agents); it is
+// excluded here so the import stays at the spec'd scope and AC-17's
+// reconciliation does not hard-fail. Surfaced in dry-run output.
+const EXCLUDED_DIRS = new Set([
+	"examples",
+	"scripts",
+	"integrations",
+	"finance",
+]);
+
+/** Clamp a string to `max` chars (DB CHECK: vibe ≤160, communication ≤500). */
+function clamp(s: string, max: number): string {
+	return s.length <= max ? s : `${s.slice(0, max - 1).trimEnd()}…`;
+}
+
+// Expertise roles accepted by fn_validate_personality. Anything else (e.g. the
+// 'coordinator' the specialized keyword map can yield) is filtered out before
+// insert, falling back to 'researcher'.
+const VALID_EXPERTISE = new Set([
+	"architect",
+	"reviewer",
+	"coder",
+	"debugger",
+	"writer",
+	"researcher",
+	"tester",
+	"devops",
+	"designer",
+]);
 
 // Division → expertise roles mapping
 const DIVISION_EXPERTISE: Record<Division, string[]> = {
@@ -51,6 +83,7 @@ const DIVISION_EXPERTISE: Record<Division, string[]> = {
 	"game-development": ["designer", "coder"],
 	"spatial-computing": ["designer"],
 	specialized: [],
+	strategy: ["researcher", "writer"],
 	academic: ["researcher"],
 };
 
@@ -83,7 +116,9 @@ interface AgentDef {
 	vibe: string;
 	expertise: string[];
 	capabilities: string[];
+	capabilityTitles: string[];
 	boundaries: string[];
+	communicationStyle: string;
 }
 
 function slugify(name: string): string {
@@ -94,9 +129,7 @@ function slugify(name: string): string {
 		.replace(/^-+|-+$/g, "");
 }
 
-function parseFrontmatter(
-	content: string,
-): Record<string, string> | null {
+function parseFrontmatter(content: string): Record<string, string> | null {
 	const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
 	if (!match) return null;
 	const result: Record<string, string> = {};
@@ -104,7 +137,10 @@ function parseFrontmatter(
 		const colon = line.indexOf(":");
 		if (colon === -1) continue;
 		const key = line.slice(0, colon).trim();
-		const val = line.slice(colon + 1).trim().replace(/^["']|["']$/g, "");
+		const val = line
+			.slice(colon + 1)
+			.trim()
+			.replace(/^["']|["']$/g, "");
 		if (key) result[key] = val;
 	}
 	return result;
@@ -143,12 +179,42 @@ function extractH3sUnderSection(
 
 		// Collect H3 headings
 		if (/^###\s+/.test(trimmed)) {
-			const heading = trimmed.replace(/^###\s+/, "").replace(/\*\*/g, "").trim();
+			const heading = trimmed
+				.replace(/^###\s+/, "")
+				.replace(/\*\*/g, "")
+				.trim();
 			results.push(heading);
 		}
 	}
 
 	return results;
+}
+
+/**
+ * First block of body text under the first H2 matching any pattern. Used for
+ * communication_style, which fn_validate_personality requires to be non-empty.
+ */
+function extractBodyUnderSection(
+	content: string,
+	sectionPatterns: RegExp[],
+): string {
+	const lines = content.split("\n");
+	let inSection = false;
+	const buf: string[] = [];
+	for (const line of lines) {
+		const trimmed = line.trim();
+		if (!inSection) {
+			if (sectionPatterns.some((p) => p.test(trimmed))) inSection = true;
+			continue;
+		}
+		if (/^#{1,2}\s/.test(trimmed) && !/^###\s/.test(trimmed)) break;
+		const text = trimmed
+			.replace(/^[-*]\s+/, "")
+			.replace(/\*\*/g, "")
+			.trim();
+		if (text && !/^###\s/.test(text)) buf.push(text);
+	}
+	return buf.join(" ").trim();
 }
 
 function inferSpecializedExpertise(name: string): string[] {
@@ -167,17 +233,23 @@ async function parseAgentFile(
 	const fm = parseFrontmatter(content);
 	if (!fm?.name) return null;
 
-	const capabilities = extractH3sUnderSection(content, [
+	const capabilityTitles = extractH3sUnderSection(content, [
 		/^##\s+🎯\s+Your Core Mission/,
 		/^#\s+Your Core Mission/,
-	]).map(slugify);
+	]);
+	const capabilities = capabilityTitles.map(slugify).filter(Boolean);
 
 	const boundaries = extractH3sUnderSection(content, [
 		/^##\s+🚨\s+Critical Rules/,
 		/^#\s+Critical Rules/,
 	]);
 
-	let expertise =
+	const communicationStyle = extractBodyUnderSection(content, [
+		/^##\s+💭\s+Your Communication Style/,
+		/^#\s+Your Communication Style/,
+	]);
+
+	const expertise =
 		division === "specialized"
 			? inferSpecializedExpertise(fm.name)
 			: DIVISION_EXPERTISE[division];
@@ -195,34 +267,69 @@ async function parseAgentFile(
 		vibe: fm.vibe ?? "",
 		expertise,
 		capabilities,
+		capabilityTitles,
 		boundaries,
+		communicationStyle,
 	};
+}
+
+interface DivisionScan {
+	defs: AgentDef[];
+	rawMd: number; // total .md files seen
+	skipped: number; // .md files skipped (doc files / no frontmatter)
 }
 
 async function scanDivision(
 	baseDir: string,
 	division: Division,
-): Promise<AgentDef[]> {
+): Promise<DivisionScan> {
 	const dir = join(baseDir, division);
 	let entries: string[];
 	try {
 		entries = await readdir(dir);
 	} catch {
-		return [];
+		return { defs: [], rawMd: 0, skipped: 0 };
 	}
 
 	const defs: AgentDef[] = [];
+	let rawMd = 0;
 	for (const entry of entries) {
 		if (extname(entry) !== ".md") continue;
-		// Skip documentation files that aren't agent definitions
+		rawMd++;
+		// Skip documentation files that aren't agent definitions (README,
+		// QUICKSTART, EXECUTIVE-BRIEF, nexus-*, CONTRIBUTING — present e.g. in
+		// strategy/, which holds only planning docs, not agents).
 		if (/^(README|QUICKSTART|EXECUTIVE|NEXUS|CONTRIBUTING)/i.test(entry)) {
 			continue;
 		}
 		const filePath = join(dir, entry);
 		const def = await parseAgentFile(filePath, division);
-		if (def) defs.push(def);
+		if (def) defs.push(def); // parseAgentFile returns null when no `name:` frontmatter
 	}
-	return defs;
+	return { defs, rawMd, skipped: rawMd - defs.length };
+}
+
+/**
+ * AC-17: reconcile the declared IMPORTABLE_DIVISIONS against on-disk reality.
+ * Returns divisions declared-but-absent and present-but-unaccounted-for (i.e.
+ * neither importable nor explicitly excluded).
+ */
+export async function reconcileDivisions(root: string): Promise<{
+	missingFromDisk: string[];
+	extraOnDisk: string[];
+}> {
+	const entries = await readdir(root, { withFileTypes: true });
+	const onDisk = entries
+		.filter((e) => e.isDirectory() && !e.name.startsWith("."))
+		.map((e) => e.name);
+	const importable = new Set<string>(IMPORTABLE_DIVISIONS);
+	const missingFromDisk = IMPORTABLE_DIVISIONS.filter(
+		(d) => !onDisk.includes(d),
+	);
+	const extraOnDisk = onDisk.filter(
+		(d) => !importable.has(d) && !EXCLUDED_DIRS.has(d),
+	);
+	return { missingFromDisk, extraOnDisk };
 }
 
 async function preflightCheck(): Promise<void> {
@@ -251,7 +358,10 @@ async function preflightCheck(): Promise<void> {
 			 WHERE conname = 'agent_registry_type_check'
 			   AND conrelid = 'roadmap_workforce.agent_registry'::regclass`,
 		);
-		if (typeRes.rows.length > 0 && !typeRes.rows[0].conbin.includes("'agency'")) {
+		if (
+			typeRes.rows.length > 0 &&
+			!typeRes.rows[0].conbin.includes("'agency'")
+		) {
 			console.warn(
 				"[preflight] agent_type check constraint does not include 'agency' — will use 'llm' as fallback",
 			);
@@ -266,12 +376,33 @@ async function upsertAgent(
 	def: AgentDef,
 	agentType: "agency" | "llm",
 ): Promise<number> {
+	// fn_validate_personality is STRICT: vibe non-empty ≤160; core_truths,
+	// boundaries, expertise all NON-EMPTY arrays; communication_style non-empty
+	// ≤500; expertise ∈ VALID_EXPERTISE. The P1358 spec's `core_truths: []` /
+	// `communication_style: ""` shape would be rejected on EVERY insert — derive
+	// non-empty values with safe fallbacks.
+	const vibe = clamp(def.vibe || def.description || `${def.name} agent`, 160);
+	const coreTruths = def.capabilityTitles.length
+		? def.capabilityTitles
+		: [def.description || `${def.name} — agency-agents catalog seed`];
+	const boundaries = def.boundaries.length
+		? def.boundaries
+		: ["Operates within agency-agents catalog conventions"];
+	const expertise = (() => {
+		const valid = def.expertise.filter((r) => VALID_EXPERTISE.has(r));
+		return valid.length ? valid : ["researcher"];
+	})();
+	const communication_style = clamp(
+		def.communicationStyle || "Professional, domain-focused communication.",
+		500,
+	);
+
 	const personality = {
-		vibe: def.vibe,
-		expertise: def.expertise,
-		boundaries: def.boundaries,
-		core_truths: [],
-		communication_style: "",
+		vibe,
+		expertise,
+		boundaries,
+		core_truths: coreTruths,
+		communication_style,
 	};
 
 	const display_metadata = {
@@ -321,36 +452,71 @@ export async function runImport(opts: ImportOptions = {}): Promise<void> {
 	const localPath = opts.localPath ?? "/data/code/agency-agents";
 	const dryRun = opts.dryRun ?? false;
 
-	console.log(
-		`[import-catalog] source=${localPath} dry-run=${dryRun}`,
-	);
+	console.log(`[import-catalog] source=${localPath} dry-run=${dryRun}`);
+
+	// AC-17: reconcile divisions before any scan or write.
+	const { missingFromDisk, extraOnDisk } = await reconcileDivisions(localPath);
+	for (const d of missingFromDisk) {
+		console.error(`Division ${d} declared but not found in catalog`);
+	}
+	if (missingFromDisk.length) {
+		throw new Error("declared division(s) missing from disk");
+	}
+	for (const d of extraOnDisk) {
+		console.error(
+			`Division ${d} present in catalog but not in IMPORTABLE_DIVISIONS — did you mean to exclude it?`,
+		);
+	}
+	if (extraOnDisk.length) {
+		throw new Error("unreconciled division(s) on disk");
+	}
 
 	if (!dryRun) {
 		await preflightCheck();
 	}
 
-	// Scan all divisions
+	// Scan all divisions (track raw .md and skipped non-agent docs per division).
 	const allDefs: AgentDef[] = [];
+	const scanByDivision: Record<string, DivisionScan> = {};
+	let rawTotal = 0;
+	let skippedTotal = 0;
 	for (const division of IMPORTABLE_DIVISIONS) {
-		const defs = await scanDivision(localPath, division);
-		allDefs.push(...defs);
+		const scan = await scanDivision(localPath, division);
+		scanByDivision[division] = scan;
+		allDefs.push(...scan.defs);
+		rawTotal += scan.rawMd;
+		skippedTotal += scan.skipped;
 	}
 
-	console.log(`[import-catalog] found ${allDefs.length} agent definitions`);
+	console.log(
+		`[import-catalog] ${allDefs.length} importable agents (${rawTotal} .md files, ${skippedTotal} non-agent docs skipped)`,
+	);
 
 	if (dryRun) {
-		const byDivision = new Map<string, number>();
-		for (const def of allDefs) {
-			byDivision.set(def.division, (byDivision.get(def.division) ?? 0) + 1);
+		console.log("\n[import-catalog] per-division breakdown:");
+		for (const division of IMPORTABLE_DIVISIONS) {
+			const s = scanByDivision[division];
 			console.log(
-				`  ${def.identity} | div=${def.division} caps=${def.capabilities.length} expertise=${def.expertise.join(",")}`,
+				`  ${division.padEnd(20)} agents=${String(s.defs.length).padStart(3)} ` +
+					`raw=${String(s.rawMd).padStart(3)}` +
+					(s.skipped ? `  (${s.skipped} non-agent skipped)` : ""),
 			);
 		}
-		console.log("\n[import-catalog] per-division counts:");
-		for (const [div, count] of [...byDivision.entries()].sort()) {
-			console.log(`  ${div.padEnd(20)} ${count}`);
+		if (EXCLUDED_DIRS.size) {
+			console.log(`  excluded dirs: ${[...EXCLUDED_DIRS].join(", ")}`);
 		}
-		console.log(`[import-catalog] total=${allDefs.length} dry-run complete — no writes performed`);
+		// Parsed sample (AC-2).
+		const sample = allDefs[0];
+		if (sample) {
+			console.log(
+				`\n[import-catalog] sample: name="${sample.name}" slug=${sample.identity} ` +
+					`caps=${sample.capabilities.length} expertise=${sample.expertise.join(",")} ` +
+					`vibe="${clamp(sample.vibe, 60)}"`,
+			);
+		}
+		console.log(
+			`\n[import-catalog] total=${allDefs.length} dry-run complete — no writes performed`,
+		);
 		return;
 	}
 
