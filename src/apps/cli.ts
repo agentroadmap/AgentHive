@@ -5379,25 +5379,6 @@ agentsCmd
 	});
 
 agentsCmd
-	.command("import-catalog")
-	.description("import agency-agents catalog as inactive agent seeds (P1358)")
-	.option(
-		"--local-path <dir>",
-		"path to local agency-agents repo",
-		"/data/code/agency-agents",
-	)
-	.option("--dry-run", "print what would be imported without writing to DB")
-	.action(async (options) => {
-		const { runImport } = await import(
-			"../../scripts/import-agency-agents-catalog.ts"
-		);
-		await runImport({
-			localPath: options.localPath,
-			dryRun: Boolean(options.dryRun),
-		});
-	});
-
-agentsCmd
 	.command("join <name>")
 	.description("initialize a new agent workspace with a ghost identity")
 	.option(
