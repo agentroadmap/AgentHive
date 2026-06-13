@@ -210,7 +210,11 @@ const jsonBodyParser = express.json({ limit: "4mb" });
 
 app.post(["/mcp", "/api/mcp"], jsonBodyParser, async (req, res) => {
 	try {
-		const response = await handleDirectMcpRequest(sharedServer, req.body, req.headers.authorization);
+		const response = await handleDirectMcpRequest(
+			sharedServer,
+			req.body,
+			req.headers.authorization,
+		);
 		res.status(response.status).json(response.body);
 	} catch (err) {
 		console.error("[MCP] Direct MCP request failed:", String(err));
@@ -232,11 +236,11 @@ if (HTTP_ENABLED) {
 		async (req, res) => {
 			try {
 				// SDK requires fresh Server per StreamableHTTP request (Protocol is
-				// P1123/P1399 HOTFIX: Reuse the singleton sharedServer instead of 
-				// calling createMcpServer per request. Creating a fresh server 
-				// on every HTTP hit creates a new DB connection pool and 
-				// installs a new NOTIFY listener, exhausting Postgres 
-				// connections and eventually poisoning the pool with 
+				// P1123/P1399 HOTFIX: Reuse the singleton sharedServer instead of
+				// calling createMcpServer per request. Creating a fresh server
+				// on every HTTP hit creates a new DB connection pool and
+				// installs a new NOTIFY listener, exhausting Postgres
+				// connections and eventually poisoning the pool with
 				// "Cannot use a pool after calling end".
 				const transport = await sharedServer.createStreamableHttpTransport();
 				await transport.handleRequest(req, res, req.body);
@@ -271,7 +275,10 @@ if (SSE_ENABLED) {
 	app.get("/sse", async (_req, res) => {
 		console.log("[MCP] New SSE connection request");
 		try {
-			const sseTransport = await sharedServer.createSseTransport("/messages", res);
+			const sseTransport = await sharedServer.createSseTransport(
+				"/messages",
+				res,
+			);
 
 			const sessionId = sseTransport.sessionId;
 			sessions.set(sessionId, sseTransport);
@@ -297,7 +304,9 @@ if (SSE_ENABLED) {
 		const transport = sessions.get(sessionId);
 
 		if (!transport) {
-			res.status(400).send(`No active SSE connection for session: ${sessionId}`);
+			res
+				.status(400)
+				.send(`No active SSE connection for session: ${sessionId}`);
 			return;
 		}
 
@@ -320,16 +329,22 @@ if (SSE_ENABLED) {
 }
 
 const server = app.listen(port, host, () => {
-	console.log(`[MCP] AgentHive MCP server v${APP_VERSION} listening on port ${port}`);
+	console.log(
+		`[MCP] AgentHive MCP server v${APP_VERSION} listening on port ${port}`,
+	);
 	console.log(`[MCP] Transport config: MCP_TRANSPORT=${MCP_TRANSPORT}`);
 	console.log(`[MCP] Readiness URL: http://localhost:${port}/health`);
 	if (SSE_ENABLED) {
 		console.log(`[MCP] SSE Endpoint:             http://localhost:${port}/sse`);
-		console.log(`[MCP] SSE Message Endpoint:     http://localhost:${port}/messages`);
+		console.log(
+			`[MCP] SSE Message Endpoint:     http://localhost:${port}/messages`,
+		);
 		console.log(`[MCP] SSE deprecation target:   2026-07-01`);
 	}
 	if (HTTP_ENABLED) {
-		console.log(`[MCP] StreamableHTTP Endpoint:  http://localhost:${port}/mcp-streamable`);
+		console.log(
+			`[MCP] StreamableHTTP Endpoint:  http://localhost:${port}/mcp-streamable`,
+		);
 	}
 });
 
@@ -343,24 +358,39 @@ const keepalive = setInterval(() => {
 	});
 }, 30000); // Every 30 seconds
 
-// Handle graceful shutdown
-process.on("SIGTERM", () => {
-	console.log("[MCP] SIGTERM received, shutting down gracefully");
+// Handle graceful shutdown.
+// P3198: long-lived SSE connections never close on their own, so server.close()'s
+// callback would never fire and systemd would kill the unit on TimeoutStopSec.
+// Force-close open sockets so close() can complete, and arm an unref'd failsafe
+// that exits regardless if anything still pins the event loop.
+let shuttingDown = false;
+function shutdown(sig) {
+	if (shuttingDown) return;
+	shuttingDown = true;
+	console.log(`[MCP] ${sig} received, shutting down gracefully`);
 	clearInterval(keepalive);
-	server.close(() => {
-		console.log("[MCP] Server closed");
-		process.exit(0);
-	});
-});
 
-process.on("SIGINT", () => {
-	console.log("[MCP] SIGINT received, shutting down gracefully");
-	clearInterval(keepalive);
+	const hardExit = setTimeout(() => {
+		console.warn("[MCP] graceful close exceeded 5s — forcing exit");
+		process.exit(0);
+	}, 5000);
+	hardExit.unref();
+
 	server.close(() => {
 		console.log("[MCP] Server closed");
 		process.exit(0);
 	});
-});
+
+	// Node >=18.2: drop idle keep-alive + long-lived SSE sockets so close() resolves.
+	if (typeof server.closeAllConnections === "function") {
+		server.closeAllConnections();
+	} else if (typeof server.closeIdleConnections === "function") {
+		server.closeIdleConnections();
+	}
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
 
 process.on("uncaughtException", (err) => {
 	console.error("[MCP] Uncaught exception:", err);
