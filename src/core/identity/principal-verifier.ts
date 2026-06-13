@@ -13,10 +13,10 @@
 import { createVerify } from "node:crypto";
 import type { PrincipalIdentityStore } from "./principal-identity.js";
 import {
-	verifyBoundBearer,
-	verifyAgentSessionToken,
-	CLOCK_SKEW_MS,
 	type AgentSessionTokenInput,
+	CLOCK_SKEW_MS,
+	verifyAgentSessionToken,
+	verifyBoundBearer,
 } from "./principal-identity.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -25,6 +25,27 @@ export interface VerifiedPrincipal {
 	principal_id: string;
 	principal_kind: "operator" | "agency" | "agent";
 	parent_principal_id: string | null;
+	/**
+	 * P1114: trust_tier driving MCP-tool clearance. Typed as string here to keep
+	 * core/identity free of an apps/mcp-server import; the enforcement middleware
+	 * narrows it to TrustTier. Defaulted by principal_kind (see
+	 * defaultTrustTierForKind); a per-identity DB override is a P1114 Phase-2 item.
+	 */
+	trust_tier?: string;
+}
+
+/** P1114: default trust_tier per principal kind (operator>agency>agent). */
+export function defaultTrustTierForKind(
+	kind: VerifiedPrincipal["principal_kind"],
+): string {
+	switch (kind) {
+		case "operator":
+			return "authority";
+		case "agency":
+			return "known";
+		default:
+			return "restricted";
+	}
 }
 
 export interface VerifyResult {
@@ -87,17 +108,26 @@ export class PrincipalVerifier {
 		if (principal.revoked_at) {
 			return { ok: false, reason: "principal_revoked" };
 		}
-		if (principal.expires_at && principal.expires_at.getTime() < Date.now() - CLOCK_SKEW_MS) {
+		if (
+			principal.expires_at &&
+			principal.expires_at.getTime() < Date.now() - CLOCK_SKEW_MS
+		) {
 			return { ok: false, reason: "principal_expired" };
 		}
 
 		let credResult: VerifyResult;
 		switch (principal.principal_kind) {
 			case "operator":
-				credResult = this._verifyOperatorBearer(envelope, principal.principal_id);
+				credResult = this._verifyOperatorBearer(
+					envelope,
+					principal.principal_id,
+				);
 				break;
 			case "agency":
-				credResult = this._verifyAgencyEd25519(envelope, principal.public_credential ?? "");
+				credResult = this._verifyAgencyEd25519(
+					envelope,
+					principal.public_credential ?? "",
+				);
 				break;
 			case "agent":
 				credResult = await this._verifyAgentHmac(envelope, principal);
@@ -108,6 +138,15 @@ export class PrincipalVerifier {
 
 		if (credResult.ok) {
 			this.store.touchLastUsed(envelope.principal_id);
+			// P1114: enrich with trust_tier (kind default) for clearance checks.
+			if (
+				credResult.principal &&
+				credResult.principal.trust_tier === undefined
+			) {
+				credResult.principal.trust_tier = defaultTrustTierForKind(
+					credResult.principal.principal_kind,
+				);
+			}
 		}
 		return credResult;
 	}
@@ -118,7 +157,10 @@ export class PrincipalVerifier {
 		envelope: McpAuthEnvelope,
 		expectedPrincipalId: string,
 	): VerifyResult {
-		const result = verifyBoundBearer(envelope.credential, this.operatorHmacSecret);
+		const result = verifyBoundBearer(
+			envelope.credential,
+			this.operatorHmacSecret,
+		);
 		if (!result.ok) return { ok: false, reason: result.reason };
 		// AC#103 — token must be bound to the asserted principal_id
 		if (result.principal_id !== expectedPrincipalId) {
@@ -174,7 +216,10 @@ export class PrincipalVerifier {
 
 	private async _verifyAgentHmac(
 		envelope: McpAuthEnvelope,
-		agentPrincipal: { principal_id: string; parent_principal_id: string | null },
+		agentPrincipal: {
+			principal_id: string;
+			parent_principal_id: string | null;
+		},
 	): Promise<VerifyResult> {
 		if (!envelope.spawn_context) {
 			return { ok: false, reason: "missing_spawn_context" };
