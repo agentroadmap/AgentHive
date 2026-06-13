@@ -119,18 +119,22 @@ export async function logThrottleDecision(
 
   // Fire-and-forget audit log (non-blocking)
   // The resolver must not wait on this
-  query(
+  // from_agent must be a registered agent_registry identity (FK);
+  // 'system:orchestrator' was unregistered, which silently killed every
+  // audit write until P1375.
+  return query(
     `INSERT INTO roadmap.message_ledger (
       from_agent, channel, message_type, metadata, project_id
      ) VALUES ($1, $2, $3, $4, $5)`,
     [
-      'system:orchestrator',
+      'orchestrator',
       'system:capacity-throttle',
       'throttle_decision',
       JSON.stringify(metadata),
       projectId || 1, // Default to control-plane project if not specified
     ]
-  ).catch((err) => {
+  ).then(() => undefined)
+  .catch((err) => {
     console.warn('[P1365] Failed to log throttle decision:', err);
   });
 }

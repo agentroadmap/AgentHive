@@ -168,6 +168,44 @@ export async function resolveAgency(
 		}
 	}
 
+	// P1375 (P1365-C AC-8 follow-up): capacity-aware throttle audit.
+	// Score the selected candidate against agency_capacity ('*' = provider-level
+	// wildcard row written by the P1859 probe bridge). Hard-throttled candidates
+	// are rejected; soft/hard decisions are audit-logged fire-and-forget — a
+	// logging failure must never block resolution (AC-3). Fail-open on errors.
+	try {
+		const { computeCapacityScoreMultiplier, logThrottleDecision } = await import(
+			"../capacity-filter.ts"
+		);
+		const provider =
+			typeof (row.capabilities as Record<string, unknown>)?.provider === "string"
+				? ((row.capabilities as Record<string, unknown>).provider as string)
+				: "*";
+		const { multiplier, score } = await computeCapacityScoreMultiplier(
+			row.agency_identity,
+			provider,
+			"*",
+		);
+		if (score.action === "soft" || score.action === "hard") {
+			void logThrottleDecision(
+				row.agency_identity,
+				provider,
+				"*",
+				score,
+				row.project_id != null ? String(row.project_id) : projectId,
+			);
+		}
+		if (multiplier === 0) {
+			// Hard-throttled: never dispatch to this agency.
+			return null;
+		}
+	} catch (err) {
+		console.warn(
+			`[agency-resolver] capacity check failed for ${row.agency_identity} (fail-open):`,
+			err instanceof Error ? err.message : err,
+		);
+	}
+
 	// P1351 AC-6: build agency chain for nested agencies
 	const agencyChain = await buildAgencyChain(row.agency_identity);
 
