@@ -35,6 +35,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Client } from "pg";
 import { setProviderAuthDown } from "../../core/orchestration/provider-auth.ts";
+import { resolveExecutorWorktreeFallback } from "../../core/orchestration/executor-worktree-fallback.ts";
 import {
 	type CliInvocationHandler,
 	type CliInvocationRegistry,
@@ -571,11 +572,13 @@ export async function bridgeTaskToOfferDispatch(args: {
 	const requiredCapabilities = capabilities.length > 0 ? capabilities : [role];
 	const leaseTtlSeconds = numberFrom(metadata.lease_ttl_seconds) ?? 60;
 	const routeHint = stringFrom(metadata.route_hint) ?? provider;
+	// P1445 AC-3: prefer the orchestrator-assigned hint; the env fallback is
+	// gated (opt-in) so the liaison never silently self-selects a shared worktree.
 	const worktreeHint =
 		stringFrom(metadata.worktree_hint) ??
 		stringFrom(metadata.worktree) ??
 		process.env.AGENCY_WORKTREE ??
-		process.env.AGENTHIVE_DEFAULT_EXECUTOR_WORKTREE ??
+		resolveExecutorWorktreeFallback() ??
 		null;
 	const statusPollMs = numberFrom(metadata.status_poll_ms) ?? 10_000;
 	const statusTimeoutMs =

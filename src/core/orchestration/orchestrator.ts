@@ -12,6 +12,7 @@ import { postWorkOffer } from "../pipeline/post-work-offer.ts";
 import { reapStaleRows } from "../pipeline/reap-stale-rows.ts";
 import { getUnlockedGateQueue } from "../proposal/gate-scanner-v2.ts";
 import { spawnAgent, spawnWithRetry } from "./agent-spawner.ts";
+import { resolveExecutorWorktreeFallback } from "./executor-worktree-fallback.ts";
 import { validateChannelRegistry } from "../../infra/messaging/channel-registry.ts";
 import {
 	bootCancelPokeAttempts,
@@ -187,9 +188,12 @@ export class Orchestrator {
 	private readonly inFlight: Set<Promise<unknown>> = new Set();
 
 	constructor(config: OrchestratorConfig = {}) {
+		// P1445 AC-3: env-based worktree selection is gated (opt-in). The
+		// orchestrator allocates worktrees atomically via the worktree_lease;
+		// this default is only a terminal fallback for explicit config.
 		this.defaultWorktree =
 			config.defaultWorktree ??
-			process.env.AGENTHIVE_DEFAULT_EXECUTOR_WORKTREE ??
+			resolveExecutorWorktreeFallback() ??
 			"claude-andy";
 		this.offerReapIntervalMs = config.offerReapIntervalMs ?? 60_000;
 		this.pokeWatchdogIntervalMs =

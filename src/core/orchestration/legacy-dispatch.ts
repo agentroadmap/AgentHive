@@ -41,6 +41,7 @@ import {
 } from "../../infra/agency/liaison-message-service.ts";
 import { createMessageEnvelope } from "../../infra/agency/liaison-message-types.ts";
 import { resolveGateRole, getGateRoleRegistry } from "./gate-role-resolver.ts";
+import { resolveExecutorWorktreeFallback } from "./executor-worktree-fallback.ts";
 import {
 	bootCancelPokeAttempts,
 	runOfferReaper,
@@ -63,8 +64,11 @@ const MCP_URL = getMcpUrl();
 const AGENTHIVE_HOST = process.env.AGENTHIVE_HOST ?? "default";
 const WORKTREE_ROOT =
 	process.env.AGENTHIVE_WORKTREE_ROOT ?? "/data/code/worktree";
-const DEFAULT_EXECUTOR_WORKTREE =
-	process.env.AGENTHIVE_DEFAULT_EXECUTOR_WORKTREE;
+// P1445 AC-3: env-based executor worktree selection is gated (opt-in via
+// AGENTHIVE_ALLOW_ENV_WORKTREE_FALLBACK=1). In the default multi-agent config
+// this is undefined, so selectExecutorWorktree relies on the requested
+// (orchestrator-assigned) worktree instead of self-selecting from the env.
+const DEFAULT_EXECUTOR_WORKTREE = resolveExecutorWorktreeFallback();
 
 // When true, orchestrator posts work offers instead of direct-spawning.
 // Registered agency processes (e.g. copilot/agency-gary) claim and execute.
