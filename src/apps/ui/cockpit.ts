@@ -9,6 +9,10 @@ import type blessed from "blessed";
 import { box } from "./blessed.ts";
 // P1374 (P1365-B): pure, unit-tested throttle-state formatting logic.
 import {
+	buildWorkforceSubheaderParts,
+	type CockpitCounts,
+	formatCockpitHeaderCounts,
+	formatDriftMarker,
 	formatHeadroomBadge,
 	formatReadyCoolingLabel,
 	formatRelativeTime,
@@ -33,6 +37,10 @@ export interface WorkforceAgent {
 	capacityHeadroomPct?: number | null; // headroom percentage from agency_capacity
 	capacityThrottleAction?: "none" | "soft" | "hard" | null; // throttle action type
 	capacityResetAt?: number | null; // ms epoch — when capacity resets
+	// P1377 AC-9: registration-drift flag. true ⇒ this agent_registry row has NO
+	// matching roadmap.agency row (LEFT JOIN miss). Populated by the caller from
+	// the same join the canonical metrics use; renders a [DRIFT] marker.
+	is_drift?: boolean;
 }
 
 export interface PipelineProposal {
@@ -70,6 +78,13 @@ export function renderCockpit(
 		pipelineCounts?: Record<string, number>;
 		ledger: LedgerEntry[];
 		messages: TerminalMessage[];
+		// P1377 AC-11: canonical workforce counts from queryWorkforceMetrics
+		// (src/shared/queries/workforce-counts.ts). The header and workforce
+		// subheader render these numbers verbatim; NO caller may independently
+		// recompute agencyCount/online/ready. Optional only so callers that
+		// haven't fetched metrics yet (e.g. the initial empty render) stay safe;
+		// when absent the panel falls back to in-memory agent-array derivation.
+		metrics?: CockpitCounts;
 		// Layout resolved by the caller (FlagKeys.TUI_COCKPIT_LAYOUT). Defaults
 		// to 'grid' when not provided so the function stays safe for any caller
 		// that hasn't been updated yet.
@@ -261,16 +276,27 @@ export function renderCockpit(
 		terminalLog = container._terminalLog;
 	}
 
-	// Update Dynamic Content. Header bar mirrors the panel counts.
-	// P1377: this set counts distinct provider@host roles (claude@bot, …) — i.e.
-	// PROVIDERS, not agencies (a formal roadmap.agency row). Labelled accordingly
-	// so the header no longer conflates the two. Authoritative agency / registered
-	// / drift counts come from queryWorkforceMetrics
-	// (src/shared/queries/workforce-counts.ts).
-	const headerProviders = new Set(agents.map((a) => a.role || "unknown@?"))
-		.size;
+	// Update Dynamic Content. Header bar mirrors the canonical panel counts.
+	// P1377 AC-11: counts come from queryWorkforceMetrics
+	// (src/shared/queries/workforce-counts.ts) passed in as data.metrics — the
+	// header does NOT independently recompute agencyCount/online/ready. When the
+	// caller hasn't fetched metrics yet (initial empty render) we fall back to a
+	// zeroed/agent-array-derived shape so the panel stays safe.
+	// P1377 AC-13 (covers AC-5/AC-8 soft-dep note): drift_count > 0 is EXPECTED
+	// until P1372's register_agency action backfills roadmap.agency rows for
+	// every active agent_registry row. A non-zero drift count is registration
+	// drift, not a render bug.
+	const counts: CockpitCounts = data.metrics ?? {
+		total_agents: agents.length,
+		total_providers: new Set(agents.map((a) => a.role || "unknown@?")).size,
+		online_count: agents.filter((a) => a.presenceOnline).length,
+		registered_agencies: agents.filter((a) => !a.is_drift).length,
+		drift_count: agents.filter((a) => a.is_drift).length,
+	};
+	// P1377 AC-2/AC-7: header counts fragment — agents · providers · online ·
+	// registered. The word "agencies" must NOT appear here.
 	headerBox.setContent(
-		`{bold}{cyan-fg}🚀 ENGINEER'S COCKPIT{/} | Providers: ${headerProviders} | Agents: ${agents.length} | Pipeline: ${pipelineTotal} | Status: {green-fg}LIVE{/}`,
+		`{bold}{cyan-fg}🚀 ENGINEER'S COCKPIT{/} | ${formatCockpitHeaderCounts(counts)} | Pipeline: ${pipelineTotal} | Status: {green-fg}LIVE{/}`,
 	);
 
 	// Update Workforce — split into WORKING (has currentProposal) vs AVAILABLE
@@ -280,13 +306,11 @@ export function renderCockpit(
 	if (agents.length === 0) {
 		workforceBox.setContent("  {gray-fg}No agents registered{/}");
 	} else {
-		const totalAgents = agents.length;
-		// P1377: distinct provider@host groups = PROVIDERS (claude@bot, codex@bot,
-		// …), NOT agencies. The prior "agencies" label conflated the two; a formal
-		// agency is a roadmap.agency row (see queryWorkforceMetrics).
-		const providerCount = new Set(agents.map((a) => a.role || "unknown@?"))
-			.size;
-		const online = agents.filter((a) => a.presenceOnline).length;
+		// P1377: subheader counts (agents/providers/online/registered) now come
+		// from the canonical `counts` (data.metrics) via buildWorkforceSubheaderParts
+		// — NOT recomputed from the agent array here. The body sections below still
+		// derive the live dispatch buckets (working/idle/throttled/offline) from
+		// the in-memory roster, since those are presentation state, not counts.
 		const working = agents.filter(
 			(a) => a.status === "active" && a.currentProposal,
 		);
@@ -315,20 +339,27 @@ export function renderCockpit(
 				: Math.max(40, Math.floor(cols / 2) - 6);
 
 		const lines: string[] = [];
-		// Header: agencies + agents counts, liaison responsiveness, dispatch
-		// states. Operator request (2026-05-22): "agencies #, registered,
-		// online (liaison responsive, token available or to reset time)".
-		// P1365-AC6: Split "ready" and "cooling" to show capacity awareness.
-		const parts = [
-			`{bold}${providerCount}{/} providers`,
-			`{bold}${totalAgents}{/} agents`,
-			`{green-fg}${online}{/} online`,
-			`{bold}${working.length}{/} working`,
+		// P1377 AC-3/AC-8: workforce subheader — EXACTLY 4 canonical parts in
+		// order: agents, providers, online, registered. Built from the canonical
+		// metrics (data.metrics, via `counts`) by buildWorkforceSubheaderParts so
+		// the SQL, the header, the subheader, and the unit tests agree by
+		// construction. The dispatch-state detail (working/ready/cooling/
+		// throttled/offline) is rendered on a SEPARATE second line below so this
+		// primary parts array stays exactly 4 elements.
+		const subParts = buildWorkforceSubheaderParts(counts);
+		const taggedSubParts = [
+			`{bold}${subParts[0]}{/}`,
+			`{bold}${subParts[1]}{/}`,
+			`{green-fg}${subParts[2]}{/}`,
+			`{bold}${subParts[3]}{/}`,
 		];
-		// P1374 AC-3: "N ready · M cooling" (or just "N ready" when cooling = 0).
-		// Pure label from cockpit-format.ts so the SQL, render, and tests agree.
+		lines.push(taggedSubParts.join(" · "));
+
+		// Second line: live dispatch-state detail (not part of the canonical 4).
+		// P1365-AC6 / P1374 AC-3 — working, ready/cooling, throttled, offline.
+		const stateParts = [`{bold}${working.length}{/} working`];
 		if (ready.length > 0 || cooling.length > 0) {
-			parts.push(
+			stateParts.push(
 				`{cyan-fg}${formatReadyCoolingLabel(ready.length, cooling.length)}{/}`,
 			);
 		}
@@ -342,12 +373,12 @@ export function renderCockpit(
 			const resetIn = nextReset
 				? ` (next reset ${formatRelativeTime(nextReset - Date.now())})`
 				: "";
-			parts.push(`{yellow-fg}${throttled.length} throttled${resetIn}{/}`);
+			stateParts.push(`{yellow-fg}${throttled.length} throttled${resetIn}{/}`);
 		}
 		if (offline.length > 0) {
-			parts.push(`{gray-fg}${offline.length} offline{/}`);
+			stateParts.push(`{gray-fg}${offline.length} offline{/}`);
 		}
-		lines.push(parts.join(" · "));
+		lines.push(stateParts.join(" · "));
 		lines.push("");
 
 		if (working.length > 0) {
@@ -376,27 +407,43 @@ export function renderCockpit(
 
 			// AC-4: READY agents grouped by provider@host with a "(count)" badge.
 			// Per-agent names carry the low-headroom badge inline when applicable.
+			// P1377 AC-9: registration drift is per-agent, so we sub-key the group
+			// by provider + is_drift. A drift sub-group renders a [DRIFT] marker
+			// after the provider token (e.g. "claude@bot [DRIFT] (2): alice, bob");
+			// registered sub-groups render no marker.
 			if (ready.length > 0) {
 				const byProvider = new Map<string, WorkforceAgent[]>();
+				// Composite key keeps render order stable: "<provider> <0|1>".
 				ready.forEach((a) => {
-					const key = a.role || "unknown@?";
+					const provider = a.role || "unknown@?";
+					const key = `${provider} ${a.is_drift ? "1" : "0"}`;
 					if (!byProvider.has(key)) byProvider.set(key, []);
 					byProvider.get(key)!.push(a);
 				});
-				const orderedProviders = Array.from(byProvider.keys()).sort();
-				orderedProviders.forEach((provider) => {
-					const group = byProvider.get(provider) ?? [];
+				const orderedKeys = Array.from(byProvider.keys()).sort();
+				orderedKeys.forEach((key) => {
+					const group = byProvider.get(key) ?? [];
+					const provider = key.slice(0, key.indexOf(" "));
+					const isDriftGroup = key.endsWith(" 1");
+					const driftMarker = formatDriftMarker(isDriftGroup);
 					const rendered = group.map((a) => {
 						const b = badge(a);
 						return b ? `${a.id} {yellow-fg}${b}{/}` : a.id;
 					});
 					const joined = rendered.join(", ");
-					const labelLen = provider.length + String(group.length).length + 5;
+					const labelLen =
+						provider.length +
+						driftMarker.length +
+						String(group.length).length +
+						5;
 					const fit =
 						joined.length > panelBudget - labelLen
 							? `${joined.substring(0, panelBudget - labelLen - 1)}…`
 							: joined;
-					lines.push(`  {gray-fg}${provider}{/} (${group.length}): ${fit}`);
+					const driftTag = isDriftGroup ? " {red-fg}[DRIFT]{/}" : "";
+					lines.push(
+						`  {gray-fg}${provider}{/}${driftTag} (${group.length}): ${fit}`,
+					);
 				});
 			}
 

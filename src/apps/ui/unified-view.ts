@@ -4,6 +4,10 @@
 
 import type { Core } from "../../core/roadmap.ts";
 import { query as pgQuery } from "../../postgres/pool.ts";
+import {
+	queryWorkforceMetrics,
+	type WorkforceMetrics,
+} from "../../shared/queries/workforce-counts.ts";
 import * as runtimeConfig from "../../shared/runtime/config.ts";
 import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 import { DEFAULT_STATUSES } from "../../shared/constants/index.ts";
@@ -614,6 +618,7 @@ export async function runUnifiedView(
 						        ar.role,
 						        COALESCE(a.presence_state, 'unknown') AS presence_state,
 						        COALESCE(a.status, 'unknown')         AS agency_status,
+						        a.agency_id AS agency_id,
 						        a.throttled_until,
 						        COALESCE(a.last_heartbeat_at, ar.updated_at) AS last_heartbeat_at,
 						        sd.proposal_id,
@@ -671,6 +676,21 @@ export async function runUnifiedView(
 						 ORDER BY spent_today DESC
 						 LIMIT 10`,
 					);
+					// P1377 AC-11: canonical workforce counts — single round-trip via
+					// the shared query so the header/subheader render authoritative
+					// numbers (NOT recomputed from the agent array). Awaited
+					// sequentially with the rest (see the parallel-hang note above).
+					// On any error fall back to undefined ⇒ cockpit derives counts
+					// from the in-memory agent array, keeping the panel safe.
+					let workforceMetrics: WorkforceMetrics | undefined;
+					try {
+						workforceMetrics = await queryWorkforceMetrics(
+							(text: string, params?: unknown[]) =>
+								pgQuery(text, (params as any[]) ?? []) as any,
+						);
+					} catch {
+						workforceMetrics = undefined;
+					}
 					const fetchEnd = performance.now();
 
 					// Aggregate status counts into a {STATUS_UPPER: count} map.
@@ -719,6 +739,9 @@ export async function runUnifiedView(
 							capacityHeadroomPct: capacityHeadroom,
 							capacityThrottleAction: row.throttle_action ?? null,
 							capacityResetAt: capacityResetMs,
+							// P1377 AC-9: registration drift — no matching roadmap.agency
+							// row (LEFT JOIN miss ⇒ agency_id IS NULL). Renders [DRIFT].
+							is_drift: row.agency_id == null,
 						};
 					});
 
@@ -754,6 +777,9 @@ export async function runUnifiedView(
 						pipelineCounts,
 						ledger: ledgerData,
 						messages: cockpitMessages,
+						// P1377 AC-11: pass canonical metrics; header/subheader
+						// render these verbatim instead of recomputing.
+						metrics: workforceMetrics,
 						layout: cockpitLayout,
 					});
 					const renderEnd = performance.now();
