@@ -198,3 +198,61 @@ test("postWorkOffer: COMPLETE proposal is refused before dispatch insert (termin
 		"terminal status guard must prevent INSERT",
 	);
 });
+
+test("P1438 AC-16: posting never queries presence/dispatchable; preflight checks capability only", async () => {
+	// Emergent availability: open-pool posting must not depend on
+	// roadmap.agency.dispatchable / provider heartbeat / bridge liveness. A
+	// pattern-matching mock answers every query so postWorkOffer runs through to
+	// the capability preflight (and the INSERT), then we assert NO query touched a
+	// presence/dispatchable signal.
+	process.env.AGENTHIVE_MAX_INFLIGHT_OFFERS = "20";
+	const calls: Array<{ sql: string; params: unknown[] }> = [];
+	const queue = (async (sql: string, params?: unknown[]) => {
+		calls.push({ sql, params: params ?? [] });
+		if (/pg_notify/i.test(sql)) return { rows: [] } as never;
+		// proposal context lookup → an active, non-terminal, non-paused proposal
+		if (/FROM roadmap_proposal\.proposal\b/i.test(sql) && /WHERE id/i.test(sql)) {
+			return {
+				rows: [
+					{
+						project_id: 1,
+						status: "DEVELOP",
+						maturity: "new",
+						gate_scanner_paused: false,
+						gate_paused_by: null,
+						gate_paused_at: null,
+					},
+				],
+			} as never;
+		}
+		// capability preflight → a capable agency exists
+		if (/provider_registry/i.test(sql)) return { rows: [{ count: 1 }] } as never;
+		if (/recent_runs/i.test(sql)) return { rows: [{ recent_runs: 0 }] } as never;
+		if (/INSERT INTO/i.test(sql)) return { rows: [{ id: 1, dispatch_version: 1 }] } as never;
+		// backpressure + convergence-guard counts → under threshold
+		if (/count/i.test(sql)) return { rows: [{ count: 0 }] } as never;
+		return { rows: [] } as never;
+	}) as never;
+
+	await postWorkOffer(
+		{ proposalId: 4242, squadName: "P4242-test", role: "gate-reviewer", task: "review" },
+		queue,
+	).catch(() => {
+		/* we only assert on the queries made, not the final outcome */
+	});
+
+	// AC-16 core: posting issued NO presence/dispatchable query.
+	for (const call of calls) {
+		assert.doesNotMatch(
+			call.sql,
+			/dispatchable|v_agency_status/i,
+			`posting must not query presence/dispatchable: ${call.sql.replace(/\s+/g, " ").slice(0, 90)}`,
+		);
+	}
+	// And the capability preflight DID run (proves we reached it — capability gap,
+	// not presence, is the only posting gate).
+	assert.ok(
+		calls.some((c) => /provider_registry/i.test(c.sql) && /capabilities/i.test(c.sql)),
+		"capability preflight (provider_registry + capabilities) must run",
+	);
+});

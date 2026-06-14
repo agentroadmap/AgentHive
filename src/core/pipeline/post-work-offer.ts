@@ -630,15 +630,20 @@ async function postWorkOfferImpl(
 		throw new DispatchLoopError(input.proposalId, input.role, recentRuns);
 	}
 
-	// P1289 AC-3 + P1290 AC-1: Pre-flight dispatchability check. Throw
-	// CapabilityMismatchError (and INSERT nothing) if no active agency advertises
-	// the required capabilities. Mirrors the full resolveAgency predicate at
-	// agency-resolver.ts:130 — provider_registry.capabilities->'jobs' AND
-	// v_agency_status.dispatchable (which a2a-host's fn_pulse keeps fresh via
-	// roadmap.agency.presence_state). Checking provider_registry.status alone
-	// was stricter than the matcher and rejected offers the matcher would have
-	// claimed when only the new generic a2a-host (P1132) is running and no
-	// per-agency service updates provider_registry.status.
+	// P1289 AC-3 + P1290 AC-1: Pre-flight CAPABILITY check. Throw
+	// CapabilityMismatchError (and INSERT nothing) only if NO registered agency is
+	// CAPABLE of the required role — a durable capability gap, not a transient
+	// availability state.
+	//
+	// P1438 AC-16 (C6 emergent availability): posting must NOT depend on
+	// roadmap.agency.dispatchable / provider heartbeat / bridge liveness. The old
+	// preflight also required `v_agency_status.dispatchable = true`, which is
+	// heartbeat-derived — so a parked cold-wake liaison (the mandated V3 model)
+	// would make the offer never post. Now we post the open-pool offer whenever a
+	// capable agency EXISTS; availability is revealed later by a successful claim
+	// (an asleep liaison simply doesn't claim, and the offer waits in the pool /
+	// is reaped per policy). fn_claim_work_offer remains the atomic availability
+	// truth and carries no presence prerequisite.
 	// checkCaps falls back to ROLE_TO_REQUIRED_CAPABILITIES if the caller didn't
 	// supply requiredCapabilities, so the preflight always has a value to check
 	// against rather than silently skipping.
@@ -650,12 +655,10 @@ async function postWorkOfferImpl(
 			`SELECT count(*)::int AS count
 			   FROM roadmap_workforce.provider_registry pr
 			   JOIN roadmap_workforce.agent_registry ar ON ar.id = pr.agency_id
-			   LEFT JOIN roadmap.v_agency_status vas ON vas.agency_id = ar.agent_identity
 			  WHERE pr.status NOT IN ('offline', 'retired')
 			    AND ar.status = 'active'
 			    AND ar.agent_type <> 'coordinator'
 			    AND ar.agent_identity NOT LIKE 'test/%'
-			    AND (vas.agency_id IS NULL OR vas.dispatchable = true)
 			    AND (pr.capabilities->'jobs') ?| $1::text[]`,
 			[checkCaps],
 		);
