@@ -35,6 +35,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Client } from "pg";
 import { setProviderAuthDown } from "../../core/orchestration/provider-auth.ts";
+import { ROLE_TO_REQUIRED_CAPABILITIES } from "../../core/orchestration/offer-dispatch.ts";
 import {
 	type CliInvocationHandler,
 	type CliInvocationRegistry,
@@ -569,7 +570,16 @@ export async function bridgeTaskToOfferDispatch(args: {
 	const capabilities = stringArrayFrom(
 		metadata.required_capabilities ?? metadata.capabilities,
 	);
-	const requiredCapabilities = capabilities.length > 0 ? capabilities : [role];
+	// When the task message doesn't specify capabilities, derive them from the role
+	// via the canonical role→capability map — NOT the role name itself. The old
+	// `[role]` fallback wrote required_capabilities=["developer"] for a developer
+	// task, but agencies advertise the capability "develop" (role names ≠ capability
+	// names), so fn_claim_work_offer's capability gate never matched and the offer
+	// was unclaimable forever. (Found live 2026-06-14: offers 62786/87/88 stuck open.)
+	const requiredCapabilities =
+		capabilities.length > 0
+			? capabilities
+			: (ROLE_TO_REQUIRED_CAPABILITIES[role.toLowerCase()] ?? ["develop"]);
 	const leaseTtlSeconds = numberFrom(metadata.lease_ttl_seconds) ?? 60;
 	const routeHint = stringFrom(metadata.route_hint) ?? provider;
 	const worktreeHint =
