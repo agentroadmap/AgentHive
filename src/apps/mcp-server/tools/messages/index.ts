@@ -74,12 +74,22 @@ export function registerMessageTools(server: McpServer): void {
 				type: "object",
 				properties: {
 					from_agent: { type: "string" },
+					from: { type: "string", description: "Alias for from_agent" },
 					to_agent: { type: "string" },
+					to: { type: "string", description: "Alias for to_agent" },
 					channel: { type: "string" },
-					message_content: { type: "string" },
+					message_content: { type: "string", description: "Message text. Aliases: content, message, text, body, note, notes, task, brief." },
+					content: { type: "string", description: "Alias for message_content" },
+					message: { type: "string", description: "Alias for message_content" },
+					text: { type: "string", description: "Alias for message_content" },
+					body: { type: "string", description: "Alias for message_content" },
+					note: { type: "string", description: "Alias for message_content" },
+					notes: { type: "string", description: "Alias for message_content" },
+					task: { type: "string", description: "Alias for message_content" },
+					brief: { type: "string", description: "Alias for message_content" },
 					message_type: {
 						type: "string",
-						enum: ["task", "notify", "ack", "error", "event", "text", "user_message"],
+						enum: ["task", "notify", "ack", "error", "event", "text", "user_message", "protocol_ping", "protocol_pong", "task_request", "task_ack", "task_status", "task_complete", "task_error"],
 					},
 					proposal_id: { type: "string" },
 					correlation_id: { type: "string", description: "UUID for request/response tracking" },
@@ -93,16 +103,26 @@ export function registerMessageTools(server: McpServer): void {
 						additionalProperties: true,
 					},
 				},
-				required: ["from_agent", "message_content"],
+				required: [],
 			},
 		},
 		{
 			type: "object",
 			properties: {
 				from_agent: { type: "string" },
+				from: { type: "string" },
 				to_agent: { type: "string" },
+				to: { type: "string" },
 				channel: { type: "string" },
 				message_content: { type: "string" },
+				content: { type: "string" },
+				message: { type: "string" },
+				text: { type: "string" },
+				body: { type: "string" },
+				note: { type: "string" },
+				notes: { type: "string" },
+				task: { type: "string" },
+				brief: { type: "string" },
 				message_type: { type: "string" },
 				proposal_id: { type: "string" },
 				correlation_id: { type: "string" },
@@ -112,14 +132,24 @@ export function registerMessageTools(server: McpServer): void {
 				authorization: { type: "string" },
 				metadata: { type: "object", additionalProperties: true },
 			},
-			required: ["from_agent", "message_content"],
+			required: [],
 		} as JsonSchema,
 		async (input) =>
 			pgHandlers.sendMessage(input as {
-				from_agent: string;
+				from_agent?: string;
+				from?: string;
 				to_agent?: string;
+				to?: string;
 				channel?: string;
-				message_content: string;
+				message_content?: string;
+				content?: string;
+				message?: string;
+				text?: string;
+				body?: string;
+				note?: string;
+				notes?: string;
+				task?: string;
+				brief?: string;
 				message_type?: string;
 				proposal_id?: string;
 				correlation_id?: string;

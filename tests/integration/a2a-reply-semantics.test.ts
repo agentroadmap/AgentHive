@@ -27,6 +27,9 @@ describe("P907 AC3: A2A Reply Semantics", () => {
 		             VALUES ('agent-a', 'agent-b', 'dm', 'system'), ('agent-b', 'agent-a', 'dm', 'system'), ('agent-a', '*', 'channel_post', 'system'),
 					        ('system:timeout-escalator', '*', 'dm', 'system'), ('system:timeout-reminder', '*', 'dm', 'system')
 					 ON CONFLICT DO NOTHING`);
+		await query(`INSERT INTO roadmap.room_membership (channel, agent_identity, granted_by)
+		             VALUES ('team:test', 'agent-a', 'system')
+		             ON CONFLICT DO NOTHING`);
 	});
 
 	it("Describe 1: msg_send with correlation_id", async () => {
@@ -46,6 +49,64 @@ describe("P907 AC3: A2A Reply Semantics", () => {
 		
 		assert.ok(rows.length > 0, "Message must be found");
 		assert.strictEqual(rows[0].correlation_id, correlationId, "correlation_id must be stored");
+	});
+
+	it("P3315 regression: msg_send accepts content aliases and persists metadata", async () => {
+		const correlationId = crypto.randomUUID();
+		const result = await pgHandlers.sendMessage({
+			from_agent: "agent-a",
+			to_agent: "agent-b",
+			note: "Review P3309-P3313 and message back with verdicts",
+			message_type: "task_request",
+			proposal_id: "3309",
+			correlation_id: correlationId,
+			metadata: {
+				task: "Review the adaptive routing proposal group",
+				required_capabilities: ["review"],
+			},
+		});
+
+		const text = String(result.content[0]?.type === "text" ? result.content[0].text : "");
+		assert.ok(text.includes("Message sent"), text);
+
+		const { rows } = await query(
+			`SELECT message_content, message_type, proposal_id, metadata
+			   FROM roadmap.message_ledger
+			  WHERE correlation_id = $1`,
+			[correlationId],
+		);
+
+		assert.strictEqual(rows.length, 1, "exactly one message must be stored");
+		assert.strictEqual(
+			rows[0].message_content,
+			"Review P3309-P3313 and message back with verdicts",
+		);
+		assert.strictEqual(rows[0].message_type, "task_request");
+		assert.strictEqual(String(rows[0].proposal_id), "3309");
+		assert.strictEqual(
+			rows[0].metadata.task,
+			"Review the adaptive routing proposal group",
+		);
+	});
+
+	it("P3315 regression: msg_send rejects blank content before insert", async () => {
+		const correlationId = crypto.randomUUID();
+		const result = await pgHandlers.sendMessage({
+			from_agent: "agent-a",
+			to_agent: "agent-b",
+			message_content: "   ",
+			correlation_id: correlationId,
+		});
+
+		const text = String(result.content[0]?.type === "text" ? result.content[0].text : "");
+		assert.ok(text.includes("blank message content"), text);
+		assert.strictEqual((result as any).isError, true);
+
+		const { rows } = await query(
+			`SELECT id FROM roadmap.message_ledger WHERE correlation_id = $1`,
+			[correlationId],
+		);
+		assert.strictEqual(rows.length, 0, "blank sends must not insert a row");
 	});
 
 	it("Describe 2: msg_reply propagates thread/correlation", async () => {

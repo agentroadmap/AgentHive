@@ -72,6 +72,27 @@ function extractProposalId(msg: IncomingMessage): string | null {
 	return null;
 }
 
+function stringFrom(value: unknown): string | null {
+	return typeof value === "string" && value.trim().length > 0
+		? value.trim()
+		: null;
+}
+
+function taskBriefFrom(msg: IncomingMessage): string | null {
+	const metadata = msg.metadata ?? {};
+	return (
+		stringFrom(msg.message_content) ??
+		stringFrom(metadata.task) ??
+		stringFrom(metadata.brief) ??
+		stringFrom(metadata.message) ??
+		stringFrom(metadata.content) ??
+		stringFrom(metadata.text) ??
+		stringFrom(metadata.body) ??
+		stringFrom(metadata.note) ??
+		stringFrom(metadata.notes)
+	);
+}
+
 /**
  * Claim a proposal via MCP HTTP endpoint.
  * Returns the lease_id (UUID) on success.
@@ -425,6 +446,20 @@ export async function handleTypedTaskRequest(
 			fromAgent: identity,
 			toAgent: msg.from_agent,
 			content: `Task request rejected: missing proposal_id in metadata`,
+			messageType: "task_error",
+			correlationId: msg.correlation_id ?? null,
+			replyTo: msg.id,
+		});
+		await markReadAndResolveTimeout(msg.id);
+		return;
+	}
+	if (!taskBriefFrom(msg)) {
+		console.warn(`${log} missing task brief`);
+		await insertReply({
+			fromAgent: identity,
+			toAgent: msg.from_agent,
+			content:
+				"Task request rejected: blank task brief; provide message_content or metadata.task/brief/message/content.",
 			messageType: "task_error",
 			correlationId: msg.correlation_id ?? null,
 			replyTo: msg.id,

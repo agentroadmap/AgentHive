@@ -22,6 +22,35 @@ import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
 import { checkAndEnforceRateLimit } from "./rate-limiter.ts";
 
+const MESSAGE_CONTENT_ALIASES = [
+	"message_content",
+	"content",
+	"message",
+	"text",
+	"body",
+	"note",
+	"notes",
+	"task",
+	"brief",
+] as const;
+
+export function coerceMessageContent(args: Record<string, unknown>): string | null {
+	for (const key of MESSAGE_CONTENT_ALIASES) {
+		const value = args[key];
+		if (typeof value === "string" && value.trim().length > 0) {
+			return value.trim();
+		}
+	}
+	return null;
+}
+
+function metadataFrom(value: unknown): Record<string, unknown> {
+	if (value && typeof value === "object" && !Array.isArray(value)) {
+		return value as Record<string, unknown>;
+	}
+	return {};
+}
+
 function errorResult(msg: string, err: unknown): CallToolResult {
 	return {
 		content: [
@@ -291,20 +320,55 @@ export class PgMessagingHandlers {
 	}
 
 	async sendMessage(args: {
-		from_agent: string;
+		from_agent?: string;
+		from?: string;
 		to_agent?: string;
+		to?: string;
 		channel?: string;
-		message_content: string;
+		message_content?: string;
+		content?: string;
+		message?: string;
+		text?: string;
+		body?: string;
+		note?: string;
+		notes?: string;
+		task?: string;
+		brief?: string;
 		message_type?: string;
 		proposal_id?: string;
 		correlation_id?: string;
+		metadata?: Record<string, unknown>;
 		_signature?: string; // P159: optional hex-encoded Ed25519 signature
 	}): Promise<CallToolResult> {
 		try {
+			const fromAgent = args.from_agent ?? args.from;
+			if (!fromAgent || fromAgent.trim().length === 0) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: "⛔ msg_send rejected: missing from_agent.",
+						},
+					],
+					isError: true,
+				};
+			}
+			const messageContent = coerceMessageContent(args as Record<string, unknown>);
+			if (!messageContent) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `⛔ msg_send rejected: blank message content. Accepted content params: ${MESSAGE_CONTENT_ALIASES.join(", ")}.`,
+						},
+					],
+					isError: true,
+				};
+			}
 			// P1099 AC-1: Canonicalize from_agent and to_agent before any comparison or storage
 			let canonicalFromAgent: string;
 			try {
-				canonicalFromAgent = canonicalizeIdentity(args.from_agent);
+				canonicalFromAgent = canonicalizeIdentity(fromAgent);
 			} catch (err) {
 				if (err instanceof InvalidIdentityError) {
 					return errorResult(
@@ -316,9 +380,10 @@ export class PgMessagingHandlers {
 			}
 
 			let canonicalToAgent: string | undefined;
-			if (args.to_agent) {
+			const toAgent = args.to_agent ?? args.to;
+			if (toAgent) {
 				try {
-					canonicalToAgent = canonicalizeIdentity(args.to_agent);
+					canonicalToAgent = canonicalizeIdentity(toAgent);
 				} catch (err) {
 					if (err instanceof InvalidIdentityError) {
 						return errorResult(
@@ -338,7 +403,7 @@ export class PgMessagingHandlers {
 			const verification = await verifyAgentIdentity(
 				canonicalFromAgent,
 				args._signature as string | undefined,
-				args.message_content, // Sign over message content
+				messageContent, // Sign over the persisted message content
 			);
 
 			// In hard-fail mode (AGENTHIVE_AUTH_REQUIRED=true), reject if verification.rejected
@@ -432,17 +497,18 @@ export class PgMessagingHandlers {
 
 			const { rows } = await query(
 				`INSERT INTO roadmap.message_ledger
-                    (from_agent, to_agent, channel, message_content, message_type, proposal_id, correlation_id)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    (from_agent, to_agent, channel, message_content, message_type, proposal_id, correlation_id, metadata)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
                  RETURNING id, nonce, created_at`,
 				[
 					canonicalFromAgent,
 					canonicalToAgent || null,
 					args.channel || null,
-					args.message_content,
+					messageContent,
 					args.message_type || "text",
 					args.proposal_id || null,
 					args.correlation_id || null,
+					JSON.stringify(metadataFrom(args.metadata)),
 				],
 			);
 			return {

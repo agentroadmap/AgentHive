@@ -597,6 +597,12 @@ export async function bridgeTaskToOfferDispatch(args: {
 }): Promise<TaskBridgeResult> {
 	const { msg, identity, provider } = args;
 	const metadata = msg.metadata ?? {};
+	const taskBrief = taskBriefFromMessage(msg);
+	if (!taskBrief) {
+		throw new Error(
+			"task bridge requires non-empty message_content or metadata.task/brief/message/content",
+		);
+	}
 	const proposalId = numberFrom(metadata.proposal_id) ?? msg.proposal_id;
 	if (!proposalId) {
 		throw new Error(
@@ -642,7 +648,7 @@ export async function bridgeTaskToOfferDispatch(args: {
 		numberFrom(metadata.status_timeout_ms) ?? 2 * 60 * 60_000;
 
 	const offerMetadata = {
-		task: msg.message_content,
+		task: taskBrief,
 		source: "message_ledger_task_bridge",
 		source_message_id: msg.id,
 		source_from_agent: msg.from_agent,
@@ -853,6 +859,21 @@ function stringFrom(value: unknown): string | null {
 	return typeof value === "string" && value.trim().length > 0
 		? value.trim()
 		: null;
+}
+
+function taskBriefFromMessage(msg: IncomingMessage): string | null {
+	const metadata = msg.metadata ?? {};
+	return (
+		stringFrom(msg.message_content) ??
+		stringFrom(metadata.task) ??
+		stringFrom(metadata.brief) ??
+		stringFrom(metadata.message) ??
+		stringFrom(metadata.content) ??
+		stringFrom(metadata.text) ??
+		stringFrom(metadata.body) ??
+		stringFrom(metadata.note) ??
+		stringFrom(metadata.notes)
+	);
 }
 
 function numberFrom(value: unknown): number | null {

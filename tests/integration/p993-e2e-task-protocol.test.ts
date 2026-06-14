@@ -233,6 +233,45 @@ describe("P993 AC-8 — E2E typed task protocol via message_ledger", () => {
 		expect(ackMeta.proposal_id).toBe(TEST_PROPOSAL_ID);
 	});
 
+	it("P3315 regression: blank task_request is rejected before claim, tracker, or bridge", async () => {
+		const { rows: ids } = await query(`SELECT gen_random_uuid() AS id`);
+		const blankCorrelationId = (ids[0] as any).id as string;
+		const msgId = await seedTaskRequest(blankCorrelationId);
+		const msg = makeIncomingMsg(msgId, "task_request", blankCorrelationId, 0, {
+			proposal_id: TEST_PROPOSAL_ID,
+		});
+		msg.message_content = "   ";
+		msg.metadata = { proposal_id: TEST_PROPOSAL_ID };
+		const helpers = makeHelpers(blankCorrelationId);
+		fetchSpy.mockClear();
+
+		await handleTypedTaskRequest(msg, TEST_LIAISON, "anthropic", helpers);
+
+		expect(fetchSpy).not.toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({
+				body: expect.stringContaining("prop_claim"),
+			}),
+		);
+		expect(helpers.bridgeTaskToOfferDispatch).not.toHaveBeenCalled();
+
+		const { rows: trackerRows } = await query(
+			`SELECT 1 FROM roadmap.liaison_task_tracker WHERE proposal_id = $1`,
+			[TEST_PROPOSAL_ID],
+		);
+		expect(trackerRows).toHaveLength(0);
+
+		const { rows: replies } = await query(
+			`SELECT message_type, message_content
+			   FROM roadmap.message_ledger
+			  WHERE correlation_id = $1 AND to_agent = $2`,
+			[blankCorrelationId, TEST_REQUESTOR],
+		);
+		expect(replies).toHaveLength(1);
+		expect((replies[0] as any).message_type).toBe("task_error");
+		expect((replies[0] as any).message_content).toContain("blank task brief");
+	});
+
 	it("P3315: retry reclaims a stale tracker row instead of tracker initialization error", async () => {
 		const { rows: ids } = await query(
 			`SELECT gen_random_uuid() AS old_id, gen_random_uuid() AS new_id`,
