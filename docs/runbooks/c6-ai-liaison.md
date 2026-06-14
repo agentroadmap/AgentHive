@@ -73,10 +73,46 @@ Record the chosen recovery action against the offer.
 ## Representation & the minimal A2A surface (AC-11, AC-17)
 
 Answer peer/orchestrator coordination over a deliberately small verb set, sourced
-from live agency state (never a canned reply):
+from live agency state (never a canned reply). The three verbs are handled
+deterministically in `src/infra/agency/liaison-a2a-verbs.ts` (wired into the
+liaison router in `liaison-agent.ts`), so they never fall through to the LLM
+auto-reply path. All three are added to the `message_ledger_type_check`
+constraint by migration `254-p1438-c6-a2a-verbs.sql`.
+
 - `capacity_query` — report current capacity/in-flight/quota honestly, on demand;
 - `handoff_request` — accept/decline targeted specialized work;
 - `capability_gap` — record that no current agency can serve a needed capability.
+
+### Verb examples
+
+A peer sends a verb with the standard `mcp_message` send tool, addressing your
+agency identity as `to_agent`; the `fn_a2a_message_notify` trigger wakes your
+parked session on `a2a_msg_<identity>`. Structured fields ride in `metadata`.
+
+**capacity_query** — `to_agent: claude-bot-gary.a`, `message_type: capacity_query`.
+The handler resolves live capacity via `agent_registry → provider_registry →
+v_agency_in_flight` (the same join the claim loop uses) and replies:
+
+```
+capacity claude-bot-gary.a: in_flight=1/4 headroom=3 status=active
+metadata.capacity = { found:true, maxInFlight:4, inFlightCount:1, headroom:3, ... }
+```
+
+If there is no `provider_registry` row the reply is `... unavailable (no
+provider_registry row)`. A `capacity_query` that itself carries `reply_to` is the
+answer to your own query and is consumed (no re-answer).
+
+**handoff_request** — `message_type: handoff_request`, with
+`metadata.proposal_id` (+ optional `role`, `required_capabilities`). Accepted
+**only** with headroom: the handler bridges it to a claimed `squad_dispatch` and
+replies `handoff accepted ...; dispatch <id> queued` (`metadata.accepted=true`).
+At capacity it replies `handoff declined ... at capacity (N/M)`
+(`metadata.accepted=false, reason="at_capacity"`); unknown agency → `reason="unavailable"`.
+
+**capability_gap** — `message_type: capability_gap`, with
+`metadata.capability`. The inbound ledger row is the durable record; the handler
+acks `capability_gap recorded ... '<capability>' has no serving agency`
+(`metadata.capability_gap = { capability, source_message_id, reported_by }`).
 
 ## What the liaison must NOT do
 

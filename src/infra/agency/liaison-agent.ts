@@ -49,6 +49,11 @@ import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 import { agentNotifyChannel } from "../messaging/a2a-access-control.ts";
 import { query } from "../postgres/pool.ts";
 import {
+	isA2AVerb,
+	routeA2AVerb,
+	type VerbHelpers,
+} from "./liaison-a2a-verbs.ts";
+import {
 	AgencyClaimLoop,
 	makeAgencyClaimExecutor,
 	type ListenerClient as ClaimLoopListenerClient,
@@ -328,6 +333,32 @@ export async function runLiaisonAgent(
 				await handleWorkerReport(msg, identity, helpers);
 			} catch (err) {
 				console.error(`${log} worker report handler failed:`, err);
+			}
+			return;
+		}
+
+		// P1438 AC-17 + AC-11: minimal liaison↔liaison coordination verbs
+		// (capacity_query / handoff_request / capability_gap). Deterministic
+		// handlers — must run before the generic LLM fallback so a capacity query
+		// gets a substantive live answer, not a canned auto-reply.
+		if (isA2AVerb(msg.message_type)) {
+			try {
+				const helpers: VerbHelpers = {
+					query,
+					insertReply,
+					markRead: markReadAndResolveTimeout,
+					bridgeTaskToOfferDispatch,
+					provider,
+					log,
+				};
+				const outcome = await routeA2AVerb(msg, identity, helpers);
+				console.log(
+					`${log} VERB [${msg.message_type}] → ${outcome.action}` +
+						(outcome.replyId ? ` reply=${outcome.replyId}` : "") +
+						(outcome.dispatchId ? ` dispatch=${outcome.dispatchId}` : ""),
+				);
+			} catch (err) {
+				console.error(`${log} A2A verb handler failed:`, err);
 			}
 			return;
 		}
