@@ -9,7 +9,9 @@ import { strict as assert } from "node:assert";
 
 import {
 	BackpressureError,
+	TERMINAL_PROPOSAL_STATUSES,
 	TerminalProposalError,
+	isTerminalProposalStatus,
 	postWorkOffer,
 	type QueryFn,
 } from "./post-work-offer.ts";
@@ -197,6 +199,28 @@ test("postWorkOffer: COMPLETE proposal is refused before dispatch insert (termin
 		false,
 		"terminal status guard must prevent INSERT",
 	);
+});
+
+// ── P2496: shared terminal-status guard (AC-1/AC-4/AC-5 single source of truth) ──
+
+test("P2496 isTerminalProposalStatus: COMPLETE is terminal (case-insensitive)", () => {
+	assert.equal(isTerminalProposalStatus("COMPLETE"), true);
+	assert.equal(isTerminalProposalStatus("complete"), true);
+	assert.equal(isTerminalProposalStatus("Complete"), true);
+});
+
+test("P2496 isTerminalProposalStatus: non-terminal + nullish are not terminal", () => {
+	for (const s of ["DRAFT", "REVIEW", "DEVELOP", "MERGE", "develop"]) {
+		assert.equal(isTerminalProposalStatus(s), false, `${s} must not be terminal`);
+	}
+	assert.equal(isTerminalProposalStatus(null), false);
+	assert.equal(isTerminalProposalStatus(undefined), false);
+	assert.equal(isTerminalProposalStatus(""), false);
+});
+
+test("P2496 TERMINAL_PROPOSAL_STATUSES: contains COMPLETE (the only terminal state today)", () => {
+	assert.equal(TERMINAL_PROPOSAL_STATUSES.has("COMPLETE"), true);
+	assert.equal(TERMINAL_PROPOSAL_STATUSES.has("DEVELOP"), false);
 });
 
 test("P1438 AC-16: posting never queries presence/dispatchable; preflight checks capability only", async () => {
