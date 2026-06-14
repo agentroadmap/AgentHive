@@ -375,6 +375,7 @@ describe("P1071: Proposal API — References, Parent, Routing", { skip: !skipIfN
 		const text = result.content[0].text;
 		assert(text.includes("❌"), `Expected error, got: ${text}`);
 		assert(text.includes("own parent") || text.includes("self-parent"), `Expected self-parent error, got: ${text}`);
+	});
 
 	it("AC-4: set_parent clears parent with null", async () => {
 		// First set a parent
@@ -458,4 +459,5 @@ describe("P1071: Proposal API — References, Parent, Routing", { skip: !skipIfN
 		// This is a smoke test to ensure our changes don't break existing handlers
 		const { rows } = await query(`SELECT id FROM roadmap_proposal.proposal WHERE id = $1 LIMIT 1`, [testProposalId]);
 		assert.strictEqual(rows.length, 1, "Test proposal should exist");
+	});
 });
