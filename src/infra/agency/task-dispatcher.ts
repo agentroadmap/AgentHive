@@ -380,37 +380,69 @@ export async function handleTypedTaskRequest(
 
 	const correlationId = msg.correlation_id ?? randomUUID();
 
-	// 3. Insert tracker row
+	// 3. Insert tracker row (idempotent: recycle stale/orphaned row for same proposal_id)
+	// First try a clean INSERT. On unique violation (partial index liaison_task_active_proposal
+	// enforces one active row per proposal_id) check if the existing row is stale/orphaned
+	// (no dispatch_id yet, or last_status_at older than 30 min) and recycle it. If the row
+	// is genuinely in-flight, reject to prevent double-spawn.
+	let trackerRowIsRecycled = false;
 	try {
 		await query(
 			`INSERT INTO roadmap.liaison_task_tracker
 			    (correlation_id, proposal_id, requestor_id, liaison_id, status)
 			 VALUES ($1, $2, $3, $4, 'claimed')`,
-			[
-				correlationId,
-				proposalId,
-				msg.from_agent,
-				identity,
-			],
+			[correlationId, proposalId, msg.from_agent, identity],
 		);
-	} catch (err) {
-		console.warn(`${log} tracker INSERT failed:`, err);
+	} catch (insertErr) {
+		// Unique violation: try to recycle a stale/orphaned active row
+		let recycled = false;
 		try {
-			await releaseProposal(proposalId, identity, "tracker_init_failed");
-		} catch (releaseErr) {
-			console.warn(`${log} lease release also failed:`, releaseErr);
+			const { rows: recycleRows } = await query(
+				`UPDATE roadmap.liaison_task_tracker
+				    SET correlation_id = $1,
+				        requestor_id = $2,
+				        liaison_id = $3,
+				        status = 'claimed',
+				        dispatch_id = NULL,
+				        worker_identity = NULL,
+				        last_status_at = now(),
+				        completed_at = NULL,
+				        spawn_count = spawn_count + 1
+				  WHERE proposal_id = $4
+				    AND status NOT IN ('complete', 'failed')
+				    AND (dispatch_id IS NULL
+				         OR last_status_at < now() - INTERVAL '30 minutes')
+				  RETURNING task_id`,
+				[correlationId, msg.from_agent, identity, proposalId],
+			);
+			recycled = recycleRows.length > 0;
+		} catch (recycleErr) {
+			console.warn(`${log} tracker recycle failed:`, recycleErr);
 		}
-		await insertReply({
-			fromAgent: identity,
-			toAgent: msg.from_agent,
-			content: `Task request failed: tracker initialization error`,
-			messageType: "task_error",
-			correlationId: correlationId,
-			replyTo: msg.id,
-		});
-		await markReadAndResolveTimeout(msg.id);
-		return;
+
+		if (!recycled) {
+			// Row is genuinely in-flight — reject to prevent double-spawn
+			console.warn(`${log} tracker INSERT failed (in-flight):`, insertErr);
+			try {
+				await releaseProposal(proposalId, identity, "tracker_init_failed");
+			} catch (releaseErr) {
+				console.warn(`${log} lease release also failed:`, releaseErr);
+			}
+			await insertReply({
+				fromAgent: identity,
+				toAgent: msg.from_agent,
+				content: `Task request failed: task already in progress for this proposal`,
+				messageType: "task_error",
+				correlationId: correlationId,
+				replyTo: msg.id,
+			});
+			await markReadAndResolveTimeout(msg.id);
+			return;
+		}
+		trackerRowIsRecycled = true;
+		console.log(`${log} recycled stale tracker row for proposal ${proposalId}`);
 	}
+	void trackerRowIsRecycled; // consumed by monitorTaskDispatch context
 
 	// 4. Bridge to offer dispatch
 	let dispatchId: number;
