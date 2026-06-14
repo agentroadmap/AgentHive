@@ -46,6 +46,7 @@ import { recordSpawnUsage } from "./record-spawn-usage.ts";
 import { classifyExit } from "../../core/orchestration/agent-spawner.ts";
 import { incrementSpawnFailure, THROTTLE_THRESHOLD } from "../../core/orchestration/resolvers/agency-resolver.ts";
 import { validateProposal } from "../../core/orchestration/d4-validator.ts";
+import { verifyDeliverables } from "../../core/orchestration/deliverable-verifier.ts";
 
 const obs = new ObservabilityWriter("agency:offer-dispatch-handler");
 
@@ -684,7 +685,37 @@ async function runSpawn(args: {
 			degenerateReason = "empty_output";
 		}
 	}
-	const succeeded = exitOk && degenerateReason === null;
+	let succeeded = exitOk && degenerateReason === null;
+
+	// P1438 AC-12/13 (C6 evidence-gated completion): exit-0 + non-degenerate output
+	// is NECESSARY but NOT SUFFICIENT to mark an offer 'delivered'. A worker can
+	// exit 0 with plausible output yet never write its role artifact (the
+	// hallucinated-completion / codex-AC-fabrication pattern). Before delivery,
+	// require canonical evidence for the offer's role: a proposal_reviews row for
+	// gate/review roles, a commit/agent_runs row for build roles, AC/discussion
+	// rows for enhance/architect roles (see deliverable-verifier ROLE_ARTIFACT_CHECKS
+	// + normalizeDispatchRole). Missing evidence → NOT delivered (recorded failed,
+	// does not advance the proposal); the reaper requeues per existing policy.
+	// Fail closed: a verification error also blocks the delivered claim.
+	let evidenceFailureReason: string | null = null;
+	if (succeeded && proposalId) {
+		try {
+			const verdict = await verifyDeliverables({
+				proposalId,
+				dispatchRole: payload.role,
+				workerIdentity: agencyId,
+				dispatchId,
+			});
+			if (!verdict.verified) {
+				succeeded = false;
+				evidenceFailureReason =
+					verdict.failureReason ?? `no deliverable artifact for role=${payload.role}`;
+			}
+		} catch (err) {
+			succeeded = false;
+			evidenceFailureReason = `evidence verification error: ${err instanceof Error ? err.message : String(err)}`;
+		}
+	}
 
 	// P1018: Record token usage and cost from the spawn result.
 	// This extracts provider-specific usage data, calculates cost, and
@@ -720,6 +751,10 @@ async function runSpawn(args: {
 	if (degenerateReason) {
 		logger.warn(
 			`[OfferDispatchHandler] ${agencyId}: offer=${payload.offer_id} exited 0 but is DEGENERATE (${degenerateReason}) — recording FAILED, not delivered (route_hint=${payload.route_hint ?? "none"})`,
+		);
+	} else if (evidenceFailureReason) {
+		logger.warn(
+			`[OfferDispatchHandler] ${agencyId}: offer=${payload.offer_id} exited 0 but produced NO ROLE ARTIFACT (role=${payload.role}) — recording FAILED, not delivered. ${evidenceFailureReason}`,
 		);
 	}
 

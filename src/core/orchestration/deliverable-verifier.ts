@@ -169,6 +169,52 @@ const ROLE_ARTIFACT_CHECKS: Record<
 };
 
 /**
+ * Map a live squad_dispatch.dispatch_role onto one of the four artifact-check
+ * categories in ROLE_ARTIFACT_CHECKS. Live dispatch roles are far more varied
+ * than the check keys (e.g. "gate-reviewer", "skeptic-beta", "enhancer"), so
+ * without this mapping verifyDeliverables would treat almost every real role as
+ * "unknown" and skip the evidence gate — a placebo. Roles with no artifact
+ * concept (decision/tracker/tester orchestration roles) return null and are
+ * intentionally skipped by the caller.
+ */
+export function normalizeDispatchRole(role: string): keyof typeof ROLE_ARTIFACT_CHECKS | null {
+	const r = role.toLowerCase();
+	// Review/gate roles write a proposal_reviews row.
+	if (
+		r === "gate-review" ||
+		r.startsWith("gate-review") ||
+		r.startsWith("reviewer") ||
+		r === "reviewer" ||
+		r === "review" ||
+		r === "qa" ||
+		r.startsWith("skeptic")
+	) {
+		return "gate-review";
+	}
+	// Build roles produce a commit / agent_runs artifact.
+	if (
+		r === "developer" ||
+		r === "engineer" ||
+		r === "drafter" ||
+		r === "integration" ||
+		r === "git-specialist" ||
+		r === "merge-agent"
+	) {
+		return "developer";
+	}
+	// Enhancement/enrichment/research roles write AC or discussion artifacts.
+	if (r === "enhance" || r === "enhancer" || r === "enrichment_agent" || r === "researcher") {
+		return "enhance";
+	}
+	if (r === "architect") {
+		return "architect";
+	}
+	// gate_decision_agent / merge_decision_agent / token-tracker / messaging-tester
+	// have no role artifact in ROLE_ARTIFACT_CHECKS — caller skips them.
+	return null;
+}
+
+/**
  * Verify that a worker's claimed completion has actual deliverables.
  *
  * @param input - Verification input (proposalId, dispatchRole, workerIdentity)
@@ -180,15 +226,17 @@ const ROLE_ARTIFACT_CHECKS: Record<
 export async function verifyDeliverables(input: VerifyDeliverablesInput): Promise<VerifyResult> {
 	const { proposalId, dispatchRole, workerIdentity } = input;
 
-	const checker = ROLE_ARTIFACT_CHECKS[dispatchRole];
+	const artifactRole = normalizeDispatchRole(dispatchRole);
+	const checker = artifactRole ? ROLE_ARTIFACT_CHECKS[artifactRole] : undefined;
 	if (!checker) {
-		// Unknown role: skip verification (allow advance). Log a warning.
+		// Role with no artifact concept (decision/tracker/tester, or genuinely
+		// unknown): skip verification (allow advance). Log a warning.
 		console.warn(
-			`[DeliverableVerifier] Unknown dispatch_role: ${dispatchRole} for proposal=${proposalId}; skipping verification`
+			`[DeliverableVerifier] No artifact check for dispatch_role: ${dispatchRole} for proposal=${proposalId}; skipping verification`
 		);
 		return {
-			verified: true, // Default to pass for unknown roles (safe default).
-			artifactType: "unknown-role",
+			verified: true, // Default to pass for roles with no artifact concept.
+			artifactType: "no-artifact-role",
 		};
 	}
 
