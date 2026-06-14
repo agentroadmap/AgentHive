@@ -11,9 +11,11 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { query, type Pool } from "../postgres/pool.ts";
 import { getMcpUrl } from "../../shared/runtime/endpoints.ts";
+import { type Pool, query } from "../postgres/pool.ts";
 import type { IncomingMessage } from "./liaison-agent.ts";
+
+const TRACKER_STALE_INTERVAL = "30 minutes";
 
 /**
  * Helper types for the handler signatures.
@@ -33,7 +35,11 @@ export interface TaskDispatcherHelpers {
 		msg: IncomingMessage;
 		identity: string;
 		provider: string;
-	}) => Promise<{ dispatchId: number; statusPollMs: number; statusTimeoutMs: number }>;
+	}) => Promise<{
+		dispatchId: number;
+		statusPollMs: number;
+		statusTimeoutMs: number;
+	}>;
 	monitorTaskDispatch: (args: {
 		identity: string;
 		requestor: string;
@@ -130,9 +136,7 @@ async function claimProposal(
 			return leaseId;
 		} catch (err) {
 			if (attempt === 2) {
-				throw err instanceof Error
-					? err
-					: new Error(String(err));
+				throw err instanceof Error ? err : new Error(String(err));
 			}
 			// Retry after 2s
 			await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -174,6 +178,71 @@ async function releaseProposal(
 		const text = await res.text().catch(() => "");
 		throw new Error(`MCP release failed: ${res.status} ${text}`);
 	}
+}
+
+type TrackerClaimResult =
+	| { ok: true; reused: boolean }
+	| { ok: false; reason: "task_in_flight" };
+
+/**
+ * Insert the active tracker row, or reclaim it when the prior row is provably
+ * stale. The partial unique index still protects genuinely in-flight tasks.
+ */
+export async function claimLiaisonTaskTracker(args: {
+	correlationId: string;
+	proposalId: string;
+	requestorId: string;
+	liaisonId: string;
+	staleInterval?: string;
+}): Promise<TrackerClaimResult> {
+	const { rows } = await query<{ reused: boolean }>(
+		`INSERT INTO roadmap.liaison_task_tracker
+		    (correlation_id, proposal_id, requestor_id, liaison_id, status, spawn_count)
+		 VALUES ($1, $2, $3, $4, 'claimed', 0)
+		 ON CONFLICT (proposal_id)
+		   WHERE status NOT IN ('complete','failed')
+		 DO UPDATE SET
+		    correlation_id = EXCLUDED.correlation_id,
+		    requestor_id = EXCLUDED.requestor_id,
+		    liaison_id = EXCLUDED.liaison_id,
+		    dispatch_id = NULL,
+		    worker_identity = NULL,
+		    status = 'claimed',
+		    spawn_count = roadmap.liaison_task_tracker.spawn_count + 1,
+		    last_status_at = now(),
+		    completed_at = NULL
+		  WHERE roadmap.liaison_task_tracker.last_status_at < now() - $5::interval
+		     OR NOT EXISTS (
+		        SELECT 1
+		          FROM roadmap_proposal.proposal_lease pl
+		         WHERE pl.proposal_id::text = roadmap.liaison_task_tracker.proposal_id
+		           AND pl.agent_identity = roadmap.liaison_task_tracker.liaison_id
+		           AND pl.released_at IS NULL
+		           AND pl.expires_at > now()
+		     )
+		     OR (
+		        roadmap.liaison_task_tracker.dispatch_id IS NOT NULL
+		        AND NOT EXISTS (
+		          SELECT 1
+		            FROM roadmap_workforce.squad_dispatch sd
+		           WHERE sd.id = roadmap.liaison_task_tracker.dispatch_id
+		             AND sd.offer_status NOT IN ('open','delivered','failed','expired','cancelled')
+		             AND sd.dispatch_status NOT IN ('open','completed','failed','cancelled')
+		        )
+		     )
+		 RETURNING (xmax::text::bigint <> 0) AS reused`,
+		[
+			args.correlationId,
+			args.proposalId,
+			args.requestorId,
+			args.liaisonId,
+			args.staleInterval ?? TRACKER_STALE_INTERVAL,
+		],
+	);
+
+	const row = rows[0];
+	if (!row) return { ok: false, reason: "task_in_flight" };
+	return { ok: true, reused: row.reused };
 }
 
 /**
@@ -329,7 +398,12 @@ export async function handleTypedTaskRequest(
 	provider: string,
 	helpers: TaskDispatcherHelpers,
 ): Promise<void> {
-	const { insertReply, markReadAndResolveTimeout, bridgeTaskToOfferDispatch, monitorTaskDispatch } = helpers;
+	const {
+		insertReply,
+		markReadAndResolveTimeout,
+		bridgeTaskToOfferDispatch,
+		monitorTaskDispatch,
+	} = helpers;
 	const log = `[P993TaskRequest id=${msg.id}]`;
 
 	// 1. Extract proposal_id
@@ -380,19 +454,17 @@ export async function handleTypedTaskRequest(
 
 	const correlationId = msg.correlation_id ?? randomUUID();
 
-	// 3. Insert tracker row
+	// 3. Insert or reclaim tracker row
 	try {
-		await query(
-			`INSERT INTO roadmap.liaison_task_tracker
-			    (correlation_id, proposal_id, requestor_id, liaison_id, status)
-			 VALUES ($1, $2, $3, $4, 'claimed')`,
-			[
-				correlationId,
-				proposalId,
-				msg.from_agent,
-				identity,
-			],
-		);
+		const tracker = await claimLiaisonTaskTracker({
+			correlationId,
+			proposalId,
+			requestorId: msg.from_agent,
+			liaisonId: identity,
+		});
+		if (!tracker.ok) {
+			throw new Error("task_in_flight");
+		}
 	} catch (err) {
 		console.warn(`${log} tracker INSERT failed:`, err);
 		try {
@@ -400,10 +472,14 @@ export async function handleTypedTaskRequest(
 		} catch (releaseErr) {
 			console.warn(`${log} lease release also failed:`, releaseErr);
 		}
+		const detail = err instanceof Error ? err.message : String(err);
 		await insertReply({
 			fromAgent: identity,
 			toAgent: msg.from_agent,
-			content: `Task request failed: tracker initialization error`,
+			content:
+				detail === "task_in_flight"
+					? "Task request rejected: task already in flight for proposal"
+					: "Task request failed: tracker initialization error",
 			messageType: "task_error",
 			correlationId: correlationId,
 			replyTo: msg.id,
@@ -469,7 +545,9 @@ export async function handleTypedTaskRequest(
 				worker_identity: identity,
 				dispatch_id: dispatchId,
 				lease_id: leaseId,
-				estimated_completion: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+				estimated_completion: new Date(
+					Date.now() + 60 * 60 * 1000,
+				).toISOString(),
 			},
 		});
 	} catch (err) {
@@ -557,7 +635,7 @@ export async function handleWorkerReport(
 		const proposalId = trackerRow.proposal_id as string;
 		const mcpUrl = getMcpUrl();
 		const mcpEndpoint = new URL("/mcp", mcpUrl).toString();
-		let acsVerified: string[] = [];
+		const acsVerified: string[] = [];
 
 		try {
 			const listRes = await fetch(mcpEndpoint, {
@@ -570,11 +648,13 @@ export async function handleWorkerReport(
 					params: { name: "list_ac", arguments: { proposal_id: proposalId } },
 				}),
 			});
-			const listRpc = await listRes.json() as {
+			const listRpc = (await listRes.json()) as {
 				result?: { content?: Array<{ text?: string }> };
 			};
 			const listText = listRpc.result?.content?.[0]?.text ?? "{}";
-			const listJson = JSON.parse(listText) as { items?: Array<{ item_number: number; label?: string; status: string }> };
+			const listJson = JSON.parse(listText) as {
+				items?: Array<{ item_number: number; label?: string; status: string }>;
+			};
 			const items = listJson.items ?? [];
 
 			for (const ac of items) {
@@ -593,7 +673,8 @@ export async function handleWorkerReport(
 									item_number: ac.item_number,
 									status: "pass",
 									verified_by: identity,
-									verification_notes: "Auto-verified on task_complete by liaison",
+									verification_notes:
+										"Auto-verified on task_complete by liaison",
 								},
 							},
 						}),
@@ -632,10 +713,13 @@ export async function handleWorkerReport(
 				fromAgent: identity,
 				toAgent: trackerRow.requestor_id,
 				content: msg.message_content,
-				messageType: "task_complete",
+				messageType: "task_status",
 				correlationId: correlationId,
 				replyTo: msg.id,
-				metadata: { ...((msg.metadata as object) ?? {}), acs_verified: acsVerified },
+				metadata: {
+					...((msg.metadata as object) ?? {}),
+					acs_verified: acsVerified,
+				},
 			});
 		} catch (err) {
 			console.warn(`${log} relay task_complete to requestor failed:`, err);
@@ -662,6 +746,77 @@ export async function handleWorkerReport(
 	await markReadAndResolveTimeout(msg.id);
 }
 
+export async function markLiaisonTaskTrackerFailed(args: {
+	correlationId?: string | null;
+	dispatchId?: number | null;
+	proposalId?: string | number | null;
+}): Promise<number> {
+	const predicates: string[] = ["status NOT IN ('complete', 'failed')"];
+	const params: unknown[] = [];
+
+	if (args.correlationId) {
+		params.push(args.correlationId);
+		predicates.push(`correlation_id = $${params.length}`);
+	}
+	if (args.dispatchId != null) {
+		params.push(args.dispatchId);
+		predicates.push(`dispatch_id = $${params.length}`);
+	}
+	if (args.proposalId != null) {
+		params.push(String(args.proposalId));
+		predicates.push(`proposal_id = $${params.length}`);
+	}
+	if (predicates.length === 1) return 0;
+
+	const { rowCount } = await query(
+		`UPDATE roadmap.liaison_task_tracker
+		    SET status = 'failed',
+		        last_status_at = now(),
+		        completed_at = now()
+		  WHERE ${predicates.join(" AND ")}`,
+		params,
+	);
+	return rowCount ?? 0;
+}
+
+export async function reconcileStaleLiaisonTaskTrackers(
+	pool?: Pick<Pool, "query">,
+	staleInterval = TRACKER_STALE_INTERVAL,
+): Promise<number> {
+	const executor = pool ?? { query };
+	const result = await executor.query(
+		`UPDATE roadmap.liaison_task_tracker t
+		    SET status = 'failed',
+		        spawn_count = t.spawn_count + 1,
+		        last_status_at = now(),
+		        completed_at = now()
+		  WHERE t.status NOT IN ('complete', 'failed')
+		    AND (
+		      t.last_status_at < now() - $1::interval
+		      OR NOT EXISTS (
+		        SELECT 1
+		          FROM roadmap_proposal.proposal_lease pl
+		         WHERE pl.proposal_id::text = t.proposal_id
+		           AND pl.agent_identity = t.liaison_id
+		           AND pl.released_at IS NULL
+		           AND pl.expires_at > now()
+		      )
+		      OR (
+		        t.dispatch_id IS NOT NULL
+		        AND NOT EXISTS (
+		          SELECT 1
+		            FROM roadmap_workforce.squad_dispatch sd
+		           WHERE sd.id = t.dispatch_id
+		             AND sd.offer_status NOT IN ('open','delivered','failed','expired','cancelled')
+		             AND sd.dispatch_status NOT IN ('open','completed','failed','cancelled')
+		        )
+		      )
+		    )`,
+		[staleInterval],
+	);
+	return result.rowCount ?? 0;
+}
+
 /**
  * Detect and recover from stuck workers.
  * Scans for rows where last_status_at < now() - 5 minutes,
@@ -671,34 +826,21 @@ export async function handleWorkerReport(
  * Phase 2 will wire this into a cron; for now just implement and export.
  */
 export async function detectStuckWorkers(): Promise<void> {
-	const { rows } = await query(
-		`SELECT task_id, spawn_count
-		  FROM roadmap.liaison_task_tracker
-		 WHERE last_status_at < now() - interval '30 minutes'
-		   AND status NOT IN ('complete', 'failed')
-		   AND spawn_count < 2`,
+	await reconcileStaleLiaisonTaskTrackers();
+}
+
+let stuckTaskCron: ReturnType<typeof setInterval> | null = null;
+
+export async function registerStuckTaskCron(pool: Pool): Promise<void> {
+	if (stuckTaskCron) return;
+	await reconcileStaleLiaisonTaskTrackers(pool);
+	stuckTaskCron = setInterval(
+		() => {
+			void reconcileStaleLiaisonTaskTrackers(pool).catch((err) => {
+				console.error("[P1110] Stuck liaison task tracker sweep failed:", err);
+			});
+		},
+		5 * 60 * 1000,
 	);
-
-	for (const row of rows) {
-		const { task_id, spawn_count } = row as any;
-		const newSpawnCount = spawn_count + 1;
-
-		if (newSpawnCount >= 2) {
-			// Mark failed
-			await query(
-				`UPDATE roadmap.liaison_task_tracker
-				  SET status = 'failed', spawn_count = $1, last_status_at = now(), completed_at = now()
-				 WHERE task_id = $2`,
-				[newSpawnCount, task_id],
-			);
-		} else {
-			// Just increment
-			await query(
-				`UPDATE roadmap.liaison_task_tracker
-				  SET spawn_count = $1, last_status_at = now()
-				 WHERE task_id = $2`,
-				[newSpawnCount, task_id],
-			);
-		}
-	}
+	stuckTaskCron.unref?.();
 }

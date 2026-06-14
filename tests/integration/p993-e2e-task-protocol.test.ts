@@ -7,14 +7,24 @@
  * Uses real DB; stubs MCP HTTP calls and bridgeTaskToOfferDispatch via vi.fn().
  */
 
-import { describe, it, expect, beforeAll, afterEach, afterAll, vi } from "vitest";
-import { closePool, query } from "../../src/infra/postgres/pool.ts";
 import {
+	afterAll,
+	afterEach,
+	beforeAll,
+	describe,
+	expect,
+	it,
+	vi,
+} from "vitest";
+import type { IncomingMessage } from "../../src/infra/agency/liaison-agent.ts";
+import {
+	claimLiaisonTaskTracker,
 	handleTypedTaskRequest,
 	handleWorkerReport,
+	reconcileStaleLiaisonTaskTrackers,
 	type TaskDispatcherHelpers,
 } from "../../src/infra/agency/task-dispatcher.ts";
-import type { IncomingMessage } from "../../src/infra/agency/liaison-agent.ts";
+import { closePool, query } from "../../src/infra/postgres/pool.ts";
 
 // Stub global fetch to intercept MCP HTTP calls
 const fetchSpy = vi.fn();
@@ -23,22 +33,49 @@ vi.stubGlobal("fetch", fetchSpy);
 // Minimal MCP response stubs
 function mockFetchFor(action: string): void {
 	fetchSpy.mockImplementation(async (_url: string, opts?: RequestInit) => {
-		const body = JSON.parse((opts?.body as string) ?? "{}") as Record<string, unknown>;
-		if (body.action === "prop_claim") {
-			return new Response(JSON.stringify({ lease_id: "test-lease-uuid-0001" }), { status: 200 });
+		const body = JSON.parse((opts?.body as string) ?? "{}") as Record<
+			string,
+			unknown
+		>;
+		const params = body.params as { name?: string } | undefined;
+		const toolName = params?.name ?? body.action;
+		if (toolName === "prop_claim") {
+			return new Response(
+				JSON.stringify({
+					result: {
+						content: [
+							{
+								text: JSON.stringify({ lease_id: "test-lease-uuid-0001" }),
+							},
+						],
+					},
+				}),
+				{ status: 200 },
+			);
 		}
-		if (body.action === "list_ac") {
-			return new Response(JSON.stringify({
-				items: [
-					{ item_number: 1, label: "AC-1", status: "pending" },
-					{ item_number: 2, label: "AC-2", status: "pass" },
-				],
-			}), { status: 200 });
+		if (toolName === "list_ac") {
+			return new Response(
+				JSON.stringify({
+					result: {
+						content: [
+							{
+								text: JSON.stringify({
+									items: [
+										{ item_number: 1, label: "AC-1", status: "pending" },
+										{ item_number: 2, label: "AC-2", status: "pass" },
+									],
+								}),
+							},
+						],
+					},
+				}),
+				{ status: 200 },
+			);
 		}
-		if (body.action === "verify_ac") {
+		if (toolName === "verify_ac") {
 			return new Response(JSON.stringify({ ok: true }), { status: 200 });
 		}
-		if (body.action === "release") {
+		if (toolName === "release") {
 			return new Response(JSON.stringify({ ok: true }), { status: 200 });
 		}
 		return new Response(JSON.stringify({ ok: true }), { status: 200 });
@@ -147,8 +184,14 @@ describe("P993 AC-8 — E2E typed task protocol via message_ledger", () => {
 			[TEST_PROPOSAL_ID],
 		);
 		await query(
+			`DELETE FROM roadmap_workforce.squad_dispatch
+				  WHERE proposal_id = 3315
+				     OR (agency_identity = $1 AND squad_name = 'liaison-task')`,
+			[TEST_LIAISON],
+		);
+		await query(
 			`DELETE FROM roadmap.message_ledger
-			  WHERE correlation_id = $1 OR from_agent = $2 OR to_agent = $2`,
+				  WHERE correlation_id = $1 OR from_agent = $2 OR to_agent = $2`,
 			[correlationId, TEST_LIAISON],
 		);
 	});
@@ -190,13 +233,155 @@ describe("P993 AC-8 — E2E typed task protocol via message_ledger", () => {
 		expect(ackMeta.proposal_id).toBe(TEST_PROPOSAL_ID);
 	});
 
+	it("P3315: retry reclaims a stale tracker row instead of tracker initialization error", async () => {
+		const { rows: ids } = await query(
+			`SELECT gen_random_uuid() AS old_id, gen_random_uuid() AS new_id`,
+		);
+		const oldCorrelationId = (ids[0] as any).old_id as string;
+		const newCorrelationId = (ids[0] as any).new_id as string;
+		await query(
+			`INSERT INTO roadmap.liaison_task_tracker
+				    (correlation_id, proposal_id, requestor_id, liaison_id, status, dispatch_id, worker_identity)
+				 VALUES ($1, $2, $3, $4, 'spawned', $5, $4)`,
+			[
+				oldCorrelationId,
+				TEST_PROPOSAL_ID,
+				TEST_REQUESTOR,
+				TEST_LIAISON,
+				FAKE_DISPATCH_ID,
+			],
+		);
+
+		const msgId = await seedTaskRequest(newCorrelationId);
+		const msg = makeIncomingMsg(msgId, "task_request", newCorrelationId, 0, {
+			proposal_id: TEST_PROPOSAL_ID,
+		});
+		const helpers = makeHelpers(newCorrelationId);
+
+		await handleTypedTaskRequest(msg, TEST_LIAISON, "anthropic", helpers);
+
+		const { rows: trackerRows } = await query(
+			`SELECT correlation_id, status, dispatch_id, spawn_count
+				   FROM roadmap.liaison_task_tracker
+				  WHERE proposal_id = $1`,
+			[TEST_PROPOSAL_ID],
+		);
+		expect(trackerRows).toHaveLength(1);
+		expect((trackerRows[0] as any).correlation_id).toBe(newCorrelationId);
+		expect((trackerRows[0] as any).status).toBe("spawned");
+		expect((trackerRows[0] as any).dispatch_id).toBe(FAKE_DISPATCH_ID);
+		expect(Number((trackerRows[0] as any).spawn_count)).toBe(1);
+
+		const { rows: replies } = await query(
+			`SELECT message_type, message_content
+				   FROM roadmap.message_ledger
+				  WHERE correlation_id = $1
+				    AND to_agent = $2
+				  ORDER BY id`,
+			[newCorrelationId, TEST_REQUESTOR],
+		);
+		expect(replies.some((r: any) => r.message_type === "task_ack")).toBe(true);
+		expect(
+			replies.some(
+				(r: any) =>
+					r.message_type === "task_error" &&
+					String(r.message_content).includes("tracker initialization error"),
+			),
+		).toBe(false);
+	});
+
+	it("P3315: stale tracker reaper fails rows whose dispatch reverted open/open", async () => {
+		const { rows: ids } = await query(`SELECT gen_random_uuid() AS id`);
+		const stuckCorrelationId = (ids[0] as any).id as string;
+		const { rows: dispatchRows } = await query(
+			`INSERT INTO roadmap_workforce.squad_dispatch
+				    (proposal_id, project_id, squad_name, dispatch_role, dispatch_status,
+				     offer_status, agency_identity, metadata, required_capabilities)
+				 VALUES (3315, 1, 'liaison-task', 'developer', 'open',
+				         'open', $1, '{}'::jsonb, '["developer"]'::jsonb)
+				 RETURNING id`,
+			[TEST_LIAISON],
+		);
+		const dispatchId = Number((dispatchRows[0] as any).id);
+		await query(
+			`INSERT INTO roadmap.liaison_task_tracker
+				    (correlation_id, proposal_id, requestor_id, liaison_id, status, dispatch_id, worker_identity)
+				 VALUES ($1, $2, $3, $4, 'spawned', $5, $4)`,
+			[
+				stuckCorrelationId,
+				TEST_PROPOSAL_ID,
+				TEST_REQUESTOR,
+				TEST_LIAISON,
+				dispatchId,
+			],
+		);
+
+		const cleared = await reconcileStaleLiaisonTaskTrackers();
+		expect(cleared).toBeGreaterThanOrEqual(1);
+
+		const { rows: trackerRows } = await query(
+			`SELECT status, completed_at
+				   FROM roadmap.liaison_task_tracker
+				  WHERE correlation_id = $1`,
+			[stuckCorrelationId],
+		);
+		expect((trackerRows[0] as any).status).toBe("failed");
+		expect((trackerRows[0] as any).completed_at).not.toBeNull();
+	});
+
+	it("P3315: direct stale tracker claim resets the active row", async () => {
+		const { rows: ids } = await query(
+			`SELECT gen_random_uuid() AS old_id, gen_random_uuid() AS new_id`,
+		);
+		const oldCorrelationId = (ids[0] as any).old_id as string;
+		const newCorrelationId = (ids[0] as any).new_id as string;
+		await query(
+			`INSERT INTO roadmap.liaison_task_tracker
+				    (correlation_id, proposal_id, requestor_id, liaison_id, status, dispatch_id, worker_identity)
+				 VALUES ($1, $2, $3, $4, 'spawned', $5, $4)`,
+			[
+				oldCorrelationId,
+				TEST_PROPOSAL_ID,
+				TEST_REQUESTOR,
+				TEST_LIAISON,
+				FAKE_DISPATCH_ID,
+			],
+		);
+
+		const result = await claimLiaisonTaskTracker({
+			correlationId: newCorrelationId,
+			proposalId: TEST_PROPOSAL_ID,
+			requestorId: TEST_REQUESTOR,
+			liaisonId: TEST_LIAISON,
+		});
+
+		expect(result).toEqual({ ok: true, reused: true });
+		const { rows: trackerRows } = await query(
+			`SELECT correlation_id, status, dispatch_id, worker_identity, spawn_count
+				   FROM roadmap.liaison_task_tracker
+				  WHERE proposal_id = $1`,
+			[TEST_PROPOSAL_ID],
+		);
+		expect((trackerRows[0] as any).correlation_id).toBe(newCorrelationId);
+		expect((trackerRows[0] as any).status).toBe("claimed");
+		expect((trackerRows[0] as any).dispatch_id).toBeNull();
+		expect((trackerRows[0] as any).worker_identity).toBeNull();
+		expect(Number((trackerRows[0] as any).spawn_count)).toBe(1);
+	});
+
 	it("task_status × 2 → tracker status=in_progress, relay messages appear", async () => {
 		// Seed tracker directly
 		await query(
 			`INSERT INTO roadmap.liaison_task_tracker
 			    (correlation_id, proposal_id, requestor_id, liaison_id, status, dispatch_id)
 			 VALUES ($1, $2, $3, $4, 'spawned', $5)`,
-			[correlationId, TEST_PROPOSAL_ID, TEST_REQUESTOR, TEST_LIAISON, FAKE_DISPATCH_ID],
+			[
+				correlationId,
+				TEST_PROPOSAL_ID,
+				TEST_REQUESTOR,
+				TEST_LIAISON,
+				FAKE_DISPATCH_ID,
+			],
 		);
 
 		// Seed a fake task_ack to reply_to
@@ -218,11 +403,22 @@ describe("P993 AC-8 — E2E typed task protocol via message_ledger", () => {
 					    (from_agent, to_agent, message_type, message_content, correlation_id, reply_to, metadata)
 					 VALUES ($1, $2, 'task_status', $3, $4, $5, '{}')
 					 RETURNING id`,
-					[TEST_REQUESTOR, TEST_LIAISON, `progress note ${i + 1}`, correlationId, ackId],
+					[
+						TEST_REQUESTOR,
+						TEST_LIAISON,
+						`progress note ${i + 1}`,
+						correlationId,
+						ackId,
+					],
 				);
 				return (rows[0] as any).id as number;
 			})();
-			const statusMsg = makeIncomingMsg(statusMsgId, "task_status", correlationId, ackId);
+			const statusMsg = makeIncomingMsg(
+				statusMsgId,
+				"task_status",
+				correlationId,
+				ackId,
+			);
 			await handleWorkerReport(statusMsg, TEST_LIAISON, helpers);
 		}
 
@@ -247,7 +443,13 @@ describe("P993 AC-8 — E2E typed task protocol via message_ledger", () => {
 			`INSERT INTO roadmap.liaison_task_tracker
 			    (correlation_id, proposal_id, requestor_id, liaison_id, status, dispatch_id)
 			 VALUES ($1, $2, $3, $4, 'in_progress', $5)`,
-			[correlationId, TEST_PROPOSAL_ID, TEST_REQUESTOR, TEST_LIAISON, FAKE_DISPATCH_ID],
+			[
+				correlationId,
+				TEST_PROPOSAL_ID,
+				TEST_REQUESTOR,
+				TEST_LIAISON,
+				FAKE_DISPATCH_ID,
+			],
 		);
 
 		const { rows: prevMsg } = await query(
@@ -259,18 +461,13 @@ describe("P993 AC-8 — E2E typed task protocol via message_ledger", () => {
 		);
 		const prevId = (prevMsg[0] as any).id as number;
 
-		const completeMsgId = await (async () => {
-			const { rows } = await query(
-				`INSERT INTO roadmap.message_ledger
-				    (from_agent, to_agent, message_type, message_content, correlation_id, reply_to, metadata)
-				 VALUES ($1, $2, 'task_complete', 'work done', $3, $4, $5)
-				 RETURNING id`,
-				[TEST_REQUESTOR, TEST_LIAISON, correlationId, prevId, JSON.stringify({ commit: "abc123" })],
-			);
-			return (rows[0] as any).id as number;
-		})();
-
-		const completeMsg = makeIncomingMsg(completeMsgId, "task_complete", correlationId, prevId, { commit: "abc123" });
+		const completeMsg = makeIncomingMsg(
+			900_993,
+			"task_complete",
+			correlationId,
+			prevId,
+			{ commit: "abc123" },
+		);
 		const helpers = makeHelpers(correlationId);
 		await handleWorkerReport(completeMsg, TEST_LIAISON, helpers);
 
@@ -282,10 +479,10 @@ describe("P993 AC-8 — E2E typed task protocol via message_ledger", () => {
 		expect((trackerRows[0] as any).status).toBe("complete");
 		expect((trackerRows[0] as any).completed_at).not.toBeNull();
 
-		// Outbound task_complete should carry acs_verified
+		// Outbound completion status should carry acs_verified.
 		const { rows: outRows } = await query(
 			`SELECT metadata FROM roadmap.message_ledger
-			  WHERE correlation_id = $1 AND message_type = 'task_complete'
+			  WHERE correlation_id = $1 AND message_type = 'task_status'
 			  AND to_agent = $2`,
 			[correlationId, TEST_REQUESTOR],
 		);

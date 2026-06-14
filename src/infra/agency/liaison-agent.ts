@@ -56,6 +56,7 @@ import { resolveLiaisonLlmTimeoutMs } from "./liaison-timeout.ts";
 import {
 	handleTypedTaskRequest,
 	handleWorkerReport,
+	markLiaisonTaskTrackerFailed,
 	type TaskDispatcherHelpers,
 } from "./task-dispatcher.ts";
 
@@ -707,11 +708,13 @@ export async function monitorTaskDispatch(args: {
 		const statusKey = `${row.offer_status}:${row.dispatch_status}:${row.worker_identity ?? ""}`;
 		if (statusKey !== lastStatus) {
 			lastStatus = statusKey;
-			const isTerminal = terminalOfferStatus(row.offer_status, row.dispatch_status);
-			const isSuccess = row.offer_status === "delivered" || row.dispatch_status === "completed";
+			const isReverted = revertedOfferStatus(row.offer_status, row.dispatch_status);
+			const isTerminal = terminalOfferStatus(row.offer_status, row.dispatch_status) || isReverted;
+			const isSuccess = !isReverted &&
+				(row.offer_status === "delivered" || row.dispatch_status === "completed");
 			const messageType = isTerminal
 				? isSuccess
-					? "task_result"
+					? "task_status"
 					: "task_error"
 				: "task_status";
 			await insertReply({
@@ -727,7 +730,22 @@ export async function monitorTaskDispatch(args: {
 			});
 		}
 
-		if (terminalOfferStatus(row.offer_status, row.dispatch_status)) return;
+		if (revertedOfferStatus(row.offer_status, row.dispatch_status)) {
+			await markLiaisonTaskTrackerFailed({
+				correlationId: args.correlationId,
+				dispatchId: args.dispatchId,
+			});
+			return;
+		}
+		if (terminalOfferStatus(row.offer_status, row.dispatch_status)) {
+			if (row.offer_status !== "delivered" && row.dispatch_status !== "completed") {
+				await markLiaisonTaskTrackerFailed({
+					correlationId: args.correlationId,
+					dispatchId: args.dispatchId,
+				});
+			}
+			return;
+		}
 		await sleep(Math.max(1_000, args.pollMs));
 	}
 
@@ -758,6 +776,13 @@ function terminalOfferStatus(
 		["delivered", "failed", "expired", "cancelled"].includes(offerStatus) ||
 		["completed", "failed", "cancelled"].includes(dispatchStatus)
 	);
+}
+
+function revertedOfferStatus(
+	offerStatus: string,
+	dispatchStatus: string,
+): boolean {
+	return offerStatus === "open" && dispatchStatus === "open";
 }
 
 function toOfferUuid(dispatchId: number): string {
