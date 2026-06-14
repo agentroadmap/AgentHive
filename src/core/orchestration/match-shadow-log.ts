@@ -20,29 +20,37 @@
  * JSONB payload for route_decision_log. Shadow mode therefore cannot alter live
  * routing — proven by match-shadow-log.test.ts.
  *
- * P3310 (difficulty + task_class) and P3311 (reliability read-API getReliability)
- * are not yet on main. Until they merge, provisional difficulty/task_class are
- * derived from requiredTier/role, and reliability uses AC-7 cold-start priors via
- * matchWorkToRoute's default fetchReliabilityCell. See // STUB: awaiting P3310/P3311.
+ * P3309 INTEGRATION (umbrella): the P3310 difficulty signal and the P3311
+ * reliability ledger are now MERGED on main. This module composes them:
+ *   - difficulty + task_class come from P3310 assessDifficulty() (real, not tier-derived).
+ *   - reliability comes from P3311 fetchReliabilityCell() (real ledger read with
+ *     AC-7 cold-start fallback), injected as matchWorkToRoute's default
+ *     `fetchReliability` so the matcher scores against the live ledger.
+ * The provisional* helpers are RETAINED as deterministic fallbacks (and for the
+ * existing unit contract) but are no longer the primary signal path.
  */
 
 import { query } from "../../infra/postgres/pool.ts";
 import * as config from "../../shared/runtime/config.ts";
 import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 import {
+	assessDifficulty,
+	type CapabilityTier,
+} from "./difficulty-assessor.ts";
+import { fetchReliabilityCell as ledgerFetchReliabilityCell } from "../scoring/reliability-ledger.ts";
+import {
 	type MatchResult,
 	matchWorkToRoute,
+	type ReliabilityCell,
 	type RouteCandidate,
 	type WorkItem,
 } from "./match-work-to-route.ts";
 
 /**
- * P3311 reliability read-API — EXPECTED shape (Child B, building concurrently).
- * Defined here as a thin interface so AC-5 wiring integrates at merge with no
- * code change beyond swapping the import. See AC-2 dependency note in the report.
- *
- * STUB: awaiting P3311 — when P3311 lands, import { getReliability } from its
- * module and pass an adapter to matchWorkToRoute's `fetchReliability` option.
+ * P3311 reliability read-API — the Child-B contract. The umbrella keeps this
+ * thin interface so callers (and tests) can inject an alternate reliability
+ * source. When omitted, computeShadowLog wires P3311's real ledger reader
+ * (fetchReliabilityCell) directly. See AC-1 (single source consulted by both paths).
  */
 export interface ReliabilityReadApi {
 	/** Returns reliability for a (route, task_class) cell. */
@@ -53,8 +61,9 @@ export interface ReliabilityReadApi {
 }
 
 /**
- * Derive a provisional difficulty [0,1] from the legacy requiredTier hint.
- * STUB: awaiting P3310 — replace with the difficulty signal once it ships.
+ * Deterministic fallback: derive a difficulty [0,1] from the legacy requiredTier
+ * hint. Retained for the case where assessDifficulty cannot be consulted; the
+ * primary path now uses the P3310 assessor (see deriveWorkSignal).
  */
 export function provisionalDifficulty(requiredTier: string | null): number {
 	switch (requiredTier) {
@@ -72,9 +81,10 @@ export function provisionalDifficulty(requiredTier: string | null): number {
 }
 
 /**
- * Derive a provisional task_class from the workflow role label.
- * STUB: awaiting P3310 — replace with the canonical task_class once it ships.
- * Maps known critical roles onto the DOWNSHIFT_LOCKED_TASK_CLASSES vocabulary.
+ * Deterministic fallback: derive a task_class from the workflow role label using
+ * the legacy {gate_review,merge,architecture,develop} vocabulary. The primary
+ * path now uses P3310 classifyTaskClass via assessDifficulty (canonical
+ * {mcp_protocol,code_dev,gate_review,triage,mechanical,research} vocabulary).
  */
 export function provisionalTaskClass(role: string | null): string {
 	const r = (role ?? "").toLowerCase();
@@ -82,6 +92,26 @@ export function provisionalTaskClass(role: string | null): string {
 	if (r.includes("merge")) return "merge";
 	if (r.includes("architect")) return "architecture";
 	return "develop";
+}
+
+/**
+ * P3309 wire-point: compose the P3310 difficulty signal into the matcher's
+ * WorkItem dimensions. Uses the canonical assessDifficulty(role) → {difficulty,
+ * task_class, requiredCapabilityTier}. Pure (no I/O); role is the only signal
+ * available at the resolver call-site, so task text/AC-count are left unset and
+ * the assessor falls back to its role-based heuristic.
+ */
+export function deriveWorkSignal(role: string | null): {
+	difficulty: number;
+	task_class: string;
+	requiredCapabilityTier: CapabilityTier;
+} {
+	const a = assessDifficulty({ role: role ?? "" });
+	return {
+		difficulty: a.difficultyScore,
+		task_class: a.taskClass,
+		requiredCapabilityTier: a.requiredCapabilityTier,
+	};
 }
 
 export interface ShadowLogInput {
@@ -99,6 +129,11 @@ export interface ShadowLogResult {
 	matcher_choice: MatchResult | null;
 	legacy_choice: { route_id: number; source: "legacy_resolver" } | null;
 	shadow_mode: boolean;
+	/** P3309: composed axis signals, surfaced for the route_decision_log columns. */
+	task_class: string | null;
+	difficulty_score: number | null;
+	/** Reliability of the legacy-chosen route for this task_class (ledger or prior). */
+	reliability_score: number | null;
 }
 
 /**
@@ -162,20 +197,33 @@ export async function computeShadowLog(
 		source: "legacy_resolver" as const,
 	};
 
+	// P3310: real difficulty + canonical task_class from the merged assessor.
+	const signal = deriveWorkSignal(input.role);
+
 	let matcher_choice: MatchResult | null = null;
+	let reliability_score: number | null = null;
 	try {
 		const candidates = await fetchCandidatePool(input.provider, input.host);
 		const item: WorkItem = {
-			difficulty: provisionalDifficulty(input.requiredTier),
-			task_class: provisionalTaskClass(input.role),
+			difficulty: signal.difficulty,
+			task_class: signal.task_class,
 			provider: input.provider,
 			host: input.host,
 			projectId: input.projectId,
 			agencyIdentity: input.agencyIdentity,
 		};
-		// STUB: awaiting P3311 — adapt getReliability into the matcher when present.
-		const fetchReliability = reliabilityApi
-			? async (routeId: number, taskClass: string, _tier: string) => {
+
+		// P3309 wiring: the matcher's reliability source. Precedence:
+		//   1. caller-injected ReliabilityReadApi (tests / alternate sources)
+		//   2. P3311's real ledger reader fetchReliabilityCell (default)
+		// Either way the matcher applies AC-7 cold-start priors when the ledger
+		// returns < MIN_RELIABILITY_SAMPLES observations.
+		const fetchReliability: (
+			routeId: number,
+			taskClass: string,
+			tier: string,
+		) => Promise<ReliabilityCell> = reliabilityApi
+			? async (routeId, taskClass, _tier) => {
 					const { score, confidence } = await reliabilityApi.getReliability(
 						routeId,
 						taskClass,
@@ -186,12 +234,25 @@ export async function computeShadowLog(
 						success_rate: score,
 					};
 				}
-			: undefined;
-		matcher_choice = await matchWorkToRoute(
-			item,
-			candidates,
-			fetchReliability ? { fetchReliability } : undefined,
-		);
+			: (routeId, taskClass, tier) =>
+					// Pass this module's `query` (the same one fetchCandidatePool uses,
+					// and the one mocked in unit tests) so the ledger read shares the
+					// connection/mocking surface instead of a private dynamic import.
+					ledgerFetchReliabilityCell(routeId, taskClass, tier, query);
+
+		matcher_choice = await matchWorkToRoute(item, candidates, { fetchReliability });
+
+		// Surface the reliability of the LEGACY-chosen route for the log column.
+		const chosenTier =
+			candidates.find((c) => c.route_id === input.chosenRouteId)?.tier ??
+			input.requiredTier ??
+			"mid";
+		const chosenCell = await fetchReliability(
+			input.chosenRouteId,
+			signal.task_class,
+			chosenTier,
+		).catch(() => null);
+		reliability_score = chosenCell ? chosenCell.success_rate : null;
 	} catch {
 		// Shadow logging is best-effort; never block or alter routing on failure.
 		matcher_choice = null;
@@ -201,5 +262,8 @@ export async function computeShadowLog(
 		matcher_choice,
 		legacy_choice: shadowMode ? legacy_choice : null,
 		shadow_mode: shadowMode,
+		task_class: signal.task_class,
+		difficulty_score: signal.difficulty,
+		reliability_score,
 	};
 }
