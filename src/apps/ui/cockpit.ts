@@ -7,6 +7,13 @@
 // @ts-expect-error - blessed types may not be installed
 import type blessed from "blessed";
 import { box } from "./blessed.ts";
+// P1374 (P1365-B): pure, unit-tested throttle-state formatting logic.
+import {
+	formatHeadroomBadge,
+	formatReadyCoolingLabel,
+	formatRelativeTime,
+	isCooling,
+} from "./cockpit-format.ts";
 
 export interface WorkforceAgent {
 	id: string;
@@ -287,18 +294,15 @@ export function renderCockpit(
 			(a) => a.status === "active" && !a.currentProposal,
 		);
 
-		// P1365-AC6: Split idle agents by capacity headroom
-		// "ready" = healthy headroom (>= 25%), "cooling" = low headroom (< 25%)
-		const ready = idle.filter((a) => {
-			const headroom = a.capacityHeadroomPct;
-			// If no headroom data, assume ready (no capacity record = healthy)
-			return headroom === null || headroom === undefined || headroom >= 25;
-		});
-		const cooling = idle.filter((a) => {
-			const headroom = a.capacityHeadroomPct;
-			// Cooling = explicit headroom < 25% OR soft-throttled by capacity
-			return headroom !== null && headroom !== undefined && headroom < 25;
-		});
+		// P1374 (P1365-B) AC-3: Split idle (dispatchable) agents by throttle_action.
+		//   cooling = soft-throttled by capacity (throttle_action='soft') — still
+		//             dispatchable (deprioritized per P1373), stays in AVAILABLE.
+		//   ready   = throttle_action='none' or no capacity row.
+		// Hard-throttled agents never reach here (status='throttled' → THROTTLED).
+		// Headroom (< 25%) is surfaced as a per-agent badge below, independent of
+		// the ready/cooling bucketing.
+		const cooling = idle.filter((a) => isCooling(a));
+		const ready = idle.filter((a) => !isCooling(a));
 
 		const throttled = agents.filter((a) => a.status === "throttled");
 		const offline = agents.filter((a) => a.status === "offline");
@@ -321,21 +325,12 @@ export function renderCockpit(
 			`{green-fg}${online}{/} online`,
 			`{bold}${working.length}{/} working`,
 		];
-		// Show "N ready · M cooling" format for capacity awareness
+		// P1374 AC-3: "N ready · M cooling" (or just "N ready" when cooling = 0).
+		// Pure label from cockpit-format.ts so the SQL, render, and tests agree.
 		if (ready.length > 0 || cooling.length > 0) {
-			parts.push(`{cyan-fg}${ready.length}{/} ready`);
-			if (cooling.length > 0) {
-				// Show shortest reset window for cooling agencies
-				const coolingResets = cooling
-					.map((a) => a.capacityResetAt)
-					.filter((t): t is number => typeof t === "number" && t > Date.now())
-					.sort((a, b) => a - b);
-				const nextCoolingReset = coolingResets[0];
-				const coolingResetIn = nextCoolingReset
-					? ` (reset ${formatRelativeTime(nextCoolingReset - Date.now())})`
-					: "";
-				parts.push(`{yellow-fg}${cooling.length} cooling${coolingResetIn}{/}`);
-			}
+			parts.push(
+				`{cyan-fg}${formatReadyCoolingLabel(ready.length, cooling.length)}{/}`,
+			);
 		}
 		if (throttled.length > 0) {
 			// Show shortest reset window so operator knows when to expect capacity.
@@ -371,47 +366,49 @@ export function renderCockpit(
 
 		if (ready.length > 0 || cooling.length > 0) {
 			lines.push(`{cyan-fg}[ ] AVAILABLE{/}`);
+			const nowMs = Date.now();
 
-			// Show READY agencies
+			// P1374 AC-5: per-agent low-headroom badge "[X% reset in Tm]".
+			// Pure formatter from cockpit-format.ts; returns "" when headroom is
+			// missing or >= 25%, so it composes cleanly into either layout below.
+			const badge = (a: WorkforceAgent) =>
+				formatHeadroomBadge(a.capacityHeadroomPct, a.capacityResetAt, nowMs);
+
+			// AC-4: READY agents grouped by provider@host with a "(count)" badge.
+			// Per-agent names carry the low-headroom badge inline when applicable.
 			if (ready.length > 0) {
-				const byProvider = new Map<string, string[]>();
+				const byProvider = new Map<string, WorkforceAgent[]>();
 				ready.forEach((a) => {
 					const key = a.role || "unknown@?";
 					if (!byProvider.has(key)) byProvider.set(key, []);
-					byProvider.get(key)!.push(a.id);
+					byProvider.get(key)!.push(a);
 				});
 				const orderedProviders = Array.from(byProvider.keys()).sort();
 				orderedProviders.forEach((provider) => {
-					const names = byProvider.get(provider) ?? [];
-					const joined = names.join(", ");
-					const labelLen = provider.length + String(names.length).length + 5;
+					const group = byProvider.get(provider) ?? [];
+					const rendered = group.map((a) => {
+						const b = badge(a);
+						return b ? `${a.id} {yellow-fg}${b}{/}` : a.id;
+					});
+					const joined = rendered.join(", ");
+					const labelLen = provider.length + String(group.length).length + 5;
 					const fit =
 						joined.length > panelBudget - labelLen
 							? `${joined.substring(0, panelBudget - labelLen - 1)}…`
 							: joined;
-					lines.push(`  {gray-fg}${provider}{/} (${names.length}): ${fit}`);
+					lines.push(`  {gray-fg}${provider}{/} (${group.length}): ${fit}`);
 				});
 			}
 
-			// Show COOLING agencies with headroom info
+			// AC-3/AC-5: COOLING (soft-throttled) agents stay in AVAILABLE, one per
+			// line with role and the low-headroom badge.
 			if (cooling.length > 0) {
 				lines.push(`  {yellow-fg}[cooling]{/}`);
 				cooling.forEach((a) => {
-					const headroom =
-						a.capacityHeadroomPct !== undefined ? a.capacityHeadroomPct : null;
-					const resetMs = a.capacityResetAt;
-					const resetTime =
-						resetMs && resetMs > Date.now()
-							? formatRelativeTime(resetMs - Date.now())
-							: "unknown";
-					const headroomStr =
-						headroom !== null && headroom !== undefined
-							? `${headroom.toFixed(1)}%`
-							: "N/A";
 					const role = `{gray-fg}(${a.role}){/}`;
-					lines.push(
-						`  {bold}${a.id}{/} ${role} [{yellow-fg}${headroomStr} headroom↓{/} reset ${resetTime}]`,
-					);
+					const b = badge(a);
+					const badgeStr = b ? ` {yellow-fg}${b}{/}` : "";
+					lines.push(`  {bold}${a.id}{/} ${role}${badgeStr}`);
 				});
 			}
 		}
@@ -523,14 +520,4 @@ export function renderCockpit(
 	}
 
 	screen.render();
-}
-
-function formatRelativeTime(ms: number): string {
-	if (ms < 0) return "now";
-	const seconds = Math.round(ms / 1000);
-	if (seconds < 60) return `in ${seconds}s`;
-	const minutes = Math.round(seconds / 60);
-	if (minutes < 60) return `in ${minutes}m`;
-	const hours = Math.round(minutes / 60);
-	return `in ${hours}h`;
 }
