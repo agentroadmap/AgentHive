@@ -178,6 +178,22 @@ export class ProposalPausedError extends Error {
 // Offer-gen guard: COMPLETE is a terminal state — never post work offers for
 // a completed proposal (operator directive 2026-06-09). scanQueues/legacy-dispatch
 // treat this as skip-and-continue, same shape as ProposalPausedError.
+//
+// P2496: single source of truth for terminal proposal statuses. Reused by the
+// AC-1 guard below, by legacy-dispatch.handleStateChange (AC-5), and by the
+// liaison A2A task bridge (AC-4) so the "no offers for terminal proposals"
+// invariant is enforced at every offer-creation site, not duplicated.
+export const TERMINAL_PROPOSAL_STATUSES: ReadonlySet<string> = new Set([
+	"COMPLETE",
+]);
+
+/** True when `status` is a terminal proposal state (case-insensitive). */
+export function isTerminalProposalStatus(
+	status: string | null | undefined,
+): boolean {
+	return !!status && TERMINAL_PROPOSAL_STATUSES.has(status.toUpperCase());
+}
+
 export class TerminalProposalError extends Error {
 	constructor(
 		readonly proposalId: number,
@@ -571,9 +587,8 @@ async function postWorkOfferImpl(
 	}
 
 	// Terminal-status guard (operator directive): COMPLETE is terminal — refuse before INSERT.
-	const TERMINAL_PROPOSAL_STATUSES = new Set(["COMPLETE"]);
-	if (ctx.status && TERMINAL_PROPOSAL_STATUSES.has(ctx.status.toUpperCase())) {
-		throw new TerminalProposalError(input.proposalId, ctx.status);
+	if (isTerminalProposalStatus(ctx.status)) {
+		throw new TerminalProposalError(input.proposalId, ctx.status as string);
 	}
 
 	if (ctx.gate_scanner_paused) {

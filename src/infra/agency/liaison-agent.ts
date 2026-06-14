@@ -47,6 +47,10 @@ import { emitOAuthRotateSignal } from "../../core/runtime/oauth-token-monitor.ts
 import * as runtimeConfig from "../../shared/runtime/config.ts";
 import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 import { agentNotifyChannel } from "../messaging/a2a-access-control.ts";
+import {
+	isTerminalProposalStatus,
+	TerminalProposalError,
+} from "../../core/pipeline/post-work-offer.ts";
 import { query } from "../postgres/pool.ts";
 import {
 	isA2AVerb,
@@ -608,6 +612,20 @@ export async function bridgeTaskToOfferDispatch(args: {
 		throw new Error(
 			"task bridge requires proposal_id on message_ledger or metadata",
 		);
+	}
+
+	// P2496 AC-4: this bridge INSERTs into squad_dispatch directly, bypassing
+	// postWorkOffer and therefore its AC-1 terminal-status guard. Re-assert that
+	// guard here so an A2A task_request can never resurrect work on a COMPLETE
+	// proposal. The caller catches this and replies with a clear error (see the
+	// task-bridge try/catch in the message handler).
+	const { rows: statusRows } = await query<{ status: string | null }>(
+		`SELECT status FROM roadmap_proposal.proposal WHERE id = $1`,
+		[proposalId],
+	);
+	const proposalStatus = statusRows[0]?.status ?? null;
+	if (isTerminalProposalStatus(proposalStatus)) {
+		throw new TerminalProposalError(proposalId, proposalStatus as string);
 	}
 
 	const role =

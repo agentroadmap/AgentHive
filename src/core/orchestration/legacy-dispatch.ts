@@ -25,7 +25,10 @@ import {
 	liveChildCount,
 } from "./agent-spawner.ts";
 import { ObservabilityWriter } from "../observability/observability-writer.ts";
-import { postWorkOffer } from "../pipeline/post-work-offer.ts";
+import {
+	isTerminalProposalStatus,
+	postWorkOffer,
+} from "../pipeline/post-work-offer.ts";
 import { ROLE_TO_REQUIRED_CAPABILITIES } from "./offer-dispatch.ts";
 import { reapStaleRows } from "../pipeline/reap-stale-rows.ts";
 import { enqueueNotification } from "../notifications/enqueue.ts";
@@ -1355,6 +1358,19 @@ export async function handleStateChange(proposalId: string, newState: string) {
 		return;
 	}
 
+	// P2496 AC-5: COMPLETE (and any terminal status) is the end of the line —
+	// post zero offers. Without this guard the NOTIFY path keeps queuing dev/gate
+	// offers for completed proposals, which then sit open and starve genuine work
+	// (dispatch churn, 2026-06-09). postWorkOffer also refuses (AC-1), but
+	// short-circuiting here avoids the downstream backpressure/dispatch bookkeeping
+	// and the noisy TerminalProposalError throw on every poll cycle.
+	if (isTerminalProposalStatus(maturityRows[0]?.status)) {
+		logger.log(
+			`⏭ P${proposalId} → ${newState}: status=${maturityRows[0]?.status} is terminal — no offers for completed proposals`,
+		);
+		return;
+	}
+
 	// Skip if this proposal already has a running agent (prevents re-dispatch every poll cycle)
 	const { rows: runningRows } = await query<{ cnt: number }>(
 		`SELECT count(*)::int AS cnt FROM agent_runs
@@ -1908,6 +1924,10 @@ async function claimImplicitGateReady(
           LIMIT 1
        ) dispatch ON true
       WHERE p.maturity = 'mature'
+        -- P2496 AC-6: never select terminal proposals for an implicit gate. The
+        -- positive allowlist below already excludes COMPLETE, but this explicit
+        -- guard keeps the invariant true even if the allowlist is later widened.
+        AND UPPER(p.status) <> 'COMPLETE'
         AND (LOWER(p.status) IN ('draft', 'review', 'develop', 'merge', 'triage', 'fix')
              OR (LOWER(p.status) = 'deliberation' AND p.type = 'governance-amendment'))
         AND dispatch.id IS NULL
