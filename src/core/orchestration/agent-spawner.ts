@@ -2595,9 +2595,16 @@ function runProcess(
 		child.on("error", (err) => {
 			exited = true;
 			cleanup();
+			const diagnostics = [
+				`cmd_exists=${existsSync(cmd)}`,
+				`cwd_exists=${existsSync(cwd)}`,
+				`home=${env.HOME ?? ""}`,
+				`codex_home=${env.CODEX_HOME ?? ""}`,
+				`path=${env.PATH ?? ""}`,
+			].join(" ");
 			resolve({
 				stdout,
-				stderr: `${stderr}\n[agent-spawner] spawn error: ${err.message}`,
+				stderr: `${stderr}\n[agent-spawner] spawn error: ${err.message}\n[agent-spawner] spawn diagnostics: ${diagnostics}`,
 				exitCode: null,
 			});
 		});
