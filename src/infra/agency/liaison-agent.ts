@@ -54,6 +54,13 @@ import {
 	type ListenerClient as ClaimLoopListenerClient,
 } from "./agency-claim-loop.ts";
 import { sendMessage as sendLiaisonMessage } from "./liaison-message-service.ts";
+// P1109 Tier-2: agent_registry FK-anchor + listener_subscription presence are
+// wrapped behind infra-layer helpers instead of raw INSERT/DELETE SQL here.
+import {
+	ensureAgentRegistryRow,
+	recordListenerSubscription,
+	removeListenerSubscription,
+} from "./presence-ops.ts";
 import { resolveLiaisonLlmTimeoutMs } from "./liaison-timeout.ts";
 import {
 	handleTypedTaskRequest,
@@ -147,19 +154,20 @@ export async function runLiaisonAgent(
 	// rather than silently producing a channel name no one will hear.
 	const channel = agentNotifyChannel(identity);
 
-	await query(
-		`INSERT INTO roadmap_workforce.agent_registry
-		    (agent_identity, agent_type, trust_tier, status)
-		 VALUES ($1, 'agency', 'authority', 'active')
-		 ON CONFLICT (agent_identity) DO UPDATE SET status = 'active'`,
-		[identity],
-	);
+	// P1109 Tier-2 (AC-14): FK-anchor row via the tool-layer wrapper, not raw SQL.
+	await ensureAgentRegistryRow(identity);
 
 	const listenClient = opts.createListenClient
 		? await opts.createListenClient()
 		: await connectListenClient(identity);
 	await listenClient.query(`LISTEN "${channel}"`);
 	console.log(`${log} LISTEN active on: ${channel}`);
+
+	// P1109 Tier-2 (AC-4 / AC-6): record listener presence in
+	// roadmap.listener_subscription from the SAME client that holds the LISTEN, so
+	// the established_pid matches the backend fn_listener_reconcile_drift inspects.
+	// Best-effort: a bookkeeping failure must not prevent the inbox loop from running.
+	await recordListenerSubscription(listenClient, identity, channel).catch(() => {});
 
 	// V3-C6 (P1438 step 3b): Conditionally start AgencyClaimLoop if flag enabled
 	// This loop allows the agency to self-claim work offers from the shared work_offers
@@ -468,6 +476,13 @@ export async function runLiaisonAgent(
 					);
 				}
 			}
+
+			// P1109 Tier-2 (AC-5): clean up the listener_subscription row on graceful
+			// shutdown BEFORE closing the client, so fn_listener_reconcile_drift does
+			// not later report it as a stale (pid-not-in-pg_stat_activity) row.
+			await removeListenerSubscription(listenClient, identity, channel).catch(
+				() => {},
+			);
 
 			try {
 				await listenClient.query(`UNLISTEN "${channel}"`);

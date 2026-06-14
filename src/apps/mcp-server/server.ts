@@ -2304,6 +2304,73 @@ export async function createMcpServer(
 		"[MCP] Registered 4 P917 agency lifecycle tools (v0.37.1-george)",
 	);
 
+	// P1109 Tier-2: presence + listener-subscription via MCP. These wrap the raw
+	// `SELECT roadmap.fn_pulse(...)` and roadmap.listener_subscription bookkeeping
+	// that agency processes used to issue directly.
+	const presenceHandlers = await import(
+		"./tools/agency/agent-presence-handlers.ts"
+	);
+	server.addTool({
+		name: "agent_pulse",
+		description:
+			"P1109 Tier-2: update an agency presence heartbeat via MCP instead of raw " +
+			"SELECT roadmap.fn_pulse(...). Atomically sets roadmap.agency.last_heartbeat_at = now() " +
+			"and presence_state. Returns { success, agency_id, presence_state, last_heartbeat_at }.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				agency_id: { type: "string", description: "Agency identity" },
+				state: {
+					type: "string",
+					enum: ["online", "busy", "away", "offline"],
+					description: "Presence state to record",
+				},
+			},
+			required: ["agency_id", "state"],
+			additionalProperties: false,
+		},
+		handler: (a) => presenceHandlers.agentPulseHandler(a as any),
+	});
+	server.addTool({
+		name: "agent_subscribe",
+		description:
+			"P1109 Tier-2: record (or refresh) a listener presence row in " +
+			"roadmap.listener_subscription via MCP. Audit/poll-mode entrypoint: records the " +
+			"server backend pid. In-process LISTEN owners record their own client's pid via " +
+			"recordListenerSubscription (see liaison-agent.ts). Returns { success, agent_identity, channel, established_pid }.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				agent_identity: { type: "string", description: "Agency/agent identity" },
+				channel: {
+					type: "string",
+					description: "Notification channel being listened on (e.g. msg_<identity>)",
+				},
+			},
+			required: ["agent_identity", "channel"],
+			additionalProperties: false,
+		},
+		handler: (a) => presenceHandlers.handleAgentSubscribe(a as any),
+	});
+	server.addTool({
+		name: "agent_unsubscribe",
+		description:
+			"P1109 Tier-2: remove a listener presence row from roadmap.listener_subscription " +
+			"via MCP on clean shutdown, so the reconcile functions don't report it stale. " +
+			"Returns { success, agent_identity, channel }.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				agent_identity: { type: "string", description: "Agency/agent identity" },
+				channel: { type: "string", description: "Notification channel" },
+			},
+			required: ["agent_identity", "channel"],
+			additionalProperties: false,
+		},
+		handler: (a) => presenceHandlers.handleAgentUnsubscribe(a as any),
+	});
+	console.error("[MCP] Registered 3 P1109 Tier-2 presence/subscription tools");
+
 	// P297: State machine management tools
 	server.addTool({
 		name: "state_machine_start",
