@@ -33,6 +33,11 @@ import type { OfferDispatchPayload } from "../../infra/agency/liaison-message-ty
 import { ObservabilityWriter } from "../observability/observability-writer.ts";
 import * as config from "../../shared/runtime/config.ts";
 import { FlagKeys } from "../../shared/runtime/config-keys.ts";
+import {
+	matchWorkToRoute,
+	type RouteCandidate,
+	type WorkItem,
+} from "./match-work-to-route.ts";
 
 const obs = new ObservabilityWriter("agency:offer-dispatch");
 
@@ -314,6 +319,69 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 			kind: "offer_dispatch",
 			payload: augmented,
 		});
+
+		// AC-5/AC-8 (P3312): shadow-mode — run matcher after dispatch to log matcher_choice
+		// vs the route that will be resolved downstream at spawn time.
+		void (async () => {
+			try {
+				const shadowEnabled = await config
+					.flag(FlagKeys.ADAPTIVE_MATCHER_ENABLED)
+					.catch(() => false);
+				if (shadowEnabled) return; // live mode — matcher already drove route selection upstream
+				const routeHint = extractRouteHint(claim.metadata);
+				const { rows: candidateRows } = await query<{
+					id: number;
+					model_name: string;
+					route_provider: string;
+					tier: string;
+					cost_per_million_input: number | null;
+					priority: number;
+				}>(
+					`SELECT mr.id, mr.model_name, mr.route_provider,
+					        COALESCE(mr.tier, 'tool') AS tier,
+					        mr.cost_per_million_input, mr.priority
+					   FROM roadmap.model_routes mr
+					  WHERE mr.is_enabled = true
+					  ORDER BY mr.priority ASC, COALESCE(mr.cost_per_million_input, 0) ASC`,
+					[],
+				);
+				const candidates: RouteCandidate[] = candidateRows.map((r) => ({
+					route_id: r.id,
+					model_name: r.model_name,
+					route_provider: r.route_provider,
+					tier: r.tier ?? "tool",
+					cost_per_million_input: r.cost_per_million_input,
+					priority: r.priority,
+				}));
+				const workItem: WorkItem = {
+					difficulty: 0.5,
+					task_class: claim.role ?? "develop",
+					provider: routeHint,
+					proposalId: claim.proposalId,
+				};
+				const matcherResult = await matchWorkToRoute(workItem, candidates);
+				const topCandidate =
+					matcherResult.kind === "ranked" ? matcherResult.candidates[0] : null;
+				if (topCandidate) {
+					await query(
+						`INSERT INTO roadmap.route_decision_log
+						   (proposal_id, role, agency_identity, chosen_route_id, eliminated_routes,
+						    matcher_choice, legacy_choice, shadow_mode)
+						 VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, NULL, true)`,
+						[
+							claim.proposalId,
+							claim.role,
+							targetAgencyId,
+							topCandidate.route_id,
+							JSON.stringify([]),
+							JSON.stringify(matcherResult),
+						],
+					);
+				}
+			} catch (_err) {
+				// Fire-and-forget — shadow log errors must never affect dispatch.
+			}
+		})();
 
 		// P908-D: offer_activated span marks the moment the dispatch message was sent.
 		const traceId = extractTraceId(claim.metadata);

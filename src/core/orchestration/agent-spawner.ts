@@ -78,6 +78,11 @@ import type {
 	EliminatedRoute,
 	ResolveRouteOpts,
 } from "./resolvers/route-resolver.types.ts";
+import {
+	matchWorkToRoute,
+	type RouteCandidate,
+	type WorkItem,
+} from "./match-work-to-route.ts";
 import { provisionScratch, reapScratch, SCRATCH_ROOT } from "./scratch.ts";
 import { sanitizeExtraEnv } from "./spawn-env-sanitizer.ts";
 import { applySpawnStagger } from "./spawn-stagger.ts";
@@ -963,6 +968,7 @@ async function logRouteDecision({
 	agencyIdentity,
 	projectId,
 	roleProfileId,
+	matcherChoice = null,
 }: {
 	provider: string;
 	chosenRouteId: number;
@@ -971,6 +977,8 @@ async function logRouteDecision({
 	agencyIdentity: string | null;
 	projectId: number | null;
 	roleProfileId: number | null;
+	/** AC-8 (P3312): matchWorkToRoute result in shadow mode; null when matcher did not run. */
+	matcherChoice?: object | null;
 }): Promise<void> {
 	// Params: $1=provider, $2=winner id, $3=host, $4=projectId, $5=agencyIdentity, $6=roleProfileId
 	const { rows } = await query<{
@@ -997,14 +1005,16 @@ async function logRouteDecision({
 	await query(
 		`INSERT INTO roadmap.route_decision_log
 		   (proposal_id, role, agency_identity, chosen_route_id, eliminated_routes,
-		    legacy_choice, shadow_mode)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		    matcher_choice, legacy_choice, shadow_mode)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 		[
 			proposalId,
 			role,
 			agencyIdentity,
 			chosenRouteId,
 			JSON.stringify(eliminatedRoutes),
+			// AC-8 (P3312): matchWorkToRoute result (null when ADAPTIVE_MATCHER_ENABLED=true — matcher IS the choice)
+			matcherChoice !== null ? JSON.stringify(matcherChoice) : null,
 			// AC-8 (P3312): record legacy choice JSONB for shadow-mode diff
 			JSON.stringify({ route_id: chosenRouteId, source: "legacy_resolver" }),
 			// shadow_mode=true (ADAPTIVE_MATCHER_ENABLED defaults false, so this path is shadow)
@@ -1186,36 +1196,8 @@ async function resolveModelRoute(
 		routeId: r.id ? BigInt(r.id) : null,
 	});
 
-	if (hint) {
-		const { rows } = await fetchRoute(hint);
-		if (rows.length > 0) {
-			const route = toModelRoute(rows[0]);
-			assertResolvedRouteMetadata(provider, route);
-			void logRouteDecision({
-				provider,
-				chosenRouteId: rows[0].id,
-				proposalId,
-				role,
-				agencyIdentity,
-				projectId,
-				roleProfileId,
-			}).catch((err) => {
-				console.warn(
-					"[P772] route_decision_log write failed (non-blocking):",
-					err instanceof Error ? err.message : String(err),
-				);
-			});
-			return { ...route, eliminatedRoutes: [] };
-		}
-
-		console.warn(
-			`[P235] No enabled route for model "${hint}" with agent_provider "${provider}". ` +
-				`Falling back to default.`,
-		);
-		// Fall through to default resolution
-	}
-
 	// P771/P773: filter string for queries with params (provider=$1, host=$2, projectId=$3, agency=$4, role=$5)
+	// AC-5 (P3312): defined before hint block so shadow-mode IIFE can reference it at all call sites.
 	const defaultPolicyFilters = `
           AND ${hostPolicyFilterSql(2, "mr")}
           AND ${projectPolicyFilterSql(3, "mr")}
@@ -1230,6 +1212,81 @@ async function resolveModelRoute(
 		agencyIdentity,
 		roleProfileId,
 	] as const;
+
+	if (hint) {
+		const { rows } = await fetchRoute(hint);
+		if (rows.length > 0) {
+			const route = toModelRoute(rows[0]);
+			assertResolvedRouteMetadata(provider, route);
+			// AC-5/AC-8 (P3312): shadow-mode — run matcher alongside legacy, log both choices.
+			void (async () => {
+				try {
+					let matcherChoice: object | null = null;
+					const shadowEnabled = await config
+						.flag(FlagKeys.ADAPTIVE_MATCHER_ENABLED)
+						.catch(() => false);
+					if (!shadowEnabled) {
+						const { rows: candidateRows } = await query<{
+							id: number;
+							model_name: string;
+							route_provider: string;
+							tier: string;
+							cost_per_million_input: number | null;
+							priority: number;
+						}>(
+							`SELECT mr.id, mr.model_name, mr.route_provider,
+							        COALESCE(mr.tier, 'tool') AS tier,
+							        mr.cost_per_million_input, mr.priority
+							   FROM roadmap.model_routes mr
+							  WHERE mr.agent_provider = $1
+							    AND mr.is_enabled = true${defaultPolicyFilters}`,
+							[provider, ...defaultPolicyParams],
+						);
+						const candidates: RouteCandidate[] = candidateRows.map((r) => ({
+							route_id: r.id,
+							model_name: r.model_name,
+							route_provider: r.route_provider,
+							tier: r.tier ?? "tool",
+							cost_per_million_input: r.cost_per_million_input,
+							priority: r.priority,
+						}));
+						const workItem: WorkItem = {
+							difficulty: 0.5,
+							task_class: role ?? "develop",
+							provider,
+							agencyIdentity,
+							projectId,
+							roleProfileId,
+							proposalId,
+						};
+						matcherChoice = await matchWorkToRoute(workItem, candidates);
+					}
+					await logRouteDecision({
+						provider,
+						chosenRouteId: rows[0].id,
+						proposalId,
+						role,
+						agencyIdentity,
+						projectId,
+						roleProfileId,
+						matcherChoice,
+					});
+				} catch (err) {
+					console.warn(
+						"[P772] route_decision_log write failed (non-blocking):",
+						err instanceof Error ? err.message : String(err),
+					);
+				}
+			})();
+			return { ...route, eliminatedRoutes: [] };
+		}
+
+		console.warn(
+			`[P235] No enabled route for model "${hint}" with agent_provider "${provider}". ` +
+				`Falling back to default.`,
+		);
+		// Fall through to default resolution
+	}
 
 	// Default: use DB is_default flag first, then cheapest enabled as fallback.
 	// P742+P771: all 5 policy layers applied so a policy-excluded default is never returned.
@@ -1270,20 +1327,66 @@ async function resolveModelRoute(
 	if (rows.length > 0) {
 		const route = toModelRoute(rows[0]);
 		assertResolvedRouteMetadata(provider, route);
-		void logRouteDecision({
-			provider,
-			chosenRouteId: rows[0].id,
-			proposalId,
-			role,
-			agencyIdentity,
-			projectId,
-			roleProfileId,
-		}).catch((err) => {
-			console.warn(
-				"[P772] route_decision_log write failed (non-blocking):",
-				err instanceof Error ? err.message : String(err),
-			);
-		});
+		// AC-5/AC-8 (P3312): shadow-mode — run matcher alongside legacy, log both choices.
+		void (async () => {
+			try {
+				let matcherChoice: object | null = null;
+				const shadowEnabled = await config
+					.flag(FlagKeys.ADAPTIVE_MATCHER_ENABLED)
+					.catch(() => false);
+				if (!shadowEnabled) {
+					const { rows: candidateRows } = await query<{
+						id: number;
+						model_name: string;
+						route_provider: string;
+						tier: string;
+						cost_per_million_input: number | null;
+						priority: number;
+					}>(
+						`SELECT mr.id, mr.model_name, mr.route_provider,
+						        COALESCE(mr.tier, 'tool') AS tier,
+						        mr.cost_per_million_input, mr.priority
+						   FROM roadmap.model_routes mr
+						  WHERE mr.agent_provider = $1
+						    AND mr.is_enabled = true${defaultPolicyFilters}`,
+						[provider, ...defaultPolicyParams],
+					);
+					const candidates: RouteCandidate[] = candidateRows.map((r) => ({
+						route_id: r.id,
+						model_name: r.model_name,
+						route_provider: r.route_provider,
+						tier: r.tier ?? "tool",
+						cost_per_million_input: r.cost_per_million_input,
+						priority: r.priority,
+					}));
+					const workItem: WorkItem = {
+						difficulty: 0.5,
+						task_class: role ?? "develop",
+						provider,
+						agencyIdentity,
+						projectId,
+						roleProfileId,
+						proposalId,
+					};
+					matcherChoice = await matchWorkToRoute(workItem, candidates);
+				}
+				await logRouteDecision({
+					provider,
+					chosenRouteId: rows[0].id,
+					proposalId,
+					role,
+					agencyIdentity,
+					projectId,
+					roleProfileId,
+					matcherChoice,
+				});
+			} catch (err) {
+				console.warn(
+					"[P772] route_decision_log write failed (non-blocking):",
+					err instanceof Error ? err.message : String(err),
+				);
+			}
+		})();
 		return { ...route, eliminatedRoutes: [] };
 	}
 
@@ -1324,20 +1427,66 @@ async function resolveModelRoute(
 		if (defaultRows.length > 0) {
 			const route = toModelRoute(defaultRows[0]);
 			assertResolvedRouteMetadata(provider, route);
-			void logRouteDecision({
-				provider,
-				chosenRouteId: defaultRows[0].id,
-				proposalId,
-				role,
-				agencyIdentity,
-				projectId,
-				roleProfileId,
-			}).catch((err) => {
-				console.warn(
-					"[P772] route_decision_log write failed (non-blocking):",
-					err instanceof Error ? err.message : String(err),
-				);
-			});
+			// AC-5/AC-8 (P3312): shadow-mode — run matcher alongside legacy, log both choices.
+			void (async () => {
+				try {
+					let matcherChoice: object | null = null;
+					const shadowEnabled = await config
+						.flag(FlagKeys.ADAPTIVE_MATCHER_ENABLED)
+						.catch(() => false);
+					if (!shadowEnabled) {
+						const { rows: candidateRows } = await query<{
+							id: number;
+							model_name: string;
+							route_provider: string;
+							tier: string;
+							cost_per_million_input: number | null;
+							priority: number;
+						}>(
+							`SELECT mr.id, mr.model_name, mr.route_provider,
+							        COALESCE(mr.tier, 'tool') AS tier,
+							        mr.cost_per_million_input, mr.priority
+							   FROM roadmap.model_routes mr
+							  WHERE mr.agent_provider = $1
+							    AND mr.is_enabled = true${defaultPolicyFilters}`,
+							[provider, ...defaultPolicyParams],
+						);
+						const candidates: RouteCandidate[] = candidateRows.map((r) => ({
+							route_id: r.id,
+							model_name: r.model_name,
+							route_provider: r.route_provider,
+							tier: r.tier ?? "tool",
+							cost_per_million_input: r.cost_per_million_input,
+							priority: r.priority,
+						}));
+						const workItem: WorkItem = {
+							difficulty: 0.5,
+							task_class: role ?? "develop",
+							provider,
+							agencyIdentity,
+							projectId,
+							roleProfileId,
+							proposalId,
+						};
+						matcherChoice = await matchWorkToRoute(workItem, candidates);
+					}
+					await logRouteDecision({
+						provider,
+						chosenRouteId: defaultRows[0].id,
+						proposalId,
+						role,
+						agencyIdentity,
+						projectId,
+						roleProfileId,
+						matcherChoice,
+					});
+				} catch (err) {
+					console.warn(
+						"[P772] route_decision_log write failed (non-blocking):",
+						err instanceof Error ? err.message : String(err),
+					);
+				}
+			})();
 			return { ...route, eliminatedRoutes: [] };
 		}
 	}
