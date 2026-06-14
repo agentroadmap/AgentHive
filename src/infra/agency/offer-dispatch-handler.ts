@@ -808,18 +808,18 @@ async function runSpawn(args: {
 				? await hasSquadDispatchProviderSignalColumn(exec)
 				: false;
 			if (providerSignal && providerSignalColumnExists) {
-				updateParts.push("provider_signal = $" + (updateValues.length + 1));
+				updateParts.push("provider_signal = $" + (updateValues.length + 1) + "::text");
 				updateValues.push(providerSignal);
 			}
 			if (providerSignal && !providerSignalColumnExists) {
 				metadataEntries.push(
-					"'provider_signal', $" + (updateValues.length + 1),
+					"'provider_signal', $" + (updateValues.length + 1) + "::text",
 				);
 				updateValues.push(providerSignal);
 			}
 			if (personaName) {
 				metadataEntries.push(
-					"'persona_used', $" + (updateValues.length + 1),
+					"'persona_used', $" + (updateValues.length + 1) + "::text",
 				);
 				updateValues.push(personaName);
 			}
