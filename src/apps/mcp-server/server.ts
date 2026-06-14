@@ -1046,6 +1046,24 @@ export async function createMcpServer(
 			void verifyAgentHive2Connection(
 				process.env.AGENTHIVE_V2_PROJECT_SCHEMA ?? "agentHive",
 			);
+
+			// P1072 AC-14/26: select the active vault provider from the hiveCentral
+			// control plane (control_credential.vault_provider) once the control
+			// pool is reachable, but before any tool calls getVault(). Non-fatal:
+			// logs "[vault] Adapter initialized from DB: ..." on success or
+			// "[vault] DB init failed (env fallback active)" and keeps the
+			// env/file fallback adapter on any failure.
+			try {
+				const { initVaultFromDb } = await import(
+					"../../shared/vault/index.ts"
+				);
+				await initVaultFromDb();
+			} catch (error) {
+				console.error(
+					"[vault] DB init failed (env fallback active):",
+					(error as Error).message,
+				);
+			}
 		}
 
 		// Postgres-backed tools
