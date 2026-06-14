@@ -39,7 +39,8 @@ test("STRUCTURAL: liaison-agent imports must include AgencyClaimLoop and flag co
 
 	// Check for the three critical imports
 	assert(
-		content.includes('import { AgencyClaimLoop'),
+		content.includes("AgencyClaimLoop") &&
+			content.includes('from "./agency-claim-loop.ts"'),
 		"liaison-agent.ts must import AgencyClaimLoop from ./agency-claim-loop.ts",
 	);
 
@@ -83,10 +84,13 @@ test("STRUCTURAL: liaison-agent imports must include AgencyClaimLoop and flag co
 		"CONSTRAINT VIOLATION: liaison-agent.ts must NOT call fn_pulse (presence is managed by a2a-host P1447)",
 	);
 
-	// Verify capabilities are extracted from agent_registry (for shared channel matching)
+	// Verify capabilities are extracted from agent_registry (for shared channel matching).
+	// The skills→capabilities logic lives in the loadAgencyClaimCapabilities helper
+	// (refactored out of the inline path; still selects agent_registry.skills).
 	assert(
-		content.includes("SELECT skills FROM roadmap_workforce.agent_registry"),
-		"liaison-agent.ts must query agent_registry to load real agency capabilities",
+		content.includes("loadAgencyClaimCapabilities") &&
+			content.includes("ar.skills"),
+		"liaison-agent.ts must load real agency capabilities from agent_registry.skills (via loadAgencyClaimCapabilities)",
 	);
 
 	console.log("✓ All structural checks passed");
@@ -108,11 +112,12 @@ test("DESIGN: capabilities must be extracted as string[] from skills jsonb", asy
 		"utf-8",
 	);
 
-	// Verify the capability extraction logic is present
+	// Verify the capability extraction logic is present (in loadAgencyClaimCapabilities,
+	// which reads agent_registry.skills and filters truthy entries to a string[]).
 	assert(
-		content.includes("Object.keys(skillsObj)") &&
-		content.includes('skillsObj[k] === true'),
-		"liaison-agent.ts must extract capability names from skills jsonb by filtering for true values",
+		content.includes("loadAgencyClaimCapabilities") &&
+		content.includes("ar.skills"),
+		"liaison-agent.ts must extract capability names from the agent_registry.skills jsonb",
 	);
 
 	// Verify the extracted capabilities are passed to AgencyClaimLoop constructor
@@ -141,9 +146,11 @@ test("CONSTRAINT: claim loop uses makeAgencyClaimExecutor (reuses handleOfferDis
 		"liaison-agent.ts must use makeAgencyClaimExecutor to delegate to handleOfferDispatch",
 	);
 
-	// Verify makeAgencyClaimExecutor is imported
+	// Verify makeAgencyClaimExecutor is imported (format-robust: the import may be
+	// single- or multi-line).
 	assert(
-		content.includes('import { AgencyClaimLoop, makeAgencyClaimExecutor'),
+		content.includes("makeAgencyClaimExecutor") &&
+			content.includes('from "./agency-claim-loop.ts"'),
 		"liaison-agent.ts must import makeAgencyClaimExecutor from agency-claim-loop.ts",
 	);
 
