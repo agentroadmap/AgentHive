@@ -1445,14 +1445,15 @@ export async function recordGateDecision(args: {
 		const { rows: propRows } = await query<{
 			status: string;
 			maturity: string;
+			workflow_name: string;
 		}>(
-			`SELECT status, maturity FROM roadmap_proposal.proposal WHERE id = $1`,
+			`SELECT status, maturity, workflow_name FROM roadmap_proposal.proposal WHERE id = $1`,
 			[proposalId],
 		);
 		if (!propRows.length) {
 			return { content: [{ type: "text", text: `Proposal ${args.proposal_id} not found.` }] };
 		}
-		const { status: fromState, maturity } = propRows[0];
+		const { status: fromState, maturity, workflow_name: proposalWorkflow } = propRows[0];
 
 		// Resolve the forward gate target so the fn_apply_gate_advance trigger
 		// actually advances status on an 'advance' decision. This handler used to
@@ -1475,15 +1476,17 @@ export async function recordGateDecision(args: {
 		// vocabulary, by contrast, is small and stable across all workflows.
 		// Falls back to from_state (no-op) for non-advance decisions, terminal
 		// states with no forward edge, or genuine ambiguity.
+		//
+		// NOTE (P2754, from P3000 branch): the query below keys on
+		// proposal.workflow_name (read above) — NOT the workflows JOIN chain
+		// (workflows→workflow_templates→name), which can drift and resolve
+		// REVIEW→COMPLETE instead of REVIEW→DEVELOP.
 		let toState = fromState;
 		if (args.decision === "advance") {
 			const { rows: fwd } = await query<{ to_state: string }>(
 				`SELECT pvt.to_state
-				   FROM workflows w
-				   JOIN workflow_templates wt ON wt.id = w.template_id
-				   JOIN roadmap_proposal.proposal_valid_transitions pvt
-				     ON pvt.workflow_name = wt.name
-				  WHERE w.proposal_id = $1
+				   FROM roadmap_proposal.proposal_valid_transitions pvt
+				  WHERE pvt.workflow_name = $1
 				    AND LOWER(pvt.from_state) = LOWER($2)
 				    AND NOT (pvt.allowed_reasons && ARRAY[
 				          'iterate','iteration','revision','revise','changes_requested',
@@ -1498,7 +1501,7 @@ export async function recordGateDecision(args: {
 				    CASE WHEN LOWER(pvt.to_state) IN ('complete','closed','archived','obsolete') THEN 1 ELSE 0 END,
 				    pvt.to_state
 				  LIMIT 1`,
-				[proposalId, fromState],
+				[proposalWorkflow, fromState],
 			);
 			if (fwd.length) toState = fwd[0].to_state;
 		}
