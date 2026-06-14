@@ -94,6 +94,12 @@ interface OfferDispatchEnvelope {
 	lease_ttl_seconds?: number;
 	/** P914: worktree directory basename selected by the orchestrator. */
 	worktree_hint?: string | null;
+	/** P2335: id of the cubic (project-scoped worktree) leased for this dispatch. */
+	cubic_id?: string | null;
+	/** P2335: absolute worktree path of the leased cubic; preferred over worktree_hint. */
+	cubic_worktree_path?: string | null;
+	/** P2335: project the cubic was acquired for. */
+	project_id?: number | null;
 	/** P908-D: trace correlation UUID threaded from postWorkOffer. */
 	trace_id?: string | null;
 	/** P1113: pre-resolved behavioral persona text (prepended to task). */
@@ -351,13 +357,19 @@ export async function handleOfferDispatch(
 		return;
 	}
 
-	// P914: prefer the orchestrator-selected worktree from the payload;
-	// fall back to the agency's local resolver only when the dispatcher
-	// didn't supply one (older clients, test fixtures).
+	// P2335 AC-9: prefer the leased cubic's worktree path; then the legacy
+	// orchestrator-selected worktree_hint (P914); finally fall back to the
+	// agency's local resolver only when neither was supplied (older clients,
+	// test fixtures). cubic_worktree_path is an absolute path; worktree_hint
+	// is a basename — both are accepted downstream.
 	const worktree =
+		(payload.cubic_worktree_path && payload.cubic_worktree_path.trim().length > 0
+			? payload.cubic_worktree_path
+			: undefined) ??
 		(payload.worktree_hint && payload.worktree_hint.trim().length > 0
 			? payload.worktree_hint
-			: undefined) ?? resolveWorktree(agencyId);
+			: undefined) ??
+		resolveWorktree(agencyId);
 	const proposalId = payload.proposal_id ?? undefined;
 	const capabilities =
 		payload.required_capabilities && payload.required_capabilities.length > 0
@@ -557,7 +569,7 @@ async function runSpawn(args: {
 			: persona ? `${persona}\n\n${baseTask}` : baseTask;
 
 		// P2335: ensure cubic worktree exists before spawn
-		if ((payload as any).cubic_id && worktree && worktree.startsWith("/data/code/worktree/")) {
+		if (payload.cubic_id && worktree && worktree.startsWith("/data/code/worktree/")) {
 			try {
 				const { existsSync } = await import("node:fs");
 				if (!existsSync(worktree)) {
@@ -567,7 +579,7 @@ async function runSpawn(args: {
 					const branchName = worktree.split("/").pop() || `auto-${Date.now()}`;
 					// Assumes /data/code/AgentHive is the base repo
 					await execAsync(`git worktree add ${worktree} -b ${branchName}`, { cwd: `/data/code/AgentHive` });
-					logger.log(`[OfferDispatchHandler] provisioned project-scoped worktree ${worktree} for cubic=${(payload as any).cubic_id}`);
+					logger.log(`[OfferDispatchHandler] provisioned project-scoped worktree ${worktree} for cubic=${payload.cubic_id}`);
 				}
 			} catch (err: any) {
 				logger.warn(`[OfferDispatchHandler] failed to provision worktree ${worktree}: ${err?.message}`);

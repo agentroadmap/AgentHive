@@ -50,6 +50,12 @@ export const OfferDispatchPayloadSchema = z.object({
     persona: z.string().optional(),
     /** P1113: full task string forwarded from squad_dispatch.metadata.task. */
     task: z.string().optional(),
+    /** P2335: id of the cubic (project-scoped worktree workspace) leased for this dispatch. */
+    cubic_id: z.string().optional(),
+    /** P2335: absolute worktree path of the leased cubic; preferred over worktree_hint. */
+    cubic_worktree_path: z.string().optional(),
+    /** P2335: project the cubic was acquired for (tenant scope). */
+    project_id: z.number().optional(),
 });
 export type OfferDispatchPayload = z.infer<typeof OfferDispatchPayloadSchema>;
 
