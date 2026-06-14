@@ -1477,24 +1477,38 @@ export async function recordGateDecision(args: {
 		// states with no forward edge, or genuine ambiguity.
 		let toState = fromState;
 		if (args.decision === "advance") {
-			const { rows: fwd } = await query<{ to_state: string }>(
-				`SELECT pvt.to_state
-				   FROM workflows w
-				   JOIN workflow_templates wt ON wt.id = w.template_id
-				   JOIN roadmap_proposal.proposal_valid_transitions pvt
-				     ON pvt.workflow_name = wt.name
-				  WHERE w.proposal_id = $1
-				    AND LOWER(pvt.from_state) = LOWER($2)
-				    AND NOT (pvt.allowed_reasons && ARRAY[
-				          'iterate','iteration','revision','revise','changes_requested',
-				          'return','reject','rejected','block','blocked','concerns_raised',
-				          'close','discard','stale','send_back'
-				        ]::text[])
-				  ORDER BY pvt.to_state
-				  LIMIT 1`,
-				[proposalId, fromState],
-			);
-			if (fwd.length) toState = fwd[0].to_state;
+			// D1-D4 gate labels have a deterministic advance target — use it directly
+			// to avoid the alphabetic tie-breaking bug where COMPLETE beats DEVELOP for
+			// Architecture RFC proposals that expose both REVIEW→COMPLETE and
+			// REVIEW→DEVELOP edges in proposal_valid_transitions.
+			const GATE_ADVANCE_TARGET: Record<string, string> = {
+				D1: "REVIEW",
+				D2: "DEVELOP",
+				D3: "MERGE",
+				D4: "COMPLETE",
+			};
+			if (args.gate && args.gate in GATE_ADVANCE_TARGET) {
+				toState = GATE_ADVANCE_TARGET[args.gate as keyof typeof GATE_ADVANCE_TARGET];
+			} else {
+				const { rows: fwd } = await query<{ to_state: string }>(
+					`SELECT pvt.to_state
+					   FROM workflows w
+					   JOIN workflow_templates wt ON wt.id = w.template_id
+					   JOIN roadmap_proposal.proposal_valid_transitions pvt
+					     ON pvt.workflow_name = wt.name
+					  WHERE w.proposal_id = $1
+					    AND LOWER(pvt.from_state) = LOWER($2)
+					    AND NOT (pvt.allowed_reasons && ARRAY[
+					          'iterate','iteration','revision','revise','changes_requested',
+					          'return','reject','rejected','block','blocked','concerns_raised',
+					          'close','discard','stale','send_back'
+					        ]::text[])
+					  ORDER BY pvt.to_state
+					  LIMIT 1`,
+					[proposalId, fromState],
+				);
+				if (fwd.length) toState = fwd[0].to_state;
+			}
 		}
 
 		// Shadow-mode skip: if a row with the same agent_run_id already exists,

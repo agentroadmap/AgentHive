@@ -543,14 +543,16 @@ export async function transitionProposal(
 		);
 	}
 
-	// Validate transition exists
+	// Validate transition exists — join directly through workflow_templates so we
+	// don't fail for workflow types absent from proposal_type_config (e.g., Code
+	// Review Pipeline).  The proposal_type_config join was redundant: its only
+	// effect was ptc.workflow_name = wt.name, same as the WHERE clause below.
 	const { rowCount } = await query(
 		`SELECT 1
      FROM roadmap_proposal.proposal_valid_transitions pvt
      JOIN workflows w ON w.proposal_id = $1
      JOIN workflow_templates wt ON wt.id = w.template_id
-     JOIN roadmap_proposal.proposal_type_config ptc ON ptc.workflow_name = wt.name
-     WHERE pvt.workflow_name = ptc.workflow_name
+     WHERE pvt.workflow_name = wt.name
        AND LOWER(pvt.from_state) = LOWER($2)
        AND LOWER(pvt.to_state) = LOWER($3)
      LIMIT 1`,
