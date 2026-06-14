@@ -169,3 +169,97 @@ export async function describeTable(
 		found: true,
 	};
 }
+
+/**
+ * Strip lines that look like top-level transaction control (BEGIN; / COMMIT;),
+ * but only when we're outside a dollar-quoted string ($$ ... $$ or $tag$ ... $tag$).
+ * PL/pgSQL function bodies contain BEGIN/END that must be preserved.
+ */
+function stripTopLevelTxnControl(sql: string): string {
+	const dollarTag = /\$([a-zA-Z_][a-zA-Z0-9_]*)?\$/g;
+	const out: string[] = [];
+	let inDollar = false;
+	let currentTag: string | null = null;
+
+	for (const line of sql.split("\n")) {
+		// Walk the line for $ ... $ delimiter toggles, updating inDollar.
+		dollarTag.lastIndex = 0;
+		let m: RegExpExecArray | null;
+		let scanLine = line;
+		while ((m = dollarTag.exec(scanLine))) {
+			const tag = m[1] ?? "";
+			if (!inDollar) {
+				inDollar = true;
+				currentTag = tag;
+			} else if (currentTag === tag) {
+				inDollar = false;
+				currentTag = null;
+			}
+		}
+
+		// Skip top-level BEGIN/COMMIT lines, keep everything else.
+		if (!inDollar && /^\s*(BEGIN|COMMIT)\s*;?\s*(--.*)?$/i.test(line)) {
+			continue;
+		}
+		out.push(line);
+	}
+	return out.join("\n");
+}
+
+export type LintMigrationResult = {
+	valid: boolean;
+	errors: string[];
+	warnings: string[];
+};
+
+/**
+ * Lint SQL migration by running it inside a SAVEPOINT and ROLLBACKing.
+ * Catches fabrication patterns: non-existent columns, invalid CHECK values,
+ * schema-qualified references in wrong schema, forward-references, JSDoc comments.
+ *
+ * Accepts raw SQL code.
+ */
+export async function lintMigration(
+	sql: string,
+): Promise<LintMigrationResult> {
+	// Cheap surface check: top-level JSDoc comment blocks are a recurring bug.
+	if (/^\s*\/\*\*/.test(sql)) {
+		return {
+			valid: false,
+			errors: [
+				"top-level JSDoc /** comment block — psql rejects. Use `--` line comments or `/* ... */` (no leading asterisk on the opener).",
+			],
+			warnings: [],
+		};
+	}
+
+	// Strip embedded top-level transaction control so our outer BEGIN/ROLLBACK
+	// wraps the whole script regardless of whether the migration manages its
+	// own txn. Must NOT strip BEGIN/END that appear inside $$ ... $$ function
+	// bodies (PL/pgSQL block keywords look identical to txn keywords).
+	const processedSql = stripTopLevelTxnControl(sql);
+
+	// Lint by running the SQL inside one outer transaction we always ROLLBACK.
+	try {
+		await query("BEGIN");
+		await query(processedSql);
+		await query("ROLLBACK");
+		return {
+			valid: true,
+			errors: [],
+			warnings: [],
+		};
+	} catch (err) {
+		try {
+			await query("ROLLBACK");
+		} catch {
+			// ignore rollback failures
+		}
+		const msg = (err as Error).message;
+		return {
+			valid: false,
+			errors: [msg],
+			warnings: [],
+		};
+	}
+}

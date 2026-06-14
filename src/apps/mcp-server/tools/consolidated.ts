@@ -312,6 +312,7 @@ const documentRoutes: RouteMap = {
 
 const schemaRoutes: RouteMap = {
 	describe: "schema_describe",
+	lint_migration: "schema_lint_migration",
 };
 
 const opsRoutes: RouteMap = {
