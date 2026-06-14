@@ -189,6 +189,20 @@ function classifySpawnErrorClass(
 const defaultExec: SqlExec = (sql, params) =>
 	query(sql, params as unknown[]);
 
+async function hasSquadDispatchProviderSignalColumn(
+	exec: SqlExec,
+): Promise<boolean> {
+	const result = await exec(
+		`SELECT 1
+		   FROM information_schema.columns
+		  WHERE table_schema = 'roadmap_workforce'
+		    AND table_name = 'squad_dispatch'
+		    AND column_name = 'provider_signal'
+		  LIMIT 1`,
+	);
+	return ((result as any)?.rows?.length ?? 0) > 0;
+}
+
 const defaultDeps: Required<
 	Pick<
 		OfferDispatchHandlerDeps,
@@ -789,17 +803,30 @@ async function runSpawn(args: {
 		try {
 			const updateParts = [];
 			const updateValues = [];
-			if (providerSignal) {
+			const metadataEntries: string[] = [];
+			const providerSignalColumnExists = providerSignal
+				? await hasSquadDispatchProviderSignalColumn(exec)
+				: false;
+			if (providerSignal && providerSignalColumnExists) {
 				updateParts.push("provider_signal = $" + (updateValues.length + 1));
 				updateValues.push(providerSignal);
 			}
+			if (providerSignal && !providerSignalColumnExists) {
+				metadataEntries.push(
+					"'provider_signal', $" + (updateValues.length + 1),
+				);
+				updateValues.push(providerSignal);
+			}
 			if (personaName) {
-				updateParts.push(
-					"metadata = metadata || jsonb_build_object('persona_used', $" +
-						(updateValues.length + 1) +
-						")",
+				metadataEntries.push(
+					"'persona_used', $" + (updateValues.length + 1),
 				);
 				updateValues.push(personaName);
+			}
+			if (metadataEntries.length > 0) {
+				updateParts.push(
+					`metadata = metadata || jsonb_build_object(${metadataEntries.join(", ")})`,
+				);
 			}
 			updateValues.push(dispatchId);
 
