@@ -59,6 +59,15 @@ const GATE_CONVERGENCE_MAX_RUNS_PER_ROLE = Number(
 );
 
 /**
+ * P3311: proactive premature-maturity guard (see PrematureGateError). Enabled
+ * by default; set AGENTHIVE_PREMATURE_GATE_GUARD_ENABLED=false to disable (e.g.
+ * if a workflow legitimately matures proposals before any AC is marked passing).
+ */
+const PREMATURE_GATE_GUARD_ENABLED =
+	(process.env.AGENTHIVE_PREMATURE_GATE_GUARD_ENABLED ?? "true").toLowerCase() !==
+	"false";
+
+/**
  * Global cap on alive offers (open or claimed-but-not-completed) across the
  * whole orchestrator. The orchestrator otherwise tends to fan out 80–100 offers
  * in seconds, exhausting agency capacity and starting Claude subprocesses that
@@ -197,6 +206,39 @@ export class ConvergenceGuardError extends Error {
 			`postWorkOffer: convergence guard tripped for proposal ${proposalId} (${reasons.join(", ")}). gate_scanner_paused=true.`,
 		);
 		this.name = "ConvergenceGuardError";
+	}
+}
+
+// P3311: proactive premature-maturity guard. A proposal sitting in DEVELOP
+// with maturity='mature' but ZERO passing acceptance criteria (while it DOES
+// have ACs) was never actually built — it was matured by mistake (a closer
+// marking it done without delivering, or a gate batch advancing it). The D3
+// gate then fires its decider role (skeptic-beta) every scan; the gate
+// correctly HOLDs ("no code exists") but a hold doesn't demote maturity, so it
+// re-gates forever until a *reactive* breaker (DispatchLoopError /
+// ConvergenceGuardError) trips after burning 6+ wasted runs and pauses the
+// proposal — which then needs a manual operator unpause.
+//
+// This guard fires BEFORE the reactive breakers: it refuses the gate offer and
+// demotes maturity back to 'new', which routes the proposal to a DEVELOPER on
+// the next scan (DEVELOP/new dispatches dev roles, DEVELOP/mature dispatches
+// gate roles). Self-healing, no operator toil, no wasted gate runs.
+//
+// Deliberately NOT pausing: pause halts and waits for a human; demote re-routes
+// to productive work. Deliberately keyed on passing-AC count (DB-truth) not git
+// commits (not DB-visible from here) — a proposal with passing ACs but a stuck
+// gate (e.g. P1438: gate worker confabulates its verdict) is a DIFFERENT bug
+// (artifact-persistence gap) and is left alone by this guard.
+export class PrematureGateError extends Error {
+	constructor(
+		readonly proposalId: number,
+		readonly role: string,
+		readonly totalAcs: number,
+	) {
+		super(
+			`postWorkOffer: P${proposalId} role=${role} refused — DEVELOP/mature with 0/${totalAcs} passing acceptance criteria (premature maturity). Demoted maturity to 'new' to route to a developer.`,
+		);
+		this.name = "PrematureGateError";
 	}
 }
 
@@ -538,6 +580,60 @@ async function postWorkOfferImpl(
 			ctx.gate_paused_by,
 			ctx.gate_paused_at ? new Date(ctx.gate_paused_at) : null,
 		);
+	}
+
+	// P3311: proactive premature-maturity guard. Fires BEFORE the reactive
+	// breakers below so a no-implementation proposal never burns gate runs.
+	// Condition: DEVELOP + mature + has ACs but ZERO passing. Demote to 'new'
+	// (routes to a developer next scan) and refuse this gate offer.
+	if (
+		PREMATURE_GATE_GUARD_ENABLED &&
+		ctx.status?.toUpperCase() === "DEVELOP" &&
+		ctx.maturity?.toLowerCase() === "mature"
+	) {
+		const { rows: acRows } = await queryFn<{ total: number; passing: number }>(
+			`SELECT count(*)::int AS total,
+			        count(*) FILTER (WHERE status = 'pass')::int AS passing
+			   FROM roadmap_proposal.proposal_acceptance_criteria
+			  WHERE proposal_id = $1`,
+			[input.proposalId],
+		);
+		const totalAcs = acRows[0]?.total ?? 0;
+		const passingAcs = acRows[0]?.passing ?? 0;
+		// Only act when there ARE ACs but none pass. Zero-AC proposals are a
+		// separate concern (a gate review should flag the missing ACs) and
+		// demoting them wouldn't help, so leave them to the gate.
+		if (totalAcs > 0 && passingAcs === 0) {
+			// Demote maturity → new so the next scan dispatches a developer
+			// instead of the D3 gate. Idempotent (only flips a currently-mature
+			// row); also clears any stale pause so the demoted proposal can flow.
+			await queryFn(
+				`UPDATE roadmap_proposal.proposal
+				    SET maturity = 'new',
+				        gate_scanner_paused = false,
+				        gate_paused_by = NULL,
+				        gate_paused_at = NULL
+				  WHERE id = $1 AND maturity = 'mature' AND status = 'DEVELOP'`,
+				[input.proposalId],
+			);
+			await queryFn(
+				`INSERT INTO roadmap.notification_queue
+				   (proposal_id, severity, kind, title, body, metadata)
+				 VALUES ($1, 'INFO', 'premature_maturity_demoted', $2, $3, $4::jsonb)`,
+				[
+					input.proposalId,
+					`Premature maturity demoted for proposal ${input.proposalId}`,
+					`postWorkOffer refused a gate offer for role "${input.role}": proposal is DEVELOP/mature with 0/${totalAcs} passing acceptance criteria (no implementation evidence). Maturity demoted to 'new' to route to a developer. This pre-empts the D3 gate loop.`,
+					JSON.stringify({
+						proposal_id: input.proposalId,
+						role: input.role,
+						total_acs: totalAcs,
+						passing_acs: passingAcs,
+					}),
+				],
+			);
+			throw new PrematureGateError(input.proposalId, input.role, totalAcs);
+		}
 	}
 
 	// P1729: cumulative convergence guard. Check if blocking review count or
