@@ -1241,6 +1241,29 @@ export const FlagKeys = {
 		envOverride: false,
 	} satisfies ConfigKey<number>,
 
+	// ─── P3312: Adaptive matcher (unified matchWorkToRoute) ─────────────────
+	// Default OFF; shadow mode writes matcher vs legacy choice to route_decision_log
+	// without changing behavior. Flip true when P3310+P3311 are COMPLETE to activate.
+
+	ADAPTIVE_MATCHER_ENABLED: {
+		name: "ADAPTIVE_MATCHER_ENABLED",
+		class: "flag" as const,
+		parse: (v: string) => {
+			try {
+				return JSON.parse(v) === true;
+			} catch {
+				return v.toLowerCase() === "true" || v === "1";
+			}
+		},
+		required: false,
+		defaultValue: false,
+		description:
+			"P3312: when false (default), matchWorkToRoute runs in shadow mode only — logs matcher_choice vs legacy_choice without changing dispatch behavior. Flip true once P3310+P3311 are COMPLETE.",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<boolean>,
+
 	/**
 	 * TUI cockpit layout — 'grid' (default, 2x2) or 'stacked' (single column).
 	 * User-facing preference. Persisted in core.runtime_flag so a future web

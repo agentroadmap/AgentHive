@@ -996,14 +996,19 @@ async function logRouteDecision({
 
 	await query(
 		`INSERT INTO roadmap.route_decision_log
-		   (proposal_id, role, agency_identity, chosen_route_id, eliminated_routes)
-		 VALUES ($1, $2, $3, $4, $5)`,
+		   (proposal_id, role, agency_identity, chosen_route_id, eliminated_routes,
+		    legacy_choice, shadow_mode)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		[
 			proposalId,
 			role,
 			agencyIdentity,
 			chosenRouteId,
 			JSON.stringify(eliminatedRoutes),
+			// AC-8 (P3312): record legacy choice JSONB for shadow-mode diff
+			JSON.stringify({ route_id: chosenRouteId, source: "legacy_resolver" }),
+			// shadow_mode=true (ADAPTIVE_MATCHER_ENABLED defaults false, so this path is shadow)
+			true,
 		],
 	);
 }
