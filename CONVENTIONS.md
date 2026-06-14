@@ -591,6 +591,21 @@ Two role-resolver layers coexist by design. **Do not merge them.**
 
 **Rule:** changes to gate reviewer personas belong in `roadmap_proposal.gate_role` (then `NOTIFY gate_role_changed`). Changes to queue dispatch roles belong in `roadmap.agent_role_profile`.
 
+#### Agent persona / `vibe` convention (P1355 / P1356)
+
+`roadmap_workforce.agent_registry.personality` (JSONB) carries an agent's
+durable persona — `{vibe, core_truths[], boundaries[], communication_style, expertise[]}` —
+sourced from the agency-agents / OpenClaw `SOUL.md` vocabulary. Following that
+convention, **`personality.vibe` should be a punchy one-liner ≤160 characters**
+(the `fn_validate_personality` CHECK enforces the 160-char cap; the "punchy
+one-liner" framing is guidance, not a constraint). `expertise[]` values are
+drawn from the controlled set `{architect, reviewer, coder, debugger, writer,
+researcher, tester, devops, designer}`. Display surface (`emoji`, `color`,
+`description`, `source`) lives in the sibling `display_metadata` JSONB column,
+not in `personality`. Export an agent's persona to an OpenClaw workspace
+(`SOUL.md` / `IDENTITY.md` / `AGENTS.md`) with `roadmap agent export-openclaw`
+(operator-only; see `src/core/agency/openclaw-export-generator.ts`).
+
 ### 6.0 Database Topology (target architecture)
 
 AgentHive runs on a **two-tier Postgres topology**:
