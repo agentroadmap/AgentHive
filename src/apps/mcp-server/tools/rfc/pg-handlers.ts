@@ -1490,7 +1490,13 @@ export async function recordGateDecision(args: {
 				          'return','reject','rejected','block','blocked','concerns_raised',
 				          'close','discard','stale','send_back'
 				        ]::text[])
-				  ORDER BY pvt.to_state
+				  ORDER BY
+				    -- Prefer intermediate stages over terminal states so that
+				    -- REVIEW→DEVELOP is picked before REVIEW→COMPLETE when
+				    -- both transitions exist (e.g. Architecture RFC workflow).
+				    -- Alphabetical fallback resolves any remaining ties.
+				    CASE WHEN LOWER(pvt.to_state) IN ('complete','closed','archived','obsolete') THEN 1 ELSE 0 END,
+				    pvt.to_state
 				  LIMIT 1`,
 				[proposalId, fromState],
 			);
