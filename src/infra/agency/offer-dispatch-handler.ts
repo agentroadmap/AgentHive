@@ -414,6 +414,7 @@ async function runSpawn(args: {
 
 	const dispatchId = payload.dispatch_id as number;
 	const claimToken = payload.claim_token as string;
+	let personaName: string | null = null;
 
 	// P908-D: open offer_completed lifecycle span for the full spawn duration.
 	// Best-effort — errors are swallowed inside ObservabilityWriter.
@@ -497,7 +498,6 @@ async function runSpawn(args: {
 				: await resolvePersonaByRoleName(payload.role, query as never).catch(() => null);
 
 		// P1392: Track persona name/source for telemetry
-		let personaName: string | null = null;
 		if (persona) {
 			// Try to extract persona name from file-based resolver first
 			try {
