@@ -98,6 +98,14 @@ interface OfferDispatchEnvelope {
 	trace_id?: string | null;
 	/** P1113: pre-resolved behavioral persona text (prepended to task). */
 	persona?: string;
+	/**
+	 * P1438 AC-9: persona NAME chosen by the liaison brain's matchmaker
+	 * (matchPersonaForCapability). Distinct from `persona` (the body text): this
+	 * is the stable/dynamic label surfaced in the control feed + persisted as
+	 * metadata.persona_used telemetry. When present it wins over the role-name
+	 * fallback for telemetry attribution.
+	 */
+	persona_name?: string;
 	/** P1113: full task string forwarded from squad_dispatch.metadata.task. */
 	task?: string;
 }
@@ -511,8 +519,15 @@ async function runSpawn(args: {
 				? payload.persona
 				: await resolvePersonaByRoleName(payload.role, query as never).catch(() => null);
 
+		// P1438 AC-9: a brain-supplied persona_name (from the self-claim matchmaker)
+		// is the authoritative label for telemetry + control feed. Prefer it over
+		// the file-resolver / role-name fallback below.
+		if (typeof payload.persona_name === "string" && payload.persona_name.length > 0) {
+			personaName = payload.persona_name;
+		}
+
 		// P1392: Track persona name/source for telemetry
-		if (persona) {
+		if (persona && !personaName) {
 			// Try to extract persona name from file-based resolver first
 			try {
 				const { resolveFilePersona } = await import(

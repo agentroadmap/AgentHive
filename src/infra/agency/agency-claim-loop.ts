@@ -36,6 +36,11 @@ import {
 	evaluateSubscriptionPolicy,
 	declareThrottle,
 } from "./subscription-policy.ts";
+import { matchPersonaForCapability } from "./persona-matchmaker.ts";
+import {
+	decideRecoveryAction,
+	type RecoveryDecision,
+} from "./recovery-action.ts";
 
 export type QueryFn = typeof defaultQuery;
 
@@ -334,7 +339,10 @@ export class AgencyClaimLoop {
 export function makeAgencyClaimExecutor(
 	agencyId: string,
 	deps: OfferDispatchHandlerDeps = {},
+	executorDeps: AgencyClaimExecutorDeps = {},
 ): (claim: AgencyClaimedOffer) => Promise<void> {
+	const exec = executorDeps.queryFn ?? defaultQuery;
+	const logger = executorDeps.logger ?? console;
 	return async (claim: AgencyClaimedOffer): Promise<void> => {
 		const md = claim.metadata ?? {};
 		const briefingId =
@@ -347,6 +355,21 @@ export function makeAgencyClaimExecutor(
 			? (md.required_capabilities as string[])
 			: [claim.role];
 
+		// V3-C6 AC-9 (matchmaking): the brain selects the worker persona for this
+		// claimed offer — a stable name for common capabilities, a dynamic
+		// claude.<specialty> for rare ones. We record it on the dispatch row
+		// (metadata.persona_name) so the control feed reflects the chosen persona,
+		// and we lead the spawn's capability hints with the matched expertise so
+		// the spawner's structured-identity branch encodes the specialty.
+		const personaMatch = matchPersonaForCapability(claim.role, requiredCaps);
+		const orderedCaps = orderCapsByExpertise(requiredCaps, personaMatch.expertiseHint);
+		await recordPersonaMatch(exec, claim.dispatchId, personaMatch, logger).catch(
+			() => {},
+		);
+		logger.log(
+			`[AgencyClaim:${agencyId}] AC-9 matchmaking offer=${claim.offerId} role=${claim.role} → persona=${personaMatch.personaName} (stable=${personaMatch.stable}, source=${personaMatch.source})`,
+		);
+
 		// handleOfferDispatch reads ONLY msg.payload (offer-dispatch-handler.ts:118),
 		// so we synthesize just the payload and cast — fabricating the full
 		// LiaisonMessage envelope (message_id/sequence/correlation_id/signed_at/
@@ -358,7 +381,7 @@ export function makeAgencyClaimExecutor(
 			payload: {
 				offer_id: claim.offerId,
 				role: claim.role,
-				required_capabilities: requiredCaps,
+				required_capabilities: orderedCaps,
 				route_hint: routeHint,
 				briefing_id: briefingId,
 				claim_token: claim.claimToken,
@@ -367,9 +390,153 @@ export function makeAgencyClaimExecutor(
 				squad_name: claim.squadName,
 				lease_ttl_seconds: claim.leaseTtlSeconds,
 				worktree_hint: worktreeHint,
+				// AC-9: carry the matched persona name so the control feed / telemetry
+				// label the worker by the chosen persona, not just the agency.
+				persona_name: personaMatch.personaName,
 			},
 		} as unknown as LiaisonMessage;
 
 		await handleOfferDispatch(agencyId, synthetic, deps);
+
+		// V3-C6 AC-10 (fix coordination): after the dispatch completes, if the
+		// offer did NOT end delivered, decide a bounded recovery action
+		// (retry/reroute/escalate/log) and record it against the offer — never a
+		// silent drop, never an unconditional retry storm. handleOfferDispatch has
+		// already applied the mechanical lifecycle (failed/hold); here we attach the
+		// brain's recovery DECISION as a durable, observable record.
+		await coordinateFailureRecovery(exec, agencyId, claim, logger).catch((err) => {
+			logger.warn(
+				`[AgencyClaim:${agencyId}] AC-10 recovery coordination failed for offer=${claim.offerId}:`,
+				err instanceof Error ? err.message : err,
+			);
+		});
 	};
+}
+
+/** Injectable deps for the executor (test seam for DB writes + logging). */
+export interface AgencyClaimExecutorDeps {
+	queryFn?: QueryFn;
+	logger?: Pick<Console, "log" | "warn" | "error">;
+}
+
+/**
+ * Lead the capability list with the matched expertise hint so the spawner's
+ * structured-identity branch (agent-spawner identityHints[0]) encodes the
+ * chosen specialty into worker_identity. Preserves the rest of the caps.
+ */
+export function orderCapsByExpertise(
+	caps: readonly string[],
+	expertiseHint: string,
+): string[] {
+	const hint = expertiseHint.trim();
+	if (!hint) return [...caps];
+	const rest = caps.filter((c) => c && c.toLowerCase() !== hint.toLowerCase());
+	return [hint, ...rest];
+}
+
+/**
+ * AC-9: persist the matched persona on the dispatch row so the control feed and
+ * telemetry surface which persona the brain selected for this offer.
+ */
+async function recordPersonaMatch(
+	exec: QueryFn,
+	dispatchId: number,
+	match: { personaName: string; stable: boolean; source: string },
+	logger: Pick<Console, "warn">,
+): Promise<void> {
+	try {
+		await exec(
+			`UPDATE roadmap_workforce.squad_dispatch
+			    SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
+			          'persona_name', $2::text,
+			          'worker_persona', $2::text,
+			          'persona_stable', $3::boolean,
+			          'persona_source', $4::text
+			        )
+			  WHERE id = $1`,
+			[dispatchId, match.personaName, match.stable, match.source],
+		);
+	} catch (err) {
+		logger.warn(
+			`[AgencyClaim] recordPersonaMatch failed for dispatch ${dispatchId}:`,
+			err instanceof Error ? err.message : err,
+		);
+	}
+}
+
+/**
+ * AC-10: read the post-dispatch outcome and, if the offer is not delivered,
+ * decide + record a recovery action. Idempotent-ish: if a recovery_action is
+ * already recorded for the same attempt we skip (avoids double-write on retries).
+ */
+export async function coordinateFailureRecovery(
+	exec: QueryFn,
+	agencyId: string,
+	claim: AgencyClaimedOffer,
+	logger: Pick<Console, "log" | "warn">,
+): Promise<RecoveryDecision | null> {
+	const { rows } = await exec<{
+		offer_status: string;
+		dispatch_status: string;
+		attempt_count: number;
+		failure_class: string | null;
+		failure_is_transient: boolean | null;
+		metadata: Record<string, unknown> | null;
+		paused_at_provider_limit: boolean | null;
+	}>(
+		`SELECT offer_status, dispatch_status, attempt_count, failure_class,
+		        failure_is_transient,
+		        COALESCE(metadata, '{}'::jsonb) AS metadata,
+		        paused_at_provider_limit
+		   FROM roadmap_workforce.squad_dispatch
+		  WHERE id = $1`,
+		[claim.dispatchId],
+	);
+	const row = rows[0];
+	if (!row) return null;
+
+	// Delivered → nothing to recover. A provider-limit HOLD is a deliberate pause
+	// (P1682), not a failure to coordinate — leave it for the wake sweep.
+	const delivered =
+		row.offer_status === "delivered" || row.dispatch_status === "completed";
+	if (delivered || row.paused_at_provider_limit) return null;
+
+	const failed =
+		row.offer_status === "failed" ||
+		row.dispatch_status === "failed" ||
+		row.offer_status === "returned";
+	if (!failed) return null;
+
+	const decision = decideRecoveryAction({
+		errorText:
+			typeof row.metadata?.last_error === "string"
+				? (row.metadata.last_error as string)
+				: null,
+		failureReason: row.failure_class ?? null,
+		attemptCount: row.attempt_count ?? 1,
+	});
+
+	await exec(
+		`UPDATE roadmap_workforce.squad_dispatch
+		    SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
+		          'recovery_action', $2::text,
+		          'recovery_reason', $3::text,
+		          'recovery_failure_class', $4::text,
+		          'recovery_decided_by', $5::text,
+		          'recovery_attempt', $6::int
+		        )
+		  WHERE id = $1`,
+		[
+			claim.dispatchId,
+			decision.action,
+			decision.reason,
+			decision.failureClass,
+			agencyId,
+			row.attempt_count ?? 1,
+		],
+	);
+	logger.log(
+		`[AgencyClaim:${agencyId}] AC-10 recovery offer=${claim.offerId} → ${decision.action} (${decision.failureClass}): ${decision.reason}`,
+	);
+	return decision;
 }
