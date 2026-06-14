@@ -1415,7 +1415,9 @@ export async function getValidTransitions(args: {
 // ─── Gate Decision Log ──────────────────────────────────────────────────────
 
 export async function recordGateDecision(args: {
-	proposal_id: string;
+	proposal_id?: string;
+	id?: string;
+	display_id?: string;
 	gate: string;
 	decision: string;
 	rationale?: string;
@@ -1431,11 +1433,21 @@ export async function recordGateDecision(args: {
 			"decision_invalid",
 		);
 	}
+	// Resolve identifier from any alias: id | proposal_id | display_id
+	const rawIdentifier = args.id ?? args.proposal_id ?? args.display_id;
+	if (!rawIdentifier) {
+		return {
+			content: [{
+				type: "text",
+				text: "❌ Missing proposal identifier — pass proposal_id, id, or display_id.",
+			}],
+		};
+	}
 	try {
-		const proposalId = await resolveProposalId(args.proposal_id);
+		const proposalId = await resolveProposalId(rawIdentifier);
 		if (proposalId === null) {
 			return {
-				content: [{ type: "text", text: `Proposal ${args.proposal_id} not found.` }],
+				content: [{ type: "text", text: `Proposal ${rawIdentifier} not found.` }],
 			};
 		}
 
@@ -1456,10 +1468,18 @@ export async function recordGateDecision(args: {
 		// actually advances status on an 'advance' decision. Uses stage_order+1
 		// from workflow_stages — deterministic and workflow-type-aware (Standard RFC:
 		// REVIEW→DEVELOP; Architecture RFC: Review→Complete). Falls back to
-		// from_state (no-op) when no workflows row exists, when the current stage
-		// isn't found in the template, or when there is no next stage (terminal).
+		// from_state (no-op) when no workflows row exists (AC-8) or errors when
+		// a workflow exists but has no forward stage (terminal/drift — AC-2).
 		let toState = fromState;
 		if (args.decision === "advance") {
+			// Check workflow assignment separately so we can distinguish AC-8 (no row)
+			// from AC-2 (row present but no next stage — terminal or drift).
+			const { rows: wfRows } = await query<{ exists: boolean }>(
+				`SELECT EXISTS(SELECT 1 FROM workflows WHERE proposal_id = $1) AS exists`,
+				[proposalId],
+			);
+			const hasWorkflow = wfRows[0]?.exists ?? false;
+
 			const { rows: fwd } = await query<{ to_state: string }>(
 				`SELECT ws_next.stage_name AS to_state
 				   FROM workflows w
@@ -1473,7 +1493,25 @@ export async function recordGateDecision(args: {
 				  LIMIT 1`,
 				[proposalId, fromState],
 			);
-			if (fwd.length) toState = fwd[0].to_state;
+
+			if (fwd.length) {
+				toState = fwd[0].to_state;
+			} else if (!hasWorkflow) {
+				// AC-8: no workflows row — log and no-op (workflow not yet assigned)
+				console.warn(`[gate_decision] proposal ${proposalId} has no workflows row — advance is a no-op`);
+			} else {
+				// AC-2: workflows row exists but no next stage — terminal or template drift
+				return errorResult(
+					"Gate advance aborted",
+					new Error(
+						`No forward stage edge found for proposal ${args.proposal_id} in state ${fromState}. ` +
+						`Check that workflows.template_id is set to the correct template for this proposal ` +
+						`(run: SELECT w.proposal_id, wt.name FROM roadmap.workflows w ` +
+						`JOIN roadmap.workflow_templates wt ON wt.id = w.template_id ` +
+						`WHERE w.proposal_id = ${proposalId}).`,
+					),
+				);
+			}
 		}
 
 		// Shadow-mode skip: if a row with the same agent_run_id already exists,
@@ -1529,16 +1567,22 @@ export async function recordGateDecision(args: {
 				[proposalId],
 			);
 			const newState = after[0]?.status ?? fromState;
-			advanceNote =
-				newState.toUpperCase() === toState.toUpperCase()
-					? ` → status advanced ${fromState} → ${newState}.`
-					: ` (status NOT advanced — still ${newState}; expected ${fromState} → ${toState}. Check for state drift.)`;
+			if (newState.toUpperCase() === toState.toUpperCase()) {
+				// AC-6: sync workflows.current_stage atomically with the advance
+				await query(
+					`UPDATE roadmap.workflows SET current_stage = $1 WHERE proposal_id = $2`,
+					[newState, proposalId],
+				);
+				advanceNote = ` → status ADVANCED ${fromState} → ${newState}. [Atomic: workflows.current_stage synced]`;
+			} else {
+				advanceNote = ` (status NOT advanced — still ${newState}; expected ${fromState} → ${toState}. Check for state drift.)`;
+			}
 		}
 
 		return {
 			content: [{
 				type: "text",
-				text: `✅ Gate decision recorded: id=${rows[0].id} proposal=${args.proposal_id} gate=${args.gate} decision=${args.decision}${advanceNote}`,
+				text: `✅ Gate decision recorded: id=${rows[0].id} proposal=${rawIdentifier} gate=${args.gate} decision=${args.decision}${advanceNote}`,
 			}],
 		};
 	} catch (err) {

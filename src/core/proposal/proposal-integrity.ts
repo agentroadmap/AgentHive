@@ -177,6 +177,9 @@ async function validateTransitionRule(
 	fromState: string,
 	toState: string,
 ): Promise<TransitionValidationResult> {
+	// AC-3/AC-4: Check both the compatibility mirror (proposal_valid_transitions)
+	// and the canonical source (workflow_transitions). Either accepting the edge is
+	// sufficient — mirrors can lag after template updates (P3326 dual-source drift).
 	const { rows } = await query<TransitionRuleRow>(
 		`SELECT pvt.from_state, pvt.to_state, pvt.allowed_reasons, pvt.allowed_roles, pvt.requires_ac
      FROM roadmap_proposal.proposal_valid_transitions pvt
@@ -186,6 +189,17 @@ async function validateTransitionRule(
      WHERE pvt.workflow_name = ptc.workflow_name
        AND LOWER(pvt.from_state) = LOWER($2)
        AND LOWER(pvt.to_state) = LOWER($3)
+     UNION ALL
+     SELECT wt_canon.from_stage AS from_state,
+            wt_canon.to_stage   AS to_state,
+            wt_canon.labels     AS allowed_reasons,
+            wt_canon.allowed_roles,
+            CASE WHEN wt_canon.requires_ac THEN 'all' ELSE 'none' END AS requires_ac
+     FROM roadmap.workflow_transitions wt_canon
+     JOIN roadmap.workflows w_canon ON w_canon.template_id = wt_canon.template_id
+     WHERE w_canon.proposal_id = $1
+       AND LOWER(wt_canon.from_stage) = LOWER($2)
+       AND LOWER(wt_canon.to_stage) = LOWER($3)
      LIMIT 1`,
 		[proposalId, fromState, toState],
 	);
