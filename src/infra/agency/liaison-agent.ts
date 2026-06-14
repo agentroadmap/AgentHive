@@ -315,6 +315,18 @@ export async function runLiaisonAgent(
 					markReadAndResolveTimeout,
 					bridgeTaskToOfferDispatch,
 					monitorTaskDispatch,
+					// P2326 AC-10: wire the live ad-hoc inflight gauge (count
+					// non-terminal sentinel-bucketed squad_dispatch rows).
+					countAdHocInflight: async (sentinelProposalId: number) => {
+						const { rows } = await query<{ inflight: string }>(
+							`SELECT count(*)::text AS inflight
+							   FROM roadmap_workforce.squad_dispatch
+							  WHERE proposal_id = $1
+							    AND offer_status NOT IN ('delivered', 'expired', 'failed')`,
+							[sentinelProposalId],
+						);
+						return Number(rows[0]?.inflight ?? "0");
+					},
 				};
 				await handleTypedTaskRequest(msg, identity, provider, helpers);
 			} catch (err) {
