@@ -86,6 +86,7 @@
     "board": "node --import jiti/register scripts/roadmap-board.ts",
     "agents:stop": "node --import jiti/register scripts/agent-stop.ts",
     "cubics:repair-worktrees": "node --import jiti/register scripts/repair-cubic-worktrees.ts",
+    "tui": "node --import jiti/register src/apps/tui/index.ts",
     "mcp": "node --import jiti/register src/apps/cli.ts mcp start",
     "mcp:propose-state-machine": "node --import jiti/register scripts/propose-state-machine-issues.ts",
     "update-nix": "sh scripts/update-nix.sh",
