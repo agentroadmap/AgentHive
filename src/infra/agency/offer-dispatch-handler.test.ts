@@ -191,6 +191,100 @@ test("handleOfferDispatch: empty capabilities falls back to [role]", async () =>
 	assert.deepEqual(spawnCalls[0].capabilities, ["gate-review"]);
 });
 
+test("P2335 AC-9: cubic_worktree_path is preferred over worktree_hint", async () => {
+	const spawnCalls: Array<Record<string, unknown>> = [];
+	const { exec } = recordingExec();
+
+	const fakeSpawn = async (req: Record<string, unknown>): Promise<SpawnResult> => {
+		spawnCalls.push(req);
+		return {
+			agentRunId: "run-cubic",
+			worktree: req.worktree as string,
+			exitCode: 0,
+			stdout: "",
+			stderr: "",
+			durationMs: 1,
+		};
+	};
+
+	// cubic_worktree_path is NOT under /data/code/worktree/ so the worktree
+	// provisioning side-effect (git worktree add) is skipped — this isolates
+	// the resolution-preference assertion.
+	const msg = makeMessage({
+		offer_id: "00000000-0000-0000-0000-0000000c0b1c",
+		role: "develop",
+		required_capabilities: ["develop"],
+		route_hint: "claude-code",
+		dispatch_id: 77,
+		claim_token: "tok-cubic",
+		cubic_id: "cubic_xyz",
+		cubic_worktree_path: "/tmp/p2335-cubic-wt",
+		worktree_hint: "legacy-hint",
+	});
+
+	await handleOfferDispatch("claude/agency-bot", msg, {
+		spawn: fakeSpawn as never,
+		exec,
+		logger: silentLogger(),
+		resolveWorktree: () => "resolver-wt",
+		renewalIntervalMs: 1_000_000,
+	});
+
+	for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+
+	assert.equal(spawnCalls.length, 1);
+	assert.equal(
+		spawnCalls[0].worktree,
+		"/tmp/p2335-cubic-wt",
+		"cubic_worktree_path must win over worktree_hint and resolveWorktree",
+	);
+});
+
+test("P2335 AC-5/AC-14: no cubic → falls back to worktree_hint (legacy client)", async () => {
+	const spawnCalls: Array<Record<string, unknown>> = [];
+	const { exec } = recordingExec();
+
+	const fakeSpawn = async (req: Record<string, unknown>): Promise<SpawnResult> => {
+		spawnCalls.push(req);
+		return {
+			agentRunId: "run-legacy",
+			worktree: req.worktree as string,
+			exitCode: 0,
+			stdout: "",
+			stderr: "",
+			durationMs: 1,
+		};
+	};
+
+	// No cubic_* fields at all — old dispatcher / legacy payload.
+	const msg = makeMessage({
+		offer_id: "00000000-0000-0000-0000-00000011e6a0",
+		role: "develop",
+		required_capabilities: ["develop"],
+		route_hint: "claude-code",
+		dispatch_id: 78,
+		claim_token: "tok-legacy",
+		worktree_hint: "legacy-hint",
+	});
+
+	await handleOfferDispatch("claude/agency-bot", msg, {
+		spawn: fakeSpawn as never,
+		exec,
+		logger: silentLogger(),
+		resolveWorktree: () => "resolver-wt",
+		renewalIntervalMs: 1_000_000,
+	});
+
+	for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+
+	assert.equal(spawnCalls.length, 1);
+	assert.equal(
+		spawnCalls[0].worktree,
+		"legacy-hint",
+		"worktree_hint must be used when no cubic_worktree_path is present",
+	);
+});
+
 test("handleOfferDispatch: malformed payload (no role) is rejected without spawn", async () => {
 	let spawnCalled = false;
 	const { calls: execCalls, exec } = recordingExec();
