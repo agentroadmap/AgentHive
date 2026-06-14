@@ -859,8 +859,41 @@ class ConfigResolver {
 	 */
 	async set<T>(key: ConfigKey<T>, value: T): Promise<void> {
 		const ctx = agentContextStorage.getStore();
-		// 1. fail-closed on missing identity.
+		// 1. fail-closed on missing identity — UNLESS the emergency operator
+		//    override env is present (AC-49). The override is operator-level only:
+		//    it grants operator authority whose DID is taken verbatim from
+		//    AGENTHIVE_EMERGENCY_OPERATOR_DID so cold-boot mutation works without a
+		//    full liaison. It can NEVER downgrade to system/agent — always operator.
+		//    The DID must still resolve to an active control_identity.principal row
+		//    (the audit principal_id FK is NOT NULL); an unknown/suspended DID is
+		//    rejected with PRINCIPAL_LOOKUP_FAILED.
+		const emergencyDid = process.env.AGENTHIVE_EMERGENCY_OPERATOR_DID?.trim();
 		if (!ctx?.verified) {
+			if (emergencyDid) {
+				console.warn(
+					`[ConfigResolver] EMERGENCY operator override active for set("${key.name}") ` +
+						`via AGENTHIVE_EMERGENCY_OPERATOR_DID — no verified principal in context.`,
+				);
+				if (key.class === "secret" || key.class === "tenant_dsn") {
+					throw new RuntimeConfigMutationForbidden(
+						key.name,
+						"IMMUTABLE_CLASS",
+						"operator",
+					);
+				}
+				if (!this.pool) {
+					throw new RuntimeConfigMissing(
+						key.name,
+						key.class,
+						"[RuntimeConfig] set() requires a control-plane pool (hiveCentral) to persist + audit the mutation.",
+					);
+				}
+				await this.persistMutation(key, value, {
+					authority: "operator",
+					emergencyDid,
+				});
+				return;
+			}
 			throw new RuntimeConfigMutationForbidden(
 				key.name,
 				"NO_IDENTITY_CONTEXT",
@@ -913,51 +946,145 @@ class ConfigResolver {
 				"[RuntimeConfig] set() requires a control-plane pool (hiveCentral) to persist + audit the mutation.",
 			);
 		}
-		await this.persistMutation(key, value, ctx.verified, authority);
+		await this.persistMutation(key, value, {
+			authority,
+			principalId: ctx.verified.principal_id,
+		});
 	}
 
 	/**
-	 * P828: DB half of set() — runtime_flag upsert + config_mutation_log append
-	 * + pg_notify + synchronous local cache eviction. Separated so the
-	 * authorization gates in set() stay pure and unit-testable.
+	 * P828: DB half of set() — principal resolution + runtime_flag upsert +
+	 * config_mutation_log append + pg_notify + synchronous local cache eviction.
+	 * Separated so the authorization gates in set() stay pure and unit-testable.
+	 *
+	 * Two principal sources (mutually exclusive):
+	 *  - principalId : the verified principal from agentContextStorage (normal path).
+	 *                  Resolved against control_identity.principal by id.
+	 *  - emergencyDid: the AGENTHIVE_EMERGENCY_OPERATOR_DID env (AC-49 cold-boot).
+	 *                  Resolved against control_identity.principal by did.
+	 *
+	 * The resolved principal row supplies caller_did + principal_id (the audit FK,
+	 * NOT NULL) and principal_type. Resolution enforces:
+	 *  - AC-11/43: no matching active row → PRINCIPAL_LOOKUP_FAILED (no audit row).
+	 *  - AC-44   : lifecycle_status must be 'active' (filtered in the query).
+	 *  - AC-29   : principal_type='human' is treated as agent_read_only — denied,
+	 *              never silently granted operator authority.
+	 *
+	 * AC-14/35: if key.parse(value) rejects the value, ONE mutation_log row is
+	 * written with validation_result='failed' + validation_error, runtime_flag is
+	 * left unchanged, and the parse error is re-thrown to the caller.
 	 */
 	private async persistMutation<T>(
 		key: ConfigKey<T>,
 		value: T,
-		principal: VerifiedPrincipal,
-		authority: MutationAuthority,
+		opts: {
+			authority: MutationAuthority;
+			principalId?: string;
+			emergencyDid?: string;
+		},
 	): Promise<void> {
 		const pool = this.pool as Pool;
-		// DID + lifecycle lookup (AC-11/AC-43/AC-44): unverifiable principal → deny.
-		const did = await pool.query<{ did: string }>(
-			`SELECT did FROM control_identity.principal
-			  WHERE id = $1 AND lifecycle_status = 'active' LIMIT 1`,
-			[principal.principal_id],
-		);
-		if (did.rows.length === 0) {
+		const { authority } = opts;
+
+		// Principal resolution (AC-11/29/43/44).
+		let lookup: {
+			rows: { id: string; did: string; principal_type: string }[];
+		};
+		if (opts.emergencyDid !== undefined) {
+			lookup = await pool.query<{
+				id: string;
+				did: string;
+				principal_type: string;
+			}>(
+				`SELECT id, did, principal_type FROM control_identity.principal
+				  WHERE did = $1 AND lifecycle_status = 'active' LIMIT 1`,
+				[opts.emergencyDid],
+			);
+		} else {
+			lookup = await pool.query<{
+				id: string;
+				did: string;
+				principal_type: string;
+			}>(
+				`SELECT id, did, principal_type FROM control_identity.principal
+				  WHERE id = $1 AND lifecycle_status = 'active' LIMIT 1`,
+				[opts.principalId],
+			);
+		}
+		if (lookup.rows.length === 0) {
 			throw new RuntimeConfigMutationForbidden(
 				key.name,
 				"PRINCIPAL_LOOKUP_FAILED",
 				authority,
 			);
 		}
-		const callerDid = did.rows[0].did;
-		const newJson = JSON.stringify(value);
+		const row = lookup.rows[0];
+		// AC-29: legacy 'human' principals are denied (must register as 'operator').
+		if (row.principal_type === "human") {
+			console.warn(
+				`[ConfigResolver] principal ${row.did} has principal_type='human'; ` +
+					`config mutation denied (AC-29) — register as an operator principal.`,
+			);
+			throw new RuntimeConfigMutationForbidden(
+				key.name,
+				"AGENT_READ_ONLY",
+				"agent_read_only",
+			);
+		}
+		const callerDid = row.did;
+		const principalDbId = row.id;
+		const scope = "global";
 		const oldValue = await this.getOptional(
 			key as ConfigKey<T | undefined>,
 		).catch(() => undefined);
-		const scope = "global";
+		const oldJson =
+			oldValue === undefined ? null : JSON.stringify(oldValue);
+
+		// AC-14/35: validate the value BEFORE the runtime_flag write. A parse
+		// failure is audited (validation_result='failed') and re-thrown; the
+		// runtime_flag row is never touched.
+		try {
+			key.parse(JSON.stringify(value));
+		} catch (parseErr) {
+			const errMsg =
+				parseErr instanceof Error ? parseErr.message : String(parseErr);
+			await pool
+				.query(
+					`INSERT INTO core.config_mutation_log
+					   (key_name, key_class, scope, old_value, new_value, caller_did,
+					    principal_id, mutation_authority, validation_result, validation_error)
+					 VALUES ($1, $2, $3, $4::jsonb, NULL, $5, $6, $7, 'failed', $8)`,
+					[
+						key.name,
+						key.class,
+						scope,
+						oldJson,
+						callerDid,
+						principalDbId,
+						authority,
+						errMsg,
+					],
+				)
+				.catch(() => {});
+			throw parseErr;
+		}
+
+		const newJson = JSON.stringify(value);
 
 		// Single transaction: runtime_flag upsert + mutation_log append (AC-45).
+		// owner_did/modified_by_did are NOT NULL on core.runtime_flag — both are
+		// set to the resolved caller DID (the mutator owns the flag write).
 		const client = await pool.connect();
 		try {
 			await client.query("BEGIN");
 			await client.query(
-				`INSERT INTO ${RUNTIME_FLAG_TABLE} (flag_name, scope, value_jsonb)
-				 VALUES ($1, $2, $3::jsonb)
+				`INSERT INTO ${RUNTIME_FLAG_TABLE}
+				   (flag_name, scope, value_jsonb, owner_did, modified_by_did)
+				 VALUES ($1, $2, $3::jsonb, $4, $4)
 				 ON CONFLICT (flag_name, scope)
-				 DO UPDATE SET value_jsonb = EXCLUDED.value_jsonb, updated_at = now()`,
-				[key.name, scope, newJson],
+				 DO UPDATE SET value_jsonb = EXCLUDED.value_jsonb,
+				               modified_by_did = EXCLUDED.modified_by_did`,
+				[key.name, scope, newJson, callerDid],
 			);
 			await client.query(
 				`INSERT INTO core.config_mutation_log
@@ -968,10 +1095,10 @@ class ConfigResolver {
 					key.name,
 					key.class,
 					scope,
-					oldValue === undefined ? null : JSON.stringify(oldValue),
+					oldJson,
 					newJson,
 					callerDid,
-					principal.principal_id,
+					principalDbId,
 					authority,
 				],
 			);
