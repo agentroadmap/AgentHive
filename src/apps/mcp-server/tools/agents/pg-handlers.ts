@@ -37,6 +37,17 @@ export class PgAgentHandlers {
 	// AC-11: Per-identity probe mutex to serialize concurrent registerModel calls
 	private probePromises: Map<string, Promise<void>> = new Map();
 
+	/**
+	 * Injectable query seam (P1129 test support). Defaults to the real pool
+	 * `query`; tests pass a stub so registerModel's two-step upsert shape can be
+	 * asserted without touching the live DB. Production callers use `new
+	 * PgAgentHandlers()` and get the real query unchanged.
+	 */
+	private readonly query: typeof query;
+	constructor(queryFn: typeof query = query) {
+		this.query = queryFn;
+	}
+
 	// Helper to acquire per-identity lock
 	private async withIdentityLock<T>(identity: string, fn: () => Promise<T>): Promise<T> {
 		const existing = this.probePromises.get(identity);
@@ -366,14 +377,88 @@ export class PgAgentHandlers {
 	}
 
 	/**
+	 * AC-4/AC-19 (B5): Static model allowlist for CLIs that only accept a known
+	 * model set. Validated BEFORE the live probe so a known-bad model is rejected
+	 * deterministically even when the CLI binary is not installed on this host
+	 * (the spawn probe is permissive-on-absence and cannot be relied on alone).
+	 * Providers absent from this map have no static restriction (probe decides).
+	 */
+	private static readonly STATIC_MODEL_ALLOWLIST: Record<string, RegExp> = {
+		// copilot only routes a small fixed set; reject anything else outright.
+		copilot: /^(gpt-4o|gpt-4\.1|gpt-5|gpt-5-codex|claude-sonnet-4|claude-3\.5-sonnet|o3|o4-mini)$/i,
+	};
+
+	/**
+	 * P1129: Probe a CLI to verify a model name is accepted.
+	 * AC-11/AC-17 (B3): argv array (never shell:true); hard 10s timeout that
+	 * SIGKILLs (kill -9) the child on expiry; max 1 probe per identity (the
+	 * caller wraps this in withIdentityLock).
+	 * Returns { ok: true } if probe succeeds or CLI is unrecognised (permissive
+	 * default — static allowlist handles deterministic rejection separately).
+	 * Returns { ok: false, error } if the CLI explicitly rejects the model name.
+	 */
+	private probeModel(
+		agentProvider: string,
+		modelName: string,
+	): { ok: boolean; error?: string } {
+		type CliProbeSpec = {
+			cli: string;
+			args: string[];
+			rejectPattern: RegExp;
+			rejectOnNonZero: boolean;
+		};
+		const specs: Record<string, CliProbeSpec> = {
+			claude: {
+				cli: "claude",
+				args: ["--model", modelName, "-p", "x"],
+				rejectPattern: /unknown model/i,
+				rejectOnNonZero: false,
+			},
+			codex: {
+				cli: "codex",
+				args: ["--model", modelName, "--no-git", "-q", "x"],
+				rejectPattern: /invalid model/i,
+				rejectOnNonZero: true,
+			},
+			gemini: {
+				cli: "gemini",
+				args: ["--model", modelName, "-p", "x"],
+				rejectPattern: /model not found/i,
+				rejectOnNonZero: false,
+			},
+			copilot: {
+				cli: "copilot",
+				args: ["--model", modelName, "-p", "x"],
+				rejectPattern: /model not found|invalid/i,
+				rejectOnNonZero: true,
+			},
+		};
+
+		const spec = specs[agentProvider];
+		if (!spec) {
+			return { ok: true };
+		}
+
+		try {
+			// AC-17 (B3): argv array — NEVER shell:true. Hard 10s timeout; on
+			// expiry the child is hard-killed with SIGKILL (kill -9), not the
+			// default SIGTERM, so a CLI that ignores SIGTERM still aborts.
+			const result = spawnSync(spec.cli, spec.args, {
+				timeout: 10000,
+				killSignal: "SIGKILL",
 				encoding: "utf-8",
 			});
-			const output = ((result.stdout as string) || "") + ((result.stderr as string) || "");
+			const output =
+				((result.stdout as string) || "") + ((result.stderr as string) || "");
 
 			if (spec.rejectPattern.test(output)) {
 				return { ok: false, error: output.slice(0, 500) };
 			}
-			if (spec.rejectOnNonZero && result.status !== 0 && result.status !== null) {
+			if (
+				spec.rejectOnNonZero &&
+				result.status !== 0 &&
+				result.status !== null
+			) {
 				return { ok: false, error: output.slice(0, 500) };
 			}
 			return { ok: true };
@@ -390,8 +475,24 @@ export class PgAgentHandlers {
 	 * AC-3: Tier mapping between tables:
 	 * - metadata_tier (frontier|standard|economy) → routes via mapMetadataTierToRouteTier
 	 * - Or specify route_tier directly for custom routing (e.g., 'tool' for special cases)
+	 */
+	async registerModel(args: {
+		agent_identity: string;
+		model_name: string;
+		route_provider: string;
+		agent_provider: string;
+		agent_cli?: string;
+		base_url?: string;
+		api_spec?: string;
+		metadata_tier?: string;
+		route_tier?: string;
+		skip_probe?: boolean;
+	}): Promise<CallToolResult> {
+		// AC-11/AC-16 (B2): Serialize concurrent registerModel calls per identity
+		return await this.withIdentityLock(args.agent_identity, async () => {
+			try {
 			if (args.skip_probe) {
-				const trustCheck = await query(
+				const trustCheck = await this.query(
 					`SELECT trust_tier FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
 					[args.agent_identity],
 				);
@@ -401,6 +502,32 @@ export class PgAgentHandlers {
 						"skip_probe=true requires trust_tier='authority'",
 					);
 				}
+			}
+
+			// AC-4/AC-19 (B5): deterministic static allowlist rejection. Runs even
+			// when skip_probe=true — an authority caller still cannot register a
+			// model the CLI provably will not accept. No routes are written.
+			const allowKey = (args.agent_cli || args.agent_provider || "").toLowerCase();
+			const allow = PgAgentHandlers.STATIC_MODEL_ALLOWLIST[allowKey];
+			if (allow && !allow.test(args.model_name)) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(
+								{
+									registered: false,
+									probe_failed: true,
+									probe_error: `model "${args.model_name}" is not in the supported set for CLI "${allowKey}"`,
+									model_name: args.model_name,
+									agent_provider: args.agent_provider,
+								},
+								null,
+								2,
+							),
+						},
+					],
+				};
 			}
 
 			if (!args.skip_probe) {
@@ -444,14 +571,14 @@ export class PgAgentHandlers {
 						`Value "${metadataTier}" is not in allowed set: ${validMetadataTiers.join(", ")}`,
 					);
 				}
-				await query(
+				await this.query(
 					`INSERT INTO roadmap.model_metadata (model_name, provider, is_active, tier)
 					 VALUES ($1, $2, true, $3)
 					 ON CONFLICT (provider, model_name) DO UPDATE SET is_active = true, tier = EXCLUDED.tier`,
 					[args.model_name, args.route_provider, metadataTier],
 				);
 			} else {
-				await query(
+				await this.query(
 					`INSERT INTO roadmap.model_metadata (model_name, provider, is_active)
 					 VALUES ($1, $2, true)
 					 ON CONFLICT (provider, model_name) DO UPDATE SET is_active = true`,
@@ -462,7 +589,7 @@ export class PgAgentHandlers {
 			// Resolve agent_cli from registry if not supplied
 			let agentCli = args.agent_cli || null;
 			if (!agentCli) {
-				const reg = await query(
+				const reg = await this.query(
 					`SELECT agent_cli FROM roadmap_workforce.agent_registry WHERE agent_identity = $1`,
 					[args.agent_identity],
 				);
@@ -470,7 +597,7 @@ export class PgAgentHandlers {
 			}
 
 			// Step 2: UPSERT model_routes
-			const { rows } = await query(
+			const { rows } = await this.query(
 				`INSERT INTO roadmap.model_routes
 				   (model_name, route_provider, agent_provider, agent_cli, base_url, api_spec, tier, is_enabled)
 				 VALUES ($1, $2, $3, $4, $5, $6, $7, true)
