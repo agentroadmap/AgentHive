@@ -1453,29 +1453,23 @@ export async function recordGateDecision(args: {
 		const { status: fromState, maturity } = propRows[0];
 
 		// Resolve the forward gate target so the fn_apply_gate_advance trigger
-		// actually advances status on an 'advance' decision. This handler used to
-		// write to_state = from_state, which made the trigger's idempotency check
-		// (status == to_state -> RETURN NULL) a permanent no-op: gate_decision
-		// recorded a row but never advanced, contradicting the tool description.
-		// Resolve via the SAME workflow source the prop_transition validator uses
-		// (the `workflows` table + workflow_templates), so the two paths agree
-		// even for proposals whose proposal.workflow_name has drifted. Pick the
-		// single forward transition for this from_state (allowed_reasons that
-		// represent a gate advance, never the backward iterate/revision/reject
-		// ones). Falls back to from_state (no-op) for non-advance decisions or
-		// when no forward transition exists.
+		// actually advances status on an 'advance' decision. Uses stage_order+1
+		// from workflow_stages — deterministic and workflow-type-aware (Standard RFC:
+		// REVIEW→DEVELOP; Architecture RFC: Review→Complete). Falls back to
+		// from_state (no-op) when no workflows row exists, when the current stage
+		// isn't found in the template, or when there is no next stage (terminal).
 		let toState = fromState;
 		if (args.decision === "advance") {
 			const { rows: fwd } = await query<{ to_state: string }>(
-				`SELECT pvt.to_state
+				`SELECT ws_next.stage_name AS to_state
 				   FROM workflows w
-				   JOIN workflow_templates wt ON wt.id = w.template_id
-				   JOIN roadmap_proposal.proposal_valid_transitions pvt
-				     ON pvt.workflow_name = wt.name
+				   JOIN workflow_stages ws_curr
+				     ON ws_curr.template_id = w.template_id
+				    AND UPPER(ws_curr.stage_name) = UPPER($2)
+				   JOIN workflow_stages ws_next
+				     ON ws_next.template_id = w.template_id
+				    AND ws_next.stage_order = ws_curr.stage_order + 1
 				  WHERE w.proposal_id = $1
-				    AND LOWER(pvt.from_state) = LOWER($2)
-				    AND pvt.allowed_reasons && ARRAY['mature','decision','deploy','accepted','submit','approve','advance','quorum_met']::text[]
-				  ORDER BY pvt.to_state
 				  LIMIT 1`,
 				[proposalId, fromState],
 			);
