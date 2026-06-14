@@ -65,6 +65,7 @@ import {
 	setModelCooldown,
 	setProviderCooldown,
 } from "./provider-cooldown.ts";
+import { classifyTaskClass } from "./difficulty-assessor.ts";
 import { isWithinCapacity } from "./resolvers/capacity-guard.ts";
 import {
 	agencyPolicyFilterSql,
@@ -2107,12 +2108,15 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	// P852: agent_runs.agent_identity is the structured label without the
 	// worktree suffix, so it joins cleanly to agent_registry rows.
 	// P1436: also record provider-truth columns for spend/routing audit.
+	// P3311 AC-6: stamp task_class at INSERT from the stage role.
+	const taskClass = classifyTaskClass(stage);
 	const { rows } = await query(
 		`INSERT INTO roadmap_workforce.agent_runs
        (proposal_id, display_id, agent_identity, stage, model_used, status, activity, started_at,
-        claimed_provider, resolved_provider, agent_cli, route_id, agency_identity, provider_mismatch)
+        claimed_provider, resolved_provider, agent_cli, route_id, agency_identity, provider_mismatch,
+        task_class)
      VALUES ($1, $2, $3, $4, $5, 'running', $6, now(),
-        $7, $8, $9, $10, $11, $12)
+        $7, $8, $9, $10, $11, $12, $13)
      RETURNING id`,
 		[
 			proposalId ?? null,
@@ -2127,6 +2131,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 			route.routeId ?? null,
 			req.agencyIdentity ?? null,
 			providerMismatch,
+			taskClass,
 		],
 	);
 	const agentRunId = String(rows[0].id);
