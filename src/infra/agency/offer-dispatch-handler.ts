@@ -22,6 +22,7 @@
  */
 import { query } from "../postgres/pool.ts";
 import { spawnAgent } from "../../core/orchestration/agent-spawner.ts";
+import { resolveExecutorWorktreeFallback } from "../../core/orchestration/executor-worktree-fallback.ts";
 import type { SpawnResult } from "../../core/orchestration/agent-spawner.ts";
 import type { LiaisonMessage } from "./liaison-message-types.ts";
 import { resolvePersonaByRoleName } from "../../core/orchestration/gate-role-resolver.ts";
@@ -197,14 +198,15 @@ const defaultDeps: Required<
 	spawn: spawnAgent,
 	exec: defaultExec,
 	logger: console,
-	// P914: include AGENTHIVE_DEFAULT_EXECUTOR_WORKTREE (the var actually
-	// set in /etc/agenthive/env, e.g. "codex-one") as a fallback so the
-	// spawn cwd resolves to a real directory under WORKTREE_ROOT instead
-	// of the literal "main" which never existed.
+	// P1445 AC-3: the orchestrator now allocates a worktree atomically and
+	// passes it as worktree_hint. The ad-hoc AGENTHIVE_DEFAULT_EXECUTOR_WORKTREE
+	// env fallback is gated behind resolveExecutorWorktreeFallback() (opt-in via
+	// AGENTHIVE_ALLOW_ENV_WORKTREE_FALLBACK=1) so two dispatches can no longer
+	// silently self-select the SAME shared checkout from the environment.
 	resolveWorktree: (_agencyId) =>
 		process.env.AGENCY_WORKTREE ??
 		process.env.AGENTHIVE_DEFAULT_WORKTREE ??
-		process.env.AGENTHIVE_DEFAULT_EXECUTOR_WORKTREE ??
+		resolveExecutorWorktreeFallback() ??
 		"codex-one",
 };
 

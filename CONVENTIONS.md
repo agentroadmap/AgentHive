@@ -875,6 +875,15 @@ AgentHive is multi-agent. Git discipline is part of system safety.
 - **Canonical hooks live in the version-controlled `.githooks/` directory**, activated via `core.hooksPath`. They self-install on `npm install` (the `prepare` script runs `git config core.hooksPath .githooks`); to install manually, run `npm run hooks:install`. Verify with `git config --get core.hooksPath` → must print `.githooks`.
 - **Never put a version bump (or any `git commit`/`git commit --amend`) in a `post-merge`/`post-checkout` hook.** A bump-on-merge hook rewrites the just-pulled upstream commit's hash on *every* puller's machine, guaranteeing divergence from origin and a spurious minor bump per pull — it silently violates the Shared-history rules below. Version bumps are a release-authority action only: use `npm run release:patch|minor|major`. A legacy `.git/hooks/post-merge` doing exactly this caused repeated merge pain; it is retired (2026-06-03). If `core.hooksPath` is unset on a checkout, git falls back to `.git/hooks/` and may re-run such legacy cruft — always confirm hooksPath points to `.githooks`.
 
+### §7a Multi-agent git isolation (P1445 — mechanically enforced)
+
+The conventions above are now backed by code/hook enforcement, not trust. Three layers prevent the cross-agent collisions of 2026-05-30 (a `git checkout` swapping another agent's files; a force-push of another agent's branch; an unreviewed fast-forward to `main`):
+
+- **Worktree-per-agent (AC-1).** Every dispatch-spawned worker runs in its own `git worktree`; the shared repo root is **operator-only**. Enforced by `assertNotRepoRoot(cwd, repoRoot)` (`src/core/orchestration/worktree-guard.ts`), called on the live spawn path in `spawnAgent` (`src/core/orchestration/agent-spawner.ts`). A spawn whose resolved cwd is the repo root is **refused** with `RepoRootSpawnRefused`.
+- **Orchestrator assigns the worktree (AC-2/AC-3).** Worktrees are allocated atomically (`roadmap.worktree_lease`, `claimWorktreeForDispatch`, `FOR UPDATE SKIP LOCKED`) and passed as `worktree_hint`. Agents never self-select. The legacy `AGENTHIVE_DEFAULT_EXECUTOR_WORKTREE` env fallback is **gated off by default** — it is honoured only when `AGENTHIVE_ALLOW_ENV_WORKTREE_FALLBACK=1` is set explicitly (single-agent/dev escape hatch). See `src/core/orchestration/executor-worktree-fallback.ts`.
+- **Branch single-writer + main is MR-only (AC-4/AC-5).** An agent may push **only** the branch whose proposal it holds an active lease on; direct pushes to `main`/`master` are forbidden (merge-request-only). Enforced by the `.githooks/pre-push` hook (logic in `scripts/pre-push-lease-check.mjs`), which checks the branch's proposal id against `roadmap_proposal.proposal_lease` for the pushing agent's identity. GitLab protected-branch config on `main` is the backstop (AC-5, operator-set). Operator override: `AGENTHIVE_PREPUSH_BYPASS=1 git push ...`.
+- **Restart authority (AC-6).** Worker/spawn code (`agent-spawner.ts`, `offer-dispatch-handler.ts`, `liaison-agent.ts`, `orchestrator.ts`, `legacy-dispatch.ts`) never restarts live services. Live `systemctl restart` is an operator/CLI action only (see §15). A regression test asserts zero `systemctl restart` in worker source.
+
 ### Shared-history rules
 
 - Do not rewrite shared history.
@@ -1323,6 +1332,8 @@ When a blocker is out of control, follow the formal hierarchy:
 | **Security/ACL Denial** | Security Agent | Project Owner (Gary) |
 
 **The Gary Rule**: Direct intervention from the Project Owner (Gary) or designated HITL (Derek/Nolan) is reserved for high-level strategic pivots or final "Accepted" state transitions.
+
+**Restart authority (P1445 AC-6).** Restarting live services (`agenthive-mcp`, `agenthive-orchestrator`, `agenthive-a2a`) is an **operator-only** action performed at the console (`sudo systemctl restart <unit>`). A worker mid-dispatch must NEVER restart a live service to "pick up its own code" — that is the change-deployment step, owned by the merge-to-`main` + operator-restart flow, not by the agent that wrote the code. Worker/spawn source contains zero `systemctl restart` (asserted by `src/core/orchestration/__tests__/p1445-isolation-enforcement.test.ts`); the only `systemctl restart` references in `src/` are operator CLI surfaces (`agenthive-cli`, `hive-cli`, state-machine commands).
 
 General escalation triggers:
 

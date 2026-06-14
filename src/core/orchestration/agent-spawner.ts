@@ -81,6 +81,7 @@ import type {
 import { provisionScratch, reapScratch, SCRATCH_ROOT } from "./scratch.ts";
 import { sanitizeExtraEnv } from "./spawn-env-sanitizer.ts";
 import { applySpawnStagger } from "./spawn-stagger.ts";
+import { assertNotRepoRoot } from "./worktree-guard.ts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -2097,6 +2098,13 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 
 	const startMs = Date.now();
 	const cwd = worktreePath;
+
+	// P1445 AC-1: refuse to spawn a worker in the shared repo root. Every
+	// dispatch-spawned agent MUST run in its own git worktree; spawning in the
+	// shared checkout is the root cause of the cross-agent file-swap / wrong-
+	// branch-merge incidents. This is the mechanical enforcement of CONVENTIONS
+	// §7a — a single guard call the spawn path cannot bypass.
+	assertNotRepoRoot(cwd, getProjectRoot());
 
 	// P1029: OpenClaw routes execute over a WebSocket session instead of a
 	// subprocess. Only the "obtain stdout/stderr/exitCode" step differs — every
