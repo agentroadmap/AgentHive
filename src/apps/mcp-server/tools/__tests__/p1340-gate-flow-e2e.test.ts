@@ -31,6 +31,8 @@ describe("P1340: MCP gate-flow ergonomics — e2e", () => {
 		universalAliasReleaseId: 999109,
 		// Test 2: Gate-decision advance (999110-999112)
 		gateDecisionAdvance: 999110,
+		// Test 2b: Architecture RFC advance (999111)
+		archRfcAdvance: 999111,
 		// Test 3: Admin bypass (999113)
 		adminBypass: 999113,
 		// Test 4: Force hint (999114-999115)
@@ -89,14 +91,20 @@ describe("P1340: MCP gate-flow ergonomics — e2e", () => {
 		// Seed agent registry for test identities
 		await query(
 			`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, role)
-			 VALUES ($1, $2, $3), ($4, $5, $6), ($7, $8, $9), ($10, $11, $12)
+			 VALUES ($1, $2, $3), ($4, $5, $6), ($7, $8, $9)
 			 ON CONFLICT (agent_identity) DO NOTHING`,
 			[
 				george, "llm", "developer",
 				claude, "llm", "developer",
 				systemIdentity, "user", "developer",
-				orchestratorId, "user", "system_orchestrator",
 			],
+		);
+		// orchestratorId may be uppercase; canonicalize to satisfy ck_agent_identity_canonical
+		await query(
+			`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, role)
+			 VALUES (fn_canonicalize_identity($1), $2, $3)
+			 ON CONFLICT (agent_identity) DO NOTHING`,
+			[orchestratorId, "user", "system_orchestrator"],
 		);
 	});
 
@@ -422,6 +430,46 @@ describe("P1340: MCP gate-flow ergonomics — e2e", () => {
 				[pid],
 			);
 			expect(rows[0].status).toBe("COMPLETE");
+		});
+
+		it("AC-5: Architecture RFC REVIEW→COMPLETE (3-stage workflow, not a bug)", async () => {
+			const pid = testProposalIds.archRfcAdvance;
+			// Create proposal with Architecture RFC workflow (3-stage: Draft→Review→Complete)
+			await query(
+				`INSERT INTO roadmap_proposal.proposal
+				   (id, display_id, type, status, maturity, title, audit, workflow_name, created_at, modified_at)
+				 OVERRIDING SYSTEM VALUE
+				 VALUES ($1, $2, 'architecture', 'REVIEW', 'mature', $3, '[]'::jsonb, 'Architecture RFC', now(), now())
+				 ON CONFLICT (id) DO UPDATE SET status='REVIEW', maturity='mature', workflow_name='Architecture RFC'`,
+				[pid, `P${pid}`, `Arch RFC Test ${pid}`],
+			);
+			await createActiveLease(pid, george);
+
+			const result = await recordGateDecision({
+				proposal_id: String(pid),
+				gate: "D2",
+				decision: "advance",
+				rationale: "Architecture approved",
+				decided_by: george,
+			});
+
+			expect(result.content[0].text).toContain("ADVANCED");
+			expect(result.content[0].text).toContain("REVIEW → COMPLETE");
+
+			const { rows } = await query<{ status: string }>(
+				`SELECT status FROM roadmap_proposal.proposal WHERE id = $1`,
+				[pid],
+			);
+			expect(rows[0].status).toBe("COMPLETE");
+
+			// Verify gate_decision_log records the correct from/to states (AC-7)
+			const { rows: logRows } = await query<{ from_state: string; to_state: string }>(
+				`SELECT from_state, to_state FROM roadmap_proposal.gate_decision_log
+				  WHERE proposal_id = $1 AND gate = $2 ORDER BY id DESC LIMIT 1`,
+				[pid, "D2"],
+			);
+			expect(logRows[0].from_state).toBe("REVIEW");
+			expect(logRows[0].to_state).toBe("COMPLETE");
 		});
 	});
 

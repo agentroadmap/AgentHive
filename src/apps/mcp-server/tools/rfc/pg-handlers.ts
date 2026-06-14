@@ -1415,7 +1415,9 @@ export async function getValidTransitions(args: {
 // ─── Gate Decision Log ──────────────────────────────────────────────────────
 
 export async function recordGateDecision(args: {
-	proposal_id: string;
+	id?: string;
+	proposal_id?: string;
+	display_id?: string;
 	gate: string;
 	decision: string;
 	rationale?: string;
@@ -1424,6 +1426,16 @@ export async function recordGateDecision(args: {
 	agent_run_id?: string;
 	ac_verification?: Record<string, unknown>;
 }): Promise<CallToolResult> {
+	// Resolve the canonical identifier from any of the three alias forms.
+	const rawIdentifier = args.id ?? args.proposal_id ?? args.display_id;
+	if (!rawIdentifier) {
+		return {
+			content: [{
+				type: "text",
+				text: "❌ missing proposal identifier — supply proposal_id, id, or display_id",
+			}],
+		};
+	}
 	const VALID_DECISIONS = ["advance", "hold", "reject", "waive", "escalate"];
 	if (!VALID_DECISIONS.includes(args.decision)) {
 		return errorResult(
@@ -1432,10 +1444,10 @@ export async function recordGateDecision(args: {
 		);
 	}
 	try {
-		const proposalId = await resolveProposalId(args.proposal_id);
+		const proposalId = await resolveProposalId(rawIdentifier);
 		if (proposalId === null) {
 			return {
-				content: [{ type: "text", text: `Proposal ${args.proposal_id} not found.` }],
+				content: [{ type: "text", text: `Proposal ${rawIdentifier} not found.` }],
 			};
 		}
 
@@ -1455,26 +1467,26 @@ export async function recordGateDecision(args: {
 
 		// Resolve the forward gate target so the fn_apply_gate_advance trigger
 		// actually advances status on an 'advance' decision.
-		// IMPORTANT: use proposal.workflow_name (read above) — NOT the workflows
-		// JOIN chain (workflows→workflow_templates→name). The JOIN chain can drift
-		// (P2754): a Standard RFC proposal may have its `workflows` row pointing at
-		// an Architecture RFC template, causing advance to resolve REVIEW→COMPLETE
-		// instead of REVIEW→DEVELOP. The canonical source is proposal.workflow_name.
-		// Order COMPLETE last so intermediate stages are preferred when multiple
-		// forward transitions exist for the same from_state.
+		// IMPORTANT: use proposal.workflow_name (read above) — NOT the roadmap.workflows
+		// JOIN chain (proposal→workflows→template_id). The JOIN chain can drift (P2754):
+		// a Standard RFC proposal may have its `workflows` row pointing at an Architecture
+		// RFC template, causing advance to resolve REVIEW→COMPLETE instead of REVIEW→DEVELOP.
+		// The canonical source is proposal.workflow_name, looked up in workflow_templates by
+		// name, then the next stage determined deterministically by stage_order+1.
+		// Falls back to from_state (no-op) when: workflow_name has no matching template,
+		// current status is not a recognised stage in that template, or it is the terminal stage.
 		let toState = fromState;
 		if (args.decision === "advance") {
 			const { rows: fwd } = await query<{ to_state: string }>(
-				`SELECT pvt.to_state
-				   FROM roadmap_proposal.proposal_valid_transitions pvt
-				  WHERE pvt.workflow_name = $1
-				    AND LOWER(pvt.from_state) = LOWER($2)
-				    AND pvt.allowed_reasons && ARRAY['mature','decision','deploy','accepted','submit',
-				        'approve','advance','quorum_met',
-				        'gate_approved','decision_made','deployment_ready']::text[]
-				  ORDER BY
-				    CASE UPPER(pvt.to_state) WHEN 'COMPLETE' THEN 999 ELSE 0 END,
-				    pvt.to_state
+				`SELECT UPPER(ws_next.stage_name) AS to_state
+				   FROM roadmap.workflow_templates wt
+				   JOIN roadmap.workflow_stages ws_curr
+				     ON ws_curr.template_id = wt.id
+				    AND UPPER(ws_curr.stage_name) = UPPER($2)
+				   JOIN roadmap.workflow_stages ws_next
+				     ON ws_next.template_id = wt.id
+				    AND ws_next.stage_order = ws_curr.stage_order + 1
+				  WHERE wt.name = $1
 				  LIMIT 1`,
 				[proposalWorkflow, fromState],
 			);
@@ -1536,14 +1548,14 @@ export async function recordGateDecision(args: {
 			const newState = after[0]?.status ?? fromState;
 			advanceNote =
 				newState.toUpperCase() === toState.toUpperCase()
-					? ` → status advanced ${fromState} → ${newState}.`
+					? ` ADVANCED: ${fromState} → ${newState}`
 					: ` (status NOT advanced — still ${newState}; expected ${fromState} → ${toState}. Check for state drift.)`;
 		}
 
 		return {
 			content: [{
 				type: "text",
-				text: `✅ Gate decision recorded: id=${rows[0].id} proposal=${args.proposal_id} gate=${args.gate} decision=${args.decision}${advanceNote}`,
+				text: `✅ Gate decision recorded: id=${rows[0].id} proposal=${rawIdentifier} gate=${args.gate} decision=${args.decision}${advanceNote}`,
 			}],
 		};
 	} catch (err) {
