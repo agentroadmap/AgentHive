@@ -543,14 +543,17 @@ export async function transitionProposal(
 		);
 	}
 
-	// Validate transition exists
+	// Validate transition exists. Read directly from proposal_valid_transitions
+	// keyed on the proposal's actual workflow template name (via workflows →
+	// workflow_templates). The old path through proposal_type_config was an
+	// unnecessary indirection that broke for proposals whose workflows.template_id
+	// had drifted (P2756) and for types not in proposal_type_config (e.g. feature).
 	const { rowCount } = await query(
 		`SELECT 1
      FROM roadmap_proposal.proposal_valid_transitions pvt
-     JOIN workflows w ON w.proposal_id = $1
-     JOIN workflow_templates wt ON wt.id = w.template_id
-     JOIN roadmap_proposal.proposal_type_config ptc ON ptc.workflow_name = wt.name
-     WHERE pvt.workflow_name = ptc.workflow_name
+     JOIN roadmap.workflows w ON w.proposal_id = $1
+     JOIN roadmap.workflow_templates wt ON wt.id = w.template_id
+     WHERE pvt.workflow_name = wt.name
        AND LOWER(pvt.from_state) = LOWER($2)
        AND LOWER(pvt.to_state) = LOWER($3)
      LIMIT 1`,

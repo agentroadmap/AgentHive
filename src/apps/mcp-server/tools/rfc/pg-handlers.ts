@@ -1457,29 +1457,46 @@ export async function recordGateDecision(args: {
 		// write to_state = from_state, which made the trigger's idempotency check
 		// (status == to_state -> RETURN NULL) a permanent no-op: gate_decision
 		// recorded a row but never advanced, contradicting the tool description.
-		// Resolve via the SAME workflow source the prop_transition validator uses
-		// (the `workflows` table + workflow_templates), so the two paths agree
-		// even for proposals whose proposal.workflow_name has drifted. Pick the
-		// single forward transition for this from_state (allowed_reasons that
-		// represent a gate advance, never the backward iterate/revision/reject
-		// ones). Falls back to from_state (no-op) for non-advance decisions or
-		// when no forward transition exists.
+		// Resolve the forward gate target via the proposal's ACTUAL workflow
+		// (workflows table → workflow_templates → proposal_valid_transitions).
+		// Order by workflow_stages.stage_order so we pick the NEXT sequential
+		// stage, never a terminal state that happens to sort alphabetically first
+		// (e.g. COMPLETE < DEVELOP). Filter to forward-only by requiring the
+		// to_state stage_order to be strictly greater than the from_state order.
+		// AC-2: return an explicit error if no forward transition exists — do NOT
+		// silently write to_state = from_state (which is an undetected no-op).
 		let toState = fromState;
 		if (args.decision === "advance") {
 			const { rows: fwd } = await query<{ to_state: string }>(
 				`SELECT pvt.to_state
-				   FROM workflows w
-				   JOIN workflow_templates wt ON wt.id = w.template_id
+				   FROM roadmap.workflows w
+				   JOIN roadmap.workflow_templates wt ON wt.id = w.template_id
 				   JOIN roadmap_proposal.proposal_valid_transitions pvt
 				     ON pvt.workflow_name = wt.name
+				   JOIN roadmap.workflow_stages ws_to
+				     ON ws_to.template_id = wt.id
+				    AND LOWER(ws_to.stage_name) = LOWER(pvt.to_state)
+				   JOIN roadmap.workflow_stages ws_from
+				     ON ws_from.template_id = wt.id
+				    AND LOWER(ws_from.stage_name) = LOWER($2)
 				  WHERE w.proposal_id = $1
 				    AND LOWER(pvt.from_state) = LOWER($2)
 				    AND pvt.allowed_reasons && ARRAY['mature','decision','deploy','accepted','submit','approve','advance','quorum_met']::text[]
-				  ORDER BY pvt.to_state
+				    AND ws_to.stage_order > ws_from.stage_order
+				  ORDER BY ws_to.stage_order ASC
 				  LIMIT 1`,
 				[proposalId, fromState],
 			);
-			if (fwd.length) toState = fwd[0].to_state;
+			if (fwd.length) {
+				toState = fwd[0].to_state;
+			} else {
+				return {
+					content: [{
+						type: "text",
+						text: `❌ gate_decision advance failed for proposal ${args.proposal_id}: no forward transition found from '${fromState}' in the proposal's workflow. Check that proposal_valid_transitions and workflow_stages are populated for this workflow, and that the proposal's workflows.template_id is correct (may be a P2756 workflow drift — run the drift audit in migration 272).`,
+					}],
+				};
+			}
 		}
 
 		// Shadow-mode skip: if a row with the same agent_run_id already exists,
