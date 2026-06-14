@@ -1,4 +1,4 @@
-import { query } from "../../../../infra/postgres/pool.ts";
+import { getPool, query } from "../../../../infra/postgres/pool.ts";
 
 export type SchemaColumn = {
 	column_name: string;
@@ -239,27 +239,23 @@ export async function lintMigration(
 	// bodies (PL/pgSQL block keywords look identical to txn keywords).
 	const processedSql = stripTopLevelTxnControl(sql);
 
-	// Lint by running the SQL inside one outer transaction we always ROLLBACK.
+	// CRITICAL: the BEGIN, the script, and the ROLLBACK MUST run on the SAME
+	// connection or the "transaction" is fake. The pool wrapper query() acquires
+	// a fresh pooled connection PER CALL, so three query() calls = three
+	// connections: the BEGIN is abandoned, the script runs in autocommit and
+	// COMMITS to the live DB, and the ROLLBACK is a no-op. A lint tool must NEVER
+	// persist what it lints — hold one client and always ROLLBACK in finally.
+	const client = await getPool().connect();
 	try {
-		await query("BEGIN");
-		await query(processedSql);
-		await query("ROLLBACK");
-		return {
-			valid: true,
-			errors: [],
-			warnings: [],
-		};
+		await client.query("BEGIN");
+		await client.query(processedSql);
+		return { valid: true, errors: [], warnings: [] };
 	} catch (err) {
-		try {
-			await query("ROLLBACK");
-		} catch {
-			// ignore rollback failures
-		}
-		const msg = (err as Error).message;
-		return {
-			valid: false,
-			errors: [msg],
-			warnings: [],
-		};
+		return { valid: false, errors: [(err as Error).message], warnings: [] };
+	} finally {
+		// Always undo — on the valid path this discards the (successful) script;
+		// on the error path it clears the aborted transaction before release.
+		await client.query("ROLLBACK").catch(() => {});
+		client.release();
 	}
 }
