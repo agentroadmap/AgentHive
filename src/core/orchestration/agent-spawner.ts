@@ -2597,6 +2597,7 @@ function runProcess(
 			cleanup();
 			const diagnostics = [
 				`cmd_exists=${existsSync(cmd)}`,
+				`cwd=${cwd}`,
 				`cwd_exists=${existsSync(cwd)}`,
 				`home=${env.HOME ?? ""}`,
 				`codex_home=${env.CODEX_HOME ?? ""}`,
