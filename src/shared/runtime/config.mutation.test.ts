@@ -166,6 +166,152 @@ describe("ConfigResolver.set() authorization gates (P828)", () => {
 	});
 });
 
+/**
+ * A pool that simulates hiveCentral for the persistMutation DB half:
+ *  - SELECT ... control_identity.principal → returns `principalRow` (or none).
+ *  - INSERT ... config_mutation_log → recorded into `mutationRows`.
+ *  - all other queries → empty result.
+ * Used to exercise AC-14 (validation-failure audit), AC-29 (human deny),
+ * AC-49 (emergency override) without a live DB.
+ */
+function dbPool(
+	principalRow: { id: string; did: string; principal_type: string } | null,
+) {
+	const mutationRows: any[][] = [];
+	const calls: string[] = [];
+	async function query(sql: string, params?: any[]) {
+		calls.push(sql);
+		if (sql.includes("control_identity.principal")) {
+			return { rows: principalRow ? [principalRow] : [] };
+		}
+		if (sql.includes("config_mutation_log")) {
+			mutationRows.push(params ?? []);
+			return { rows: [] };
+		}
+		return { rows: [] };
+	}
+	const client = { query, release: () => {}, on: () => {} };
+	return {
+		mutationRows,
+		calls,
+		query,
+		connect: async () => client,
+		options: {},
+	} as never;
+}
+
+describe("ConfigResolver.persistMutation DB half (P828 AC-14/29/43/49)", () => {
+	test("AC-29: principal_type='human' → denied (AGENT_READ_ONLY), no write", async () => {
+		const pool = dbPool({
+			id: "5",
+			did: "did:hive:human",
+			principal_type: "human",
+		});
+		const r = await freshResolver(pool);
+		await withPrincipal("operator", async () => {
+			await assert.rejects(
+				() => r.set(FlagKeys.USE_OFFER_DISPATCH, true),
+				(e: unknown) =>
+					e instanceof RuntimeConfigMutationForbidden &&
+					e.reason === "AGENT_READ_ONLY",
+			);
+		});
+		assert.equal(
+			(pool as any).mutationRows.length,
+			0,
+			"human principal writes no audit row",
+		);
+	});
+
+	test("AC-43: unknown principal_id → PRINCIPAL_LOOKUP_FAILED, no write", async () => {
+		const pool = dbPool(null);
+		const r = await freshResolver(pool);
+		await withPrincipal("operator", async () => {
+			await assert.rejects(
+				() => r.set(FlagKeys.USE_OFFER_DISPATCH, true),
+				(e: unknown) =>
+					e instanceof RuntimeConfigMutationForbidden &&
+					e.reason === "PRINCIPAL_LOOKUP_FAILED",
+			);
+		});
+		assert.equal((pool as any).mutationRows.length, 0);
+	});
+
+	test("AC-14/35: parse failure writes ONE failed-audit row, re-throws", async () => {
+		const pool = dbPool({
+			id: "7",
+			did: "did:hive:op",
+			principal_type: "operator",
+		});
+		const r = await freshResolver(pool);
+		await withPrincipal("operator", async () => {
+			// PROJECT_TOKEN_BUDGET.parse rejects negative numbers.
+			await assert.rejects(() =>
+				r.set(RegistryKeys.PROJECT_TOKEN_BUDGET, -1 as never),
+			);
+		});
+		assert.equal(
+			(pool as any).mutationRows.length,
+			1,
+			"exactly one failed-audit row",
+		);
+		const row = (pool as any).mutationRows[0];
+		// params: key_name, key_class, scope, old_value, caller_did, principal_id,
+		//         mutation_authority, validation_error  (new_value is literal NULL)
+		assert.equal(row[0], "PROJECT_TOKEN_BUDGET");
+		assert.equal(row[6], "operator");
+		assert.ok(String(row[7]).includes("Invalid token budget"));
+	});
+
+	test("AC-49: emergency override (no context) resolves DID, audits operator", async () => {
+		const pool = dbPool({
+			id: "9",
+			did: "did:hive:emergency",
+			principal_type: "operator",
+		});
+		const r = await freshResolver(pool);
+		const prev = process.env.AGENTHIVE_EMERGENCY_OPERATOR_DID;
+		process.env.AGENTHIVE_EMERGENCY_OPERATOR_DID = "did:hive:emergency";
+		try {
+			// No agentContextStorage.run() — empty context, override must engage.
+			await r.set(FlagKeys.USE_OFFER_DISPATCH, true);
+		} finally {
+			if (prev === undefined)
+				delete process.env.AGENTHIVE_EMERGENCY_OPERATOR_DID;
+			else process.env.AGENTHIVE_EMERGENCY_OPERATOR_DID = prev;
+		}
+		assert.equal((pool as any).mutationRows.length, 1, "one success-audit row");
+		const row = (pool as any).mutationRows[0];
+		assert.equal(row[5], "did:hive:emergency", "caller_did = env DID");
+		assert.equal(row[6], "9", "principal_id = resolved row id");
+		assert.equal(row[7], "operator", "authority forced to operator");
+	});
+
+	test("AC-49: emergency override never writes secret class", async () => {
+		const pool = dbPool({
+			id: "9",
+			did: "did:hive:emergency",
+			principal_type: "operator",
+		});
+		const r = await freshResolver(pool);
+		const prev = process.env.AGENTHIVE_EMERGENCY_OPERATOR_DID;
+		process.env.AGENTHIVE_EMERGENCY_OPERATOR_DID = "did:hive:emergency";
+		try {
+			await assert.rejects(
+				() => r.set(SecretKeys.PGPASSWORD, "x"),
+				(e: unknown) =>
+					e instanceof RuntimeConfigMutationForbidden &&
+					e.reason === "IMMUTABLE_CLASS",
+			);
+		} finally {
+			if (prev === undefined)
+				delete process.env.AGENTHIVE_EMERGENCY_OPERATOR_DID;
+			else process.env.AGENTHIVE_EMERGENCY_OPERATOR_DID = prev;
+		}
+		assert.equal((pool as any).mutationRows.length, 0);
+	});
+});
+
 describe("ConfigResolver.reload() identity gate (P828 AC-17)", () => {
 	test("no context → NO_IDENTITY_CONTEXT", async () => {
 		const pool = spyPool();
