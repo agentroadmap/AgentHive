@@ -40,6 +40,7 @@ export interface AgencySubscribeResult {
 }
 
 export interface AgencySubmitResultInput {
+	agency_identity?: string;
 	dispatch_id: bigint;
 	claim_token: string;
 	status: "completed" | "failed";
@@ -58,6 +59,7 @@ export interface AgencySubmitResultOutput {
 }
 
 export interface AgencyHeartbeatInput {
+	agency_identity?: string;
 	dispatch_id: bigint;
 	claim_token: string;
 	lease_seconds?: number;
@@ -84,6 +86,11 @@ export async function verifyAgencyBearer(
 	const authMode = (process.env.MCP_AGENCY_AUTH || "off").toLowerCase();
 	if (authMode !== "on") {
 		return { ok: true }; // Trusted-LAN mode
+	}
+
+	// Auth required: agency_identity must be provided so token can be scoped to registry row
+	if (!agency_identity?.trim()) {
+		return { ok: false, status: 401, reason: "missing_agency_identity" };
 	}
 
 	// Auth required: bearer token must be present and match token_hash
@@ -240,7 +247,7 @@ export async function handleAgencySubmitResult(input: AgencySubmitResultInput): 
 	}
 
 	// Authenticate
-	const authCheck = await verifyAgencyBearer("", input.authorization); // Placeholder; real impl gets from context
+	const authCheck = await verifyAgencyBearer(input.agency_identity || "", input.authorization);
 	if (!authCheck.ok) {
 		const error = new Error(`Authentication failed: ${authCheck.reason}`);
 		(error as any).status = authCheck.status || 401;
@@ -351,7 +358,7 @@ export async function handleAgencyHeartbeat(input: AgencyHeartbeatInput): Promis
 	}
 
 	// Authenticate
-	const authCheck = await verifyAgencyBearer("", input.authorization); // Placeholder
+	const authCheck = await verifyAgencyBearer(input.agency_identity || "", input.authorization);
 	if (!authCheck.ok) {
 		const error = new Error(`Authentication failed: ${authCheck.reason}`);
 		(error as any).status = authCheck.status || 401;

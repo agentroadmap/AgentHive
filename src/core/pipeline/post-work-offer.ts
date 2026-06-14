@@ -20,6 +20,7 @@ import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 import { ObservabilityWriter } from "../observability/observability-writer.ts";
 import { ROLE_TO_REQUIRED_CAPABILITIES } from "../orchestration/offer-dispatch.ts";
 import { autoCharterIfNeeded } from "./auto-charter.ts";
+import { assessDifficulty } from "./difficulty-assessor.ts";
 
 const obs = new ObservabilityWriter("agency:offer-pipeline");
 
@@ -496,10 +497,13 @@ async function postWorkOfferImpl(
 		gate_scanner_paused: boolean;
 		gate_paused_by: string | null;
 		gate_paused_at: string | null;
+		task_class: string | null;
+		tier_override: string | null;
 	}>(
 		`SELECT project_id, status, maturity,
 		        gate_scanner_paused, gate_paused_by,
-		        gate_paused_at::text AS gate_paused_at
+		        gate_paused_at::text AS gate_paused_at,
+		        task_class, tier_override
 		 FROM roadmap_proposal.proposal
 		 WHERE id = $1`,
 		[input.proposalId],
@@ -535,6 +539,48 @@ async function postWorkOfferImpl(
 			ctx.gate_paused_by,
 			ctx.gate_paused_at ? new Date(ctx.gate_paused_at) : null,
 		);
+	}
+
+	// P3310: difficulty assessment — best-effort; errors never block dispatch.
+	let difficultyScore: number | null = null;
+	let requiredCapabilityTier: string | null = null;
+	let taskClass: string | null = null;
+	try {
+		const { rows: acRows } = await queryFn<{ ac_count: number; avg_words: number }>(
+			`SELECT COUNT(*)::int AS ac_count,
+			        COALESCE(
+			          AVG(array_length(string_to_array(trim(criterion_text), ' '), 1)),
+			          0
+			        ) AS avg_words
+			   FROM roadmap_proposal.proposal_acceptance_criteria
+			  WHERE proposal_id = $1`,
+			[input.proposalId],
+		);
+		const { rows: reworkRows } = await queryFn<{ rework_count: number }>(
+			`SELECT COUNT(*)::int AS rework_count
+			   FROM roadmap_workforce.squad_dispatch
+			  WHERE proposal_id = $1
+			    AND dispatch_role = $2
+			    AND dispatch_status = 'completed'`,
+			[input.proposalId, input.role],
+		);
+		const assessment = assessDifficulty({
+			role: input.role,
+			acCount: acRows[0]?.ac_count ?? 0,
+			acAvgWords: Number(acRows[0]?.avg_words ?? 0),
+			reworkCount: reworkRows[0]?.rework_count ?? 0,
+			taskClassOverride: ctx.task_class ?? null,
+			tierOverride: ctx.tier_override ?? null,
+		});
+		difficultyScore = assessment.difficulty_score;
+		requiredCapabilityTier = assessment.required_capability_tier;
+		taskClass = assessment.task_class;
+	} catch (err) {
+		obs.log({
+			level: "warn",
+			message: `P3310: difficulty assessment failed for P${input.proposalId}`,
+			error: err instanceof Error ? err.message : String(err),
+		});
 	}
 
 	// P1729: cumulative convergence guard. Check if blocking review count or
@@ -685,9 +731,11 @@ async function postWorkOfferImpl(
 		`INSERT INTO roadmap_workforce.squad_dispatch
 		   (proposal_id, project_id, squad_name, dispatch_role, dispatch_status,
 		    offer_status, agent_identity, required_capabilities, metadata,
-		    workflow_state, idempotency_key, dispatch_version, attempt_count)
+		    workflow_state, idempotency_key, dispatch_version, attempt_count,
+		    difficulty_score, required_capability_tier, task_class)
 		 VALUES ($1, $2, $3, $4, 'open', 'open', NULL, $5::jsonb, $6::jsonb,
-		         $7, $8, $9, 1)
+		         $7, $8, $9, 1,
+		         $10, $11, $12)
 		 ON CONFLICT (idempotency_key)
 		   WHERE dispatch_status IN ('open', 'assigned', 'active')
 		 DO UPDATE SET
@@ -710,6 +758,9 @@ async function postWorkOfferImpl(
 			ctx.status ?? null,
 			idempotencyKey,
 			dispatchVersion,
+			difficultyScore,
+			requiredCapabilityTier,
+			taskClass,
 		],
 	);
 
