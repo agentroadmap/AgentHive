@@ -50,6 +50,17 @@ presence/dispatchable state.
    claimed role: e.g. `gate-reviewer`/`skeptic-*` → a reviewer/skeptic persona,
    `developer`/`engineer` → Senior Developer, `enhancer`/`researcher` → an enhancer.
    A stable persona name for common capabilities; a specific one for rare needs.
+   The *mechanical default* of this choice is encoded in
+   `src/infra/agency/persona-matchmaker.ts` (`matchPersonaForCapability(role,
+   caps)`): common capabilities (`develop`/`review`/`design`/`research`/
+   `architecture`/`merge`) map to a **stable** persona name; anything outside that
+   taxonomy is **rare** and gets a dynamic `claude.<specialty>` name derived from
+   the capability. In the self-claim path (`makeAgencyClaimExecutor`) the match is
+   recorded on the dispatch row (`metadata.persona_name` / `worker_persona` /
+   `persona_stable` / `persona_source`) so the control feed reflects the chosen
+   persona, and the matched expertise hint leads the spawn's capability list so the
+   spawner's structured-identity branch encodes the specialty into the worker
+   identity. The brain may override; the floor is deterministic and testable.
 6. **Spawn the worker.** Spawn the subagent under the agency identity (it inherits
    OAuth). Give it the proposal context and the role's deliverable contract.
 7. **Evidence-gate completion (AC-12/13).** A worker exiting 0 is NOT delivery. Before
@@ -69,6 +80,23 @@ On a worker failure, decide — do not silently drop and do not retry-storm:
 - **reroute / return** the offer to the pool if this agency cannot serve it now;
 - **escalate** (log an issue) if it is a real defect or a policy-sensitive case.
 Record the chosen recovery action against the offer.
+
+The mechanical default is encoded in `src/infra/agency/recovery-action.ts`
+(`decideRecoveryAction({ errorText, failureReason, attemptCount })`) and applied
+in the self-claim executor's post-dispatch step (`coordinateFailureRecovery`):
+
+| cause | action | why |
+| :-- | :-- | :-- |
+| `auth_rejected` (401/403) | **escalate** | dead auth — retrying loops; operator must fix creds |
+| `rate_limited` / `quota_exhausted` | **reroute** | transient for *this* agency; a peer with headroom serves it |
+| transient flake (timeout, conn reset) | **retry** once, then **escalate** | bounded — never a retry storm (`maxAttempts`, default 2) |
+| non-transient defect / missing artifact | **escalate** | a real bug — log an issue, never a silent drop |
+
+The decision is written to `squad_dispatch.metadata` (`recovery_action`,
+`recovery_reason`, `recovery_failure_class`, `recovery_decided_by`,
+`recovery_attempt`) so every failure carries an observable, brain-attributable
+recovery record — the AC-10 anti-silent-drop guarantee. A provider-limit HOLD
+(P1682) is a deliberate pause, not a failure, and is left for the wake sweep.
 
 ## Representation & the minimal A2A surface (AC-11, AC-17)
 
