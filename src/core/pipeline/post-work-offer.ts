@@ -19,6 +19,12 @@ import * as runtimeConfig from "../../shared/runtime/config.ts";
 import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 import { ObservabilityWriter } from "../observability/observability-writer.ts";
 import { ROLE_TO_REQUIRED_CAPABILITIES } from "../orchestration/offer-dispatch.ts";
+import {
+	assessDifficulty,
+	isTaskClass,
+	type CapabilityTier,
+	type TaskClass,
+} from "../orchestration/difficulty-assessor.ts";
 import { autoCharterIfNeeded } from "./auto-charter.ts";
 
 const obs = new ObservabilityWriter("agency:offer-pipeline");
@@ -283,6 +289,14 @@ export interface WorkOfferInput {
 	gateFromStage?: string | null;
 	gateToStage?: string | null;
 	gateRoleSource?: string | null;
+	/**
+	 * P3310 AC-3: explicit operator/proposal overrides. When set to a legal
+	 * value, the difficulty assessor honors these over its heuristic so a
+	 * proposal can pin a tier or task_class. Left undefined for the normal
+	 * heuristic path.
+	 */
+	tierOverride?: CapabilityTier | null;
+	taskClassOverride?: TaskClass | null;
 }
 
 export interface WorkOfferResult {
@@ -808,6 +822,48 @@ async function postWorkOfferImpl(
 		version: dispatchVersion,
 	});
 
+	// P3310 AC-1: run the deterministic difficulty assessor at mint time and
+	// persist difficulty_score + required_capability_tier + task_class on the
+	// squad_dispatch row. Signals: AC count (blast radius proxy) and prior
+	// failed/expired dispatches for this (proposal, role) tuple (rework_count).
+	// Best-effort: a signal-fetch failure must never block dispatch — fall back
+	// to zeroed signals so the assessor still emits a (low) tier.
+	let assessAcCount = 0;
+	let assessReworkCount = 0;
+	try {
+		const { rows: sig } = await queryFn<{ ac_count: number; rework_count: number }>(
+			`SELECT
+			    (SELECT count(*)::int
+			       FROM roadmap_proposal.proposal_acceptance_criteria
+			      WHERE proposal_id = $1) AS ac_count,
+			    (SELECT count(*)::int
+			       FROM roadmap_workforce.squad_dispatch
+			      WHERE proposal_id = $1
+			        AND dispatch_role = $2
+			        AND dispatch_status IN ('failed', 'cancelled', 'completed')) AS rework_count`,
+			[input.proposalId, input.role],
+		);
+		assessAcCount = sig[0]?.ac_count ?? 0;
+		assessReworkCount = sig[0]?.rework_count ?? 0;
+	} catch {
+		// swallow — assessment signals are advisory, not load-bearing for dispatch
+	}
+
+	const assessment = assessDifficulty({
+		role: input.role,
+		task: input.task,
+		acCount: assessAcCount,
+		reworkCount: assessReworkCount,
+		tierOverride: input.tierOverride ?? null,
+		taskClassOverride: isTaskClass(input.taskClassOverride)
+			? input.taskClassOverride
+			: null,
+	});
+	// Mirror into metadata for observability / trace correlation.
+	metadata.difficulty_score = assessment.difficultyScore;
+	metadata.required_capability_tier = assessment.requiredCapabilityTier;
+	metadata.task_class = assessment.taskClass;
+
 	const { rows } = await queryFn<{
 		id: number;
 		attempt_count: number;
@@ -816,13 +872,18 @@ async function postWorkOfferImpl(
 		`INSERT INTO roadmap_workforce.squad_dispatch
 		   (proposal_id, project_id, squad_name, dispatch_role, dispatch_status,
 		    offer_status, agent_identity, required_capabilities, metadata,
-		    workflow_state, idempotency_key, dispatch_version, attempt_count)
+		    workflow_state, idempotency_key, dispatch_version, attempt_count,
+		    difficulty_score, required_capability_tier, task_class)
 		 VALUES ($1, $2, $3, $4, 'open', 'open', NULL, $5::jsonb, $6::jsonb,
-		         $7, $8, $9, 1)
+		         $7, $8, $9, 1,
+		         $10::double precision, $11, $12)
 		 ON CONFLICT (idempotency_key)
 		   WHERE dispatch_status IN ('open', 'assigned', 'active')
 		 DO UPDATE SET
 		   attempt_count = squad_dispatch.attempt_count + 1,
+		   difficulty_score = EXCLUDED.difficulty_score,
+		   required_capability_tier = EXCLUDED.required_capability_tier,
+		   task_class = COALESCE(EXCLUDED.task_class, squad_dispatch.task_class),
 		   metadata = squad_dispatch.metadata
 		            || jsonb_build_object(
 		                 'last_replay_at', to_jsonb(now()),
@@ -841,6 +902,9 @@ async function postWorkOfferImpl(
 			ctx.status ?? null,
 			idempotencyKey,
 			dispatchVersion,
+			assessment.difficultyScore,
+			assessment.requiredCapabilityTier,
+			assessment.taskClass,
 		],
 	);
 
