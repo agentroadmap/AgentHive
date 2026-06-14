@@ -15,10 +15,6 @@ import type { CallToolResult } from "../../types.ts";
 import { RfcStates, Maturity } from "../../../../core/workflow/state-names.ts";
 import { validateLease, formatValidationError } from "../../../../core/proposal/proposal-integrity.ts";
 import {
-	isRegisteredAgency,
-	hasActiveLiaisonSession,
-} from "../../../../infra/agency/liaison-service.ts";
-import {
 	detectConflicts,
 	type ConflictEntry,
 } from "../../../../core/proposal/directive-conflict-detector.ts";
@@ -880,23 +876,16 @@ export class PgProposalHandlers {
 				[agentArg, "llm", "developer"],
 			);
 
-			// AC-7: liaison is the sole prop_claim gateway for registered agencies.
-			// If the claiming agent identity matches a registered agency, it must have
-			// an active liaison session — otherwise the claim is rejected.
-			const agencyRegistered = await isRegisteredAgency(agentArg);
-			if (agencyRegistered) {
-				const hasSession = await hasActiveLiaisonSession(agentArg);
-				if (!hasSession) {
-					return {
-						content: [
-							{
-								type: "text",
-								text: `Agency '${agentArg}' is registered but has no active liaison session. Dispatch is handled by the universal agenthive-a2a-host floor (DB-driven discovery) — there is no per-agency service to start. If the agency needs an AI liaison to claim/coordinate, cold-wake it; the a2a-host floor attaches the LISTEN session and the offer_dispatch hub.`,
-							},
-						],
-					};
-				}
-			}
+			// P1438 AC-19 (C6 — smart AI-agent liaison): the prop_claim path no longer
+			// requires a registered agency to have an open agency_liaison_session row.
+			// V3's liaison is a cold-wakeable AI session, NOT a per-agency service that
+			// opens a session — so gating claim on session presence locked out exactly
+			// the cold-wake model the design mandates. Availability is now revealed by a
+			// successful claim (emergent presence): the durable gates are registry
+			// existence (the agent_registry upsert above) and lease availability (the
+			// lease/oversized checks below + fn_claim_work_offer's atomic ceiling). The
+			// retired AC-7 "liaison is the sole prop_claim gateway" check used to live
+			// here. See P1438 AC-15/16 (wake-is-not-presence) and P463 AC-7 (superseded).
 
 			// P671 AC-7: Check if proposal is oversized; only split-architect may claim it
 			const proposalCheckResult = await query<{ oversized: boolean }>(
