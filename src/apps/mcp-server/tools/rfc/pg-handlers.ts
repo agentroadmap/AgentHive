@@ -1461,11 +1461,20 @@ export async function recordGateDecision(args: {
 		// recorded a row but never advanced, contradicting the tool description.
 		// Resolve via the SAME workflow source the prop_transition validator uses
 		// (the `workflows` table + workflow_templates), so the two paths agree
-		// even for proposals whose proposal.workflow_name has drifted. Pick the
-		// single forward transition for this from_state (allowed_reasons that
-		// represent a gate advance, never the backward iterate/revision/reject
-		// ones). Falls back to from_state (no-op) for non-advance decisions or
-		// when no forward transition exists.
+		// even for proposals whose proposal.workflow_name has drifted.
+		//
+		// Pick the single FORWARD transition for this from_state. We identify it by
+		// EXCLUDING the backward reasons (iterate / revision / reject / close ...)
+		// rather than allow-listing forward ones. Allow-listing forward reasons was
+		// a latent bug: every workflow has its own forward vocabulary
+		// (Architecture RFC uses {design_complete,ready_for_review} /
+		// {gate_approved,decision_made,deployment_ready}; Code Review uses
+		// {merge,mature}/{approve,quorum_met}; Governance uses {approve}/{mature,complete}),
+		// none of which overlapped the old hard-coded list — so gate_decision
+		// silently no-op'd for every non-"Standard RFC" workflow. The backward
+		// vocabulary, by contrast, is small and stable across all workflows.
+		// Falls back to from_state (no-op) for non-advance decisions, terminal
+		// states with no forward edge, or genuine ambiguity.
 		let toState = fromState;
 		if (args.decision === "advance") {
 			const { rows: fwd } = await query<{ to_state: string }>(
@@ -1476,7 +1485,11 @@ export async function recordGateDecision(args: {
 				     ON pvt.workflow_name = wt.name
 				  WHERE w.proposal_id = $1
 				    AND LOWER(pvt.from_state) = LOWER($2)
-				    AND pvt.allowed_reasons && ARRAY['mature','decision','deploy','accepted','submit','approve','advance','quorum_met']::text[]
+				    AND NOT (pvt.allowed_reasons && ARRAY[
+				          'iterate','iteration','revision','revise','changes_requested',
+				          'return','reject','rejected','block','blocked','concerns_raised',
+				          'close','discard','stale','send_back'
+				        ]::text[])
 				  ORDER BY pvt.to_state
 				  LIMIT 1`,
 				[proposalId, fromState],
