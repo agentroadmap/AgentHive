@@ -1415,7 +1415,9 @@ export async function getValidTransitions(args: {
 // ─── Gate Decision Log ──────────────────────────────────────────────────────
 
 export async function recordGateDecision(args: {
-	proposal_id: string;
+	proposal_id?: string;
+	id?: string;
+	display_id?: string;
 	gate: string;
 	decision: string;
 	rationale?: string;
@@ -1424,6 +1426,16 @@ export async function recordGateDecision(args: {
 	agent_run_id?: string;
 	ac_verification?: Record<string, unknown>;
 }): Promise<CallToolResult> {
+	// Accept id / display_id / proposal_id as aliases (same convention as other handlers).
+	const rawId = args.id ?? args.display_id ?? args.proposal_id;
+	if (!rawId) {
+		return {
+			content: [{
+				type: "text",
+				text: "missing proposal identifier — pass proposal_id, id, or display_id",
+			}],
+		};
+	}
 	const VALID_DECISIONS = ["advance", "hold", "reject", "waive", "escalate"];
 	if (!VALID_DECISIONS.includes(args.decision)) {
 		return errorResult(
@@ -1432,10 +1444,10 @@ export async function recordGateDecision(args: {
 		);
 	}
 	try {
-		const proposalId = await resolveProposalId(args.proposal_id);
+		const proposalId = await resolveProposalId(rawId);
 		if (proposalId === null) {
 			return {
-				content: [{ type: "text", text: `Proposal ${args.proposal_id} not found.` }],
+				content: [{ type: "text", text: `Proposal ${rawId} not found.` }],
 			};
 		}
 
@@ -1448,54 +1460,40 @@ export async function recordGateDecision(args: {
 			[proposalId],
 		);
 		if (!propRows.length) {
-			return { content: [{ type: "text", text: `Proposal ${args.proposal_id} not found.` }] };
+			return { content: [{ type: "text", text: `Proposal ${rawId} not found.` }] };
 		}
 		const { status: fromState, maturity } = propRows[0];
 
-		// Resolve the forward gate target so the fn_apply_gate_advance trigger
-		// actually advances status on an 'advance' decision. This handler used to
-		// write to_state = from_state, which made the trigger's idempotency check
-		// (status == to_state -> RETURN NULL) a permanent no-op: gate_decision
-		// recorded a row but never advanced, contradicting the tool description.
-		// Resolve the forward gate target via the proposal's ACTUAL workflow
-		// (workflows table → workflow_templates → proposal_valid_transitions).
-		// Order by workflow_stages.stage_order so we pick the NEXT sequential
-		// stage, never a terminal state that happens to sort alphabetically first
-		// (e.g. COMPLETE < DEVELOP). Filter to forward-only by requiring the
-		// to_state stage_order to be strictly greater than the from_state order.
-		// AC-2: return an explicit error if no forward transition exists — do NOT
-		// silently write to_state = from_state (which is an undetected no-op).
+		// Resolve the forward gate target via stage_order+1 on the proposal's
+		// assigned workflow template. This is deterministic: the next stage is always
+		// ws_curr.stage_order + 1, regardless of allowed_reasons vocabulary. The old
+		// approach (joining proposal_valid_transitions + backward-reason filter) was
+		// fragile — any future forward transition whose allowed_reasons overlapped the
+		// backward list would silently pick the wrong target.
+		// Falls back to from_state (no-op) when: proposal has no workflows row,
+		// current status is unrecognised in the template (drift), or current status is
+		// the terminal stage (no next stage_order row). AC-8: log a warning instead of
+		// returning an error, so the gate_decision_log row is still written.
 		let toState = fromState;
+		let noNextStageWarning = "";
 		if (args.decision === "advance") {
 			const { rows: fwd } = await query<{ to_state: string }>(
-				`SELECT pvt.to_state
+				`SELECT UPPER(ws_next.stage_name) AS to_state
 				   FROM roadmap.workflows w
-				   JOIN roadmap.workflow_templates wt ON wt.id = w.template_id
-				   JOIN roadmap_proposal.proposal_valid_transitions pvt
-				     ON pvt.workflow_name = wt.name
-				   JOIN roadmap.workflow_stages ws_to
-				     ON ws_to.template_id = wt.id
-				    AND LOWER(ws_to.stage_name) = LOWER(pvt.to_state)
-				   JOIN roadmap.workflow_stages ws_from
-				     ON ws_from.template_id = wt.id
-				    AND LOWER(ws_from.stage_name) = LOWER($2)
+				   JOIN roadmap.workflow_stages ws_curr
+				     ON ws_curr.template_id = w.template_id
+				    AND UPPER(ws_curr.stage_name) = UPPER($2)
+				   JOIN roadmap.workflow_stages ws_next
+				     ON ws_next.template_id = w.template_id
+				    AND ws_next.stage_order = ws_curr.stage_order + 1
 				  WHERE w.proposal_id = $1
-				    AND LOWER(pvt.from_state) = LOWER($2)
-				    AND pvt.allowed_reasons && ARRAY['mature','decision','deploy','accepted','submit','approve','advance','quorum_met']::text[]
-				    AND ws_to.stage_order > ws_from.stage_order
-				  ORDER BY ws_to.stage_order ASC
 				  LIMIT 1`,
 				[proposalId, fromState],
 			);
 			if (fwd.length) {
 				toState = fwd[0].to_state;
 			} else {
-				return {
-					content: [{
-						type: "text",
-						text: `❌ gate_decision advance failed for proposal ${args.proposal_id}: no forward transition found from '${fromState}' in the proposal's workflow. Check that proposal_valid_transitions and workflow_stages are populated for this workflow, and that the proposal's workflows.template_id is correct (may be a P2756 workflow drift — run the drift audit in migration 272).`,
-					}],
-				};
+				noNextStageWarning = ` ⚠️ No next stage found for proposal ${rawId} at '${fromState}' — no workflows row, unrecognised stage, or terminal stage. Gate decision recorded as no-op (from_state = to_state).`;
 			}
 		}
 
@@ -1513,7 +1511,7 @@ export async function recordGateDecision(args: {
 				return {
 					content: [{
 						type: "text",
-						text: `✅ Gate decision for ${args.proposal_id} (agent_run_id=${args.agent_run_id}) already recorded (#${existing[0].id}) — skipped duplicate.`,
+						text: `✅ Gate decision for ${rawId} (agent_run_id=${args.agent_run_id}) already recorded (#${existing[0].id}) — skipped duplicate.`,
 					}],
 				};
 			}
@@ -1554,14 +1552,14 @@ export async function recordGateDecision(args: {
 			const newState = after[0]?.status ?? fromState;
 			advanceNote =
 				newState.toUpperCase() === toState.toUpperCase()
-					? ` → status advanced ${fromState} → ${newState}.`
+					? ` Atomic: status ADVANCED ${fromState} → ${newState}.`
 					: ` (status NOT advanced — still ${newState}; expected ${fromState} → ${toState}. Check for state drift.)`;
 		}
 
 		return {
 			content: [{
 				type: "text",
-				text: `✅ Gate decision recorded: id=${rows[0].id} proposal=${args.proposal_id} gate=${args.gate} decision=${args.decision}${advanceNote}`,
+				text: `✅ Gate decision recorded: id=${rows[0].id} proposal=${rawId} gate=${args.gate} decision=${args.decision}${advanceNote}${noNextStageWarning}`,
 			}],
 		};
 	} catch (err) {

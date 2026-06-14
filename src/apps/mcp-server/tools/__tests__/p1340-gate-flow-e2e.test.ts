@@ -44,13 +44,18 @@ describe("P1340: MCP gate-flow ergonomics — e2e", () => {
 		transitionHint: 999118,
 		// Test 8: recordGateDecision identifiers (999119)
 		recordGateDecisionId: 999119,
+		// P3325 tests (999120-999121)
+		architectureRfcGate: 999120,
+		noWorkflowFallback: 999121,
 	};
 
 	// Test agencies
 	const george = "george";
 	const claude = "claude";
 	const systemIdentity = "system";
-	const orchestratorId = "AGENTHIVE_ORCHESTRATOR_IDENTITY";
+	// fn_canonicalize_identity lowercases, so the canonical form of the orchestrator
+	// env var name is lowercase (ck_agent_identity_canonical constraint requires this).
+	const orchestratorId = process.env.AGENTHIVE_ORCHESTRATOR_IDENTITY ?? "agenthive/agency-orchestrator";
 
 	let handlers: PgProposalHandlers;
 
@@ -694,6 +699,117 @@ describe("P1340: MCP gate-flow ergonomics — e2e", () => {
 
 			expect(result.content[0].text).toContain("missing proposal identifier");
 			expect(result.content[0].text).toContain("proposal_id");
+		});
+	});
+
+	// ─── P3325 AC-5: Architecture RFC REVIEW→COMPLETE ───────────────────
+
+	describe("P3325 AC-5: Architecture RFC gate_decision advance (REVIEW→COMPLETE)", () => {
+		it("advance on Architecture RFC REVIEW-stage proposal transitions to COMPLETE, not DEVELOP", async () => {
+			const pid = testProposalIds.architectureRfcGate;
+
+			// Create architecture proposal at REVIEW stage
+			await query(
+				`INSERT INTO roadmap_proposal.proposal
+				   (id, display_id, type, status, maturity, title, audit, created_at, modified_at)
+				 OVERRIDING SYSTEM VALUE
+				 VALUES ($1, $2, 'architecture', 'REVIEW', 'mature', $3, '[]'::jsonb, now(), now())
+				 ON CONFLICT (id) DO UPDATE SET status='REVIEW', maturity='mature', type='architecture'
+				 RETURNING id`,
+				[pid, `P${pid}`, `P3325 Architecture RFC test ${pid}`],
+			);
+
+			// Wire up a workflow row pointing to Architecture RFC template
+			const { rows: tplRows } = await query<{ id: number }>(
+				`SELECT id FROM roadmap.workflow_templates WHERE name = 'Architecture RFC' LIMIT 1`,
+			);
+			if (!tplRows.length) {
+				// Skip if Architecture RFC template not loaded in this environment
+				console.warn("Architecture RFC template not found — skipping AC-5");
+				return;
+			}
+			const templateId = tplRows[0].id;
+
+			await query(
+				`INSERT INTO roadmap.workflows
+				   (proposal_id, template_id, current_stage)
+				 VALUES ($1, $2, 'REVIEW')
+				 ON CONFLICT (proposal_id) DO UPDATE SET template_id=$2, current_stage='REVIEW'`,
+				[pid, templateId],
+			);
+
+			await createActiveLease(pid, george);
+
+			const result = await recordGateDecision({
+				proposal_id: String(pid),
+				gate: "D2",
+				decision: "advance",
+				rationale: "Architecture accepted",
+				decided_by: george,
+			});
+
+			// Should advance to COMPLETE (Architecture RFC: Draft→Review→Complete, no DEVELOP)
+			expect(result.content[0].text).toContain("ADVANCED");
+			expect(result.content[0].text).toContain("REVIEW → COMPLETE");
+
+			const { rows } = await query<{ status: string }>(
+				`SELECT status FROM roadmap_proposal.proposal WHERE id = $1`,
+				[pid],
+			);
+			expect(rows[0].status).toBe("COMPLETE");
+
+			// Verify gate_decision_log records correct to_state
+			const { rows: logRows } = await query<{ from_state: string; to_state: string }>(
+				`SELECT from_state, to_state FROM roadmap_proposal.gate_decision_log
+				  WHERE proposal_id = $1 ORDER BY id DESC LIMIT 1`,
+				[pid],
+			);
+			expect(logRows[0].from_state).toBe("REVIEW");
+			expect(logRows[0].to_state).toBe("COMPLETE");
+		});
+	});
+
+	// ─── P3325 AC-8: No workflows row — graceful fallback ───────────────
+
+	describe("P3325 AC-8: gate_decision advance with no workflows row falls back gracefully", () => {
+		it("proposal with no workflows row records decision as no-op with warning, does not throw", async () => {
+			const pid = testProposalIds.noWorkflowFallback;
+
+			// Create a feature proposal at REVIEW without any workflows row
+			await query(
+				`INSERT INTO roadmap_proposal.proposal
+				   (id, display_id, type, status, maturity, title, audit, created_at, modified_at)
+				 OVERRIDING SYSTEM VALUE
+				 VALUES ($1, $2, 'feature', 'REVIEW', 'mature', $3, '[]'::jsonb, now(), now())
+				 ON CONFLICT (id) DO UPDATE SET status='REVIEW', maturity='mature'
+				 RETURNING id`,
+				[pid, `P${pid}`, `P3325 no-workflow fallback test ${pid}`],
+			);
+
+			// Ensure no workflows row for this proposal
+			await query(`DELETE FROM roadmap.workflows WHERE proposal_id = $1`, [pid]);
+
+			await createActiveLease(pid, george);
+
+			const result = await recordGateDecision({
+				proposal_id: String(pid),
+				gate: "D2",
+				decision: "advance",
+				rationale: "Attempting advance without workflow assignment",
+				decided_by: george,
+			});
+
+			// Must not return an error — gate_decision_log row should still be written
+			expect(result.content[0].text).toContain("Gate decision recorded");
+			// Warning should appear in the output
+			expect(result.content[0].text).toContain("No next stage found");
+
+			// Status must remain REVIEW (no-op advance)
+			const { rows } = await query<{ status: string }>(
+				`SELECT status FROM roadmap_proposal.proposal WHERE id = $1`,
+				[pid],
+			);
+			expect(rows[0].status).toBe("REVIEW");
 		});
 	});
 });
