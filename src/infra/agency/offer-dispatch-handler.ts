@@ -44,6 +44,7 @@ import {
 	recordProviderHardLimit,
 } from "./subscription-policy.ts";
 import { recordSpawnUsage } from "./record-spawn-usage.ts";
+import { recordReliabilityOutcome } from "./record-reliability-outcome.ts";
 import { classifyExit } from "../../core/orchestration/agent-spawner.ts";
 import { incrementSpawnFailure, THROTTLE_THRESHOLD } from "../../core/orchestration/resolvers/agency-resolver.ts";
 import { validateProposal } from "../../core/orchestration/d4-validator.ts";
@@ -784,6 +785,25 @@ async function runSpawn(args: {
 		}).catch((err) => {
 			logger.warn(
 				`[OfferDispatchHandler] ${agencyId}: recordSpawnUsage failed for run ${result.agentRunId}:`,
+				err instanceof Error ? err.message : err,
+			);
+		});
+
+		// P3313 AC-2: close the adaptive-matching feedback loop. Write this run's
+		// outcome back into the P3311 reliability ledger so the next match (P3312)
+		// sees an updated score. A degenerate/no-artifact "success" is recorded as
+		// rework; a clean failure as hard_failure. Non-fatal — never blocks dispatch.
+		void recordReliabilityOutcome({
+			agentRunId: result.agentRunId,
+			proposalId,
+			agencyIdentity: agencyId,
+			modelUsed: payload.route_hint ?? null,
+			routeId: null, // route scope is reconciled by the periodic batch refresh
+			status: succeeded ? "completed" : "failed",
+			degenerate: degenerateReason !== null || evidenceFailureReason !== null,
+		}).catch((err) => {
+			logger.warn(
+				`[OfferDispatchHandler] ${agencyId}: recordReliabilityOutcome failed for run ${result.agentRunId}:`,
 				err instanceof Error ? err.message : err,
 			);
 		});
