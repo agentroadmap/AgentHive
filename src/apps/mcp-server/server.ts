@@ -1064,6 +1064,8 @@ export async function createMcpServer(
 		type SubscribeArgs = Parameters<typeof msg.subscribe>[0];
 		type ListSubscriptionsArgs = Parameters<typeof msg.listSubscriptions>[0];
 		server.addTool({
+			// P1114 AC-6: messaging write (peer-to-peer) — MEDIUM tier.
+			clearance: { min_tier: "known", scope: "peer_write" },
 			name: "msg_send",
 			description:
 				"Send message via Postgres message_ledger. P159: Optional _signature for Ed25519 identity verification (soft-fail mode by default).",

@@ -20,6 +20,21 @@ import {
 export function registerTestingTools(server: McpServer): void {
 	const handlers = new TestHandlers(server);
 
+	// P1114 AC-7: drift-guard self-test hook. When P1114_DRIFT_PROBE=1, register a
+	// tool with NO clearance field so scripts/clearance-drift.ts can be proven to
+	// catch a newly-added undeclared tool. Off by default — never registered in
+	// production. (Kept here so the probe flows through the SAME registry the
+	// drift guard introspects.)
+	if (process.env.P1114_DRIFT_PROBE === "1") {
+		server.addTool({
+			name: "p1114_drift_probe_undeclared",
+			description:
+				"P1114 drift-guard probe: deliberately registered WITHOUT clearance.",
+			inputSchema: { type: "object", properties: {} },
+			handler: async () => ({ content: [{ type: "text", text: "probe" }] }),
+		});
+	}
+
 	const testDiscoverTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "test_discover",

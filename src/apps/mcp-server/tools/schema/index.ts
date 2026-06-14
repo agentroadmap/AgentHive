@@ -46,6 +46,10 @@ export function registerSchemaTools(server: McpServer): void {
 	});
 
 	server.addTool({
+		// P1114 AC-6: DDL / schema-mutation surface (the `apply_migration`-class
+		// tool of this codebase — executes migration SQL, albeit in a rolled-back
+		// SAVEPOINT) — HIGHEST tier, schema_write scope.
+		clearance: { min_tier: "authority", scope: "schema_write" },
 		name: "schema_lint_migration",
 		description:
 			"Validate SQL migration by executing it inside a SAVEPOINT and ROLLBACKing. Catches fabrication patterns: non-existent columns, invalid CHECK constraint values, forward-references, and JSDoc comment blocks. Returns {valid: bool, errors: string[], warnings: string[]}.",

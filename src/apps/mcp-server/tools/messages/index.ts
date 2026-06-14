@@ -67,6 +67,9 @@ export function registerMessageTools(server: McpServer): void {
 
 	const sendTool: McpToolHandler = createSimpleValidatedTool(
 		{
+			// P1114 AC-6: messaging write (peer-to-peer) — MEDIUM tier. Kept in sync
+			// with the Postgres-mode inline msg_send registration in server.ts.
+			clearance: { min_tier: "known", scope: "peer_write" },
 			name: "msg_send",
 			description:
 				"Send a message to the Postgres message_ledger. ACL enforced on send (roadmap.message_acl); trust gate enforced for restricted/blocked senders. P1105 AC-27: user/* agents require a valid bearer token in the authorization parameter. NOTE: P834 HMAC dispatch-gate verification of `provider_sig` is DESIGNED but NOT ENFORCED today — the column is accepted and stored verbatim, sig_verified stays at default 'pending', and the 5-minute replay window is not checked. Do not rely on this surface for authentication; it is delivery-only. Tracking via P834 follow-up; see drift discussion on P834.",
