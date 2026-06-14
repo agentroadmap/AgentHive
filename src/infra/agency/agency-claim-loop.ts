@@ -43,6 +43,7 @@ import {
 } from "./recovery-action.ts";
 import { evaluateCostQuota } from "./cost-quota-admission.ts";
 import { incrementDebt, resetDebt } from "./fair-share-debt.ts";
+import { hasActiveOverride } from "./quota-override.ts";
 
 export type QueryFn = typeof defaultQuery;
 
@@ -240,12 +241,22 @@ export class AgencyClaimLoop {
 			// P465: subscription-aware claim policy — refuse new claims that would
 			// breach the safety margin. On refusal, self-declare throttled so the
 			// orchestrator re-routes any pending offers to an unthrottled agency.
+			// P3000 AC-10d: check for an operator-granted quota override FIRST; if
+			// one is found (and consumed if single_use), skip the subscription check.
 			const sqlExec = (sql: string, params?: unknown[]) => this.query(sql, params);
-			const policyResult = await evaluateSubscriptionPolicy(
-				this.agencyIdentity,
-				sqlExec,
-				this.logger,
-			);
+			const quotaOverride = await hasActiveOverride(this.agencyIdentity, sqlExec as unknown as Parameters<typeof hasActiveOverride>[1]).catch(() => null);
+			if (quotaOverride) {
+				this.logger.log(
+					`[AgencyClaim:${this.agencyIdentity}] P3000 quota override active (id=${quotaOverride.id}, grantedBy=${quotaOverride.grantedBy}, singleUse=${quotaOverride.singleUse}) — skipping subscription policy`,
+				);
+			}
+			const policyResult = quotaOverride
+				? { allowed: true, reason: null, resets_at: null, tightest_window: null }
+				: await evaluateSubscriptionPolicy(
+					this.agencyIdentity,
+					sqlExec,
+					this.logger,
+				);
 			if (!policyResult.allowed) {
 				this.logger.warn(
 					`[AgencyClaim:${this.agencyIdentity}] subscription policy refused claim: ${policyResult.reason}`,
@@ -292,7 +303,10 @@ export class AgencyClaimLoop {
 			// subscription policy + capacity gates so token-quota refusals are caught
 			// only once those cheaper checks pass. On refusal, bump the starvation
 			// debt so the fair-share recovery path can grant reserved headroom later.
-			const costResult = await evaluateCostQuota(this.agencyIdentity, 0, sqlExec);
+			// Skip when an operator quota override is active (AC-10d).
+			const costResult = quotaOverride
+				? { allowed: true, reason: null, resets_at: null, reserved_headroom_used: false }
+				: await evaluateCostQuota(this.agencyIdentity, 0, sqlExec);
 			if (!costResult.allowed) {
 				this.logger.warn(
 					`[AgencyClaim:${this.agencyIdentity}] cost quota refused claim: ${costResult.reason}`,
