@@ -42,8 +42,28 @@ import {
 	declareThrottle,
 } from "./subscription-policy.ts";
 import { recordSpawnUsage } from "./record-spawn-usage.ts";
+import { evaluateCostQuota } from "./cost-quota-admission.ts";
+import { incrementDebt, resetDebt } from "./fair-share-debt.ts";
+import {
+	incrementSpawnFailure,
+	THROTTLE_THRESHOLD,
+} from "../../core/orchestration/resolvers/agency-resolver.ts";
 
 const obs = new ObservabilityWriter("agency:offer-dispatch-handler");
+
+function classifySpawnErrorClass(err: Error): "auth" | "spawn" | "timeout" | "unknown" {
+	const msg = err.message.toLowerCase();
+	if (msg.includes("auth") || msg.includes("permission") || msg.includes("unauthorized") || msg.includes("forbidden")) {
+		return "auth";
+	}
+	if (msg.includes("timeout") || msg.includes("killed") || msg.includes("sigterm")) {
+		return "timeout";
+	}
+	if (msg.includes("spawn") || msg.includes("enoent") || msg.includes("eacces")) {
+		return "spawn";
+	}
+	return "unknown";
+}
 
 export type SqlExec = (sql: string, params?: unknown[]) => Promise<unknown>;
 
@@ -286,6 +306,52 @@ export async function handleOfferDispatch(
 		return;
 	}
 
+	// P3000: cost-quota admission control — checked at dispatch time to catch
+	// concurrent claims that slipped past the claim-time check. Returns the
+	// offer if over-budget so another agent (or the same agent after window reset)
+	// can claim it. Reserved-headroom dispatch emits a metric and proceeds.
+	const costQuotaResult = await evaluateCostQuota(agencyId, 0, exec);
+	if (!costQuotaResult.allowed) {
+		logger.warn(
+			`[OfferDispatchHandler] ${agencyId}: cost-quota refused offer=${payload.offer_id}: ${costQuotaResult.reason}`,
+		);
+		obs.writeQuotaMetric({
+			metricName: "quota:denied_dispatch",
+			agentIdentity: agencyId,
+			attributes: {
+				offer_id: payload.offer_id,
+				reason: costQuotaResult.reason,
+				resets_at: costQuotaResult.resets_at?.toISOString() ?? null,
+			},
+		});
+		void incrementDebt(agencyId, exec);
+		await exec(
+			`SELECT roadmap_workforce.fn_return_work_offer($1, $2, $3, $4)`,
+			[
+				payload.dispatch_id,
+				agencyId,
+				payload.claim_token,
+				`cost_quota_refused:${costQuotaResult.reason}`,
+			],
+		).catch((err) => {
+			logger.error(
+				`[OfferDispatchHandler] ${agencyId}: fn_return_work_offer failed on cost-quota-refuse:`,
+				err instanceof Error ? err.message : err,
+			);
+		});
+		return;
+	}
+	if (costQuotaResult.reserved_headroom_used) {
+		logger.warn(
+			`[OfferDispatchHandler] ${agencyId}: starvation recovery — reserved-headroom slot granted for offer=${payload.offer_id}`,
+		);
+		obs.writeQuotaMetric({
+			metricName: "quota:reserved_headroom_granted",
+			agentIdentity: agencyId,
+			attributes: { offer_id: payload.offer_id, reason: costQuotaResult.reason },
+		});
+	}
+
 	// P914: prefer the orchestrator-selected worktree from the payload;
 	// fall back to the agency's local resolver only when the dispatcher
 	// didn't supply one (older clients, test fixtures).
@@ -493,6 +559,16 @@ async function runSpawn(args: {
 		});
 	} catch (err) {
 		spawnError = err instanceof Error ? err : new Error(String(err));
+
+		// P1360 Change 1: Wire spawn failure into agency throttle counters so
+		// resolveAgency's ORDER BY throttle_count ASC de-prioritizes repeat failures.
+		const errorClass = classifySpawnErrorClass(spawnError);
+		void incrementSpawnFailure(agencyId, THROTTLE_THRESHOLD, errorClass).catch((bumpErr) => {
+			logger.warn(
+				`[OfferDispatchHandler] ${agencyId}: failed to bump throttle counter for offer=${payload.offer_id}: ${bumpErr instanceof Error ? bumpErr.message : bumpErr}`,
+			);
+		});
+
 		// P914: surface the spawn failure cause so operators can diagnose
 		// without grepping; previously the only signal was "exit=n/a".
 		logger.error(
@@ -640,6 +716,8 @@ async function runSpawn(args: {
 		logger.log(
 			`[OfferDispatchHandler] ${agencyId}: offer=${payload.offer_id} ${status} (exit=${result?.exitCode ?? "n/a"})`,
 		);
+		// P3000: successful delivery — reset starvation debt counter.
+		if (succeeded) void resetDebt(agencyId, exec);
 	} catch (completionErr) {
 		logger.error(
 			`[OfferDispatchHandler] ${agencyId}: fn_complete_work_offer failed for offer ${payload.offer_id} — lease will time out and reaper will requeue:`,

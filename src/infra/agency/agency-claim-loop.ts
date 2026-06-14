@@ -35,6 +35,8 @@ import {
 	evaluateSubscriptionPolicy,
 	declareThrottle,
 } from "./subscription-policy.ts";
+import { evaluateCostQuota } from "./cost-quota-admission.ts";
+import { incrementDebt, resetDebt } from "./fair-share-debt.ts";
 
 export type QueryFn = typeof defaultQuery;
 
@@ -256,6 +258,17 @@ export class AgencyClaimLoop {
 				return null;
 			}
 
+			// P3000: cost-quota admission control at claim time. Runs after
+			// subscription policy so token-quota refusals are caught first.
+			const costResult = await evaluateCostQuota(this.agencyIdentity, 0, sqlExec);
+			if (!costResult.allowed) {
+				this.logger.warn(
+					`[AgencyClaim:${this.agencyIdentity}] cost quota refused claim: ${costResult.reason}`,
+				);
+				void incrementDebt(this.agencyIdentity, sqlExec);
+				return null;
+			}
+
 			const { rows } = await this.query<ClaimRow>(
 				`SELECT dispatch_id, proposal_id, squad_name, dispatch_role,
 				        claim_token, claim_expires_at, offer_version, metadata
@@ -270,6 +283,8 @@ export class AgencyClaimLoop {
 			);
 			const row = rows[0];
 			if (!row) return null;
+			// P3000: successful claim — reset starvation debt.
+			void resetDebt(this.agencyIdentity, sqlExec);
 			return {
 				offerId: String(row.dispatch_id),
 				dispatchId: Number(row.dispatch_id),
