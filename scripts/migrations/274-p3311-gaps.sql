@@ -40,3 +40,14 @@ WHERE  sd.proposal_id = ar.proposal_id
   AND  ar.task_class  IS NULL;
 
 COMMIT;
+
+-- ---------------------------------------------------------------------------
+-- 3. AC-7a alias: fn_rebuild_reliability_scores delegates to fn_p3311_rollup_reliability
+--    (AC-7a specifies this name; the implementation lives in fn_p3311_rollup_reliability).
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION roadmap_workforce.fn_rebuild_reliability_scores(
+  p_window_days integer DEFAULT 30
+) RETURNS bigint
+LANGUAGE sql AS $$
+  SELECT roadmap_workforce.fn_p3311_rollup_reliability(p_window_days);
+$$;
