@@ -50,6 +50,13 @@ export interface TaskDispatcherHelpers {
 		timeoutMs: number;
 		log: string;
 	}) => Promise<void>;
+	/**
+	 * P2326 AC-10: count non-terminal squad_dispatch rows bucketed under the
+	 * sentinel proposal — the ad-hoc inflight gauge. Optional: when omitted the
+	 * handler falls back to the module-level `query` (live runtime). Tests inject
+	 * this to exercise the cap without touching live tables.
+	 */
+	countAdHocInflight?: (sentinelProposalId: number) => Promise<number>;
 }
 
 /**
@@ -300,6 +307,39 @@ function adHocProposalId(): number | null {
 }
 
 /**
+ * P2326 AC-10: maximum concurrent ad-hoc (sentinel-bucketed) workers. Read at
+ * call time so live config changes and tests take effect without a reload.
+ * Default 3. A non-positive / non-integer value falls back to the default
+ * (the cap is a safety valve; it must never be silently disabled by a typo).
+ */
+function adHocMaxInflight(): number {
+	const raw = process.env.AGENTHIVE_ADHOC_MAX_INFLIGHT;
+	if (typeof raw !== "string" || raw.trim() === "") return 3;
+	const n = Number(raw);
+	return Number.isInteger(n) && n > 0 ? n : 3;
+}
+
+/**
+ * P2326 AC-10: count non-terminal squad_dispatch rows under the sentinel
+ * proposal. Terminal offer_status set is ('delivered','expired','failed') per
+ * the live squad_dispatch_offer_status_check constraint (open / claimed /
+ * active / delivered / expired / failed). Live-runtime fallback used when the
+ * caller does not inject `countAdHocInflight`.
+ */
+async function countAdHocInflightLive(
+	sentinelProposalId: number,
+): Promise<number> {
+	const { rows } = await query<{ inflight: string }>(
+		`SELECT count(*)::text AS inflight
+		   FROM roadmap_workforce.squad_dispatch
+		  WHERE proposal_id = $1
+		    AND offer_status NOT IN ('delivered', 'expired', 'failed')`,
+		[sentinelProposalId],
+	);
+	return Number(rows[0]?.inflight ?? "0");
+}
+
+/**
  * Adapt a no-proposal task_request for the offer-dispatch bridge, injecting the
  * sentinel proposal id (column + metadata, both read by bridgeTaskToOfferDispatch).
  */
@@ -342,6 +382,55 @@ async function handleAdHocTaskRequest(
 	} = helpers;
 	const log = `[P2324AdHocTask id=${msg.id}]`;
 	const correlationId = msg.correlation_id ?? randomUUID();
+
+	// P2326 AC-10: inflight cap. The ad-hoc path has no proposal-level claim to
+	// serialize against, so without a cap a burst of no-proposal task_requests
+	// would spawn unbounded workers under the sentinel. Count non-terminal
+	// sentinel-bucketed dispatches and reject (task_error) at/over the cap.
+	const maxInflight = adHocMaxInflight();
+	let inflight: number;
+	try {
+		const countFn = helpers.countAdHocInflight ?? countAdHocInflightLive;
+		inflight = await countFn(sentinelProposalId);
+	} catch (err) {
+		// Fail closed: if we cannot measure capacity, do not spawn — reject so the
+		// requestor can retry, rather than risk unbounded fan-out.
+		const detail = err instanceof Error ? err.message : String(err);
+		console.error(`${log} ad-hoc inflight count failed:`, detail);
+		await insertReply({
+			fromAgent: identity,
+			toAgent: msg.from_agent,
+			content: `Ad-hoc task rejected: unable to verify inflight capacity (${detail})`,
+			messageType: "task_error",
+			correlationId,
+			replyTo: msg.id,
+		});
+		await markReadAndResolveTimeout(msg.id);
+		return;
+	}
+
+	if (inflight >= maxInflight) {
+		console.warn(
+			`${log} ad-hoc cap reached (${inflight}/${maxInflight}) under sentinel ${sentinelProposalId} — rejecting`,
+		);
+		await insertReply({
+			fromAgent: identity,
+			toAgent: msg.from_agent,
+			content: `Ad-hoc task rejected: inflight cap reached (${inflight}/${maxInflight}); retry later.`,
+			messageType: "task_error",
+			correlationId,
+			replyTo: msg.id,
+			metadata: {
+				adhoc: true,
+				cap_rejected: true,
+				inflight,
+				max_inflight: maxInflight,
+				sentinel_proposal_id: sentinelProposalId,
+			},
+		});
+		await markReadAndResolveTimeout(msg.id);
+		return;
+	}
 
 	let dispatchId: number;
 	let statusPollMs: number;

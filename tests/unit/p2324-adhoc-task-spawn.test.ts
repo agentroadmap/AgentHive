@@ -46,6 +46,9 @@ function makeHelpers(calls: Call[]): TaskDispatcherHelpers {
 		monitorTaskDispatch: async (args) => {
 			calls.push({ name: "monitor", args });
 		},
+		// P2326 AC-10: inject the inflight gauge so the cap check stays DB-free.
+		// 0 inflight → always under cap → spawn path unchanged for these P2324 cases.
+		countAdHocInflight: async () => 0,
 	};
 }
 
