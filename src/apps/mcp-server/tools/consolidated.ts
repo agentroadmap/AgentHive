@@ -278,6 +278,11 @@ const agentRoutes: RouteMap = {
 	// P925: operator rename CLI for permanent agent display aliases
 	rename: "agent_rename",
 	agent_rename: "agent_rename",
+	// P1109 Tier-2: presence + listener-subscription via MCP (replaces raw fn_pulse
+	// / LISTEN-bookkeeping SQL in agency processes)
+	pulse: "agent_pulse",
+	subscribe: "agent_subscribe",
+	unsubscribe: "agent_unsubscribe",
 };
 
 const memoryRoutes: RouteMap = {

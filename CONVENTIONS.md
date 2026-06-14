@@ -143,6 +143,18 @@ The trap to avoid: using Class-B tooling (memory) to solve a Class-A problem (me
 
 Why this rule exists: AgentHive has repeatedly been burned by trusting LLM behavior for mechanical guarantees — codex agents marking ACs `pass` with no artifact, hallucinated completion summaries, token ledgers that stayed empty because the "agent should report usage" path was never deterministic (`agent_budget_ledger` 0 rows despite thousands of runs; `agent_usage_snapshot` 0 rows; `agent_runs.tokens_in` defaulting to 0). This is the same principle as **6.0a/6.0b "orchestrator is mechanical"** (lifecycle = DB state + structured fields, never interpreted LLM text), applied to the agency/worker layer. Implementing proposals: P1018 (token ledger writer), P1859 (usage probe), P1022 (quota-aware admission), P1698/P1699 (per-agency caps + dynamic controller), P1376 (throttle merge).
 
+**P1109 Amendment — encapsulate agent-side DB ops behind MCP / tool-layer wrappers.** Routine agency DB writes must NOT be raw SQL embedded in agency processes; they go through a single audited wrapper so the column/constraint contract lives in one place and schema mismatches surface at the boundary instead of as a runtime `INSERT` failure (the P1017 class: `assigned_agency`, `agent_type='user'`, `host_id`, `presence_state_enum` fabrications). Use these instead of hand-written SQL:
+
+| Operation | ❌ Raw SQL (do not write) | ✅ Wrapped path |
+| :--- | :--- | :--- |
+| Validate a table before writing DDL | `psql -c '\d roadmap.agency'` from memory | `mcp_schema action=describe args={table:'roadmap.agency'}` (Tier 1) |
+| Lint a migration before commit | eyeball the `.sql` | `mcp_schema action=lint_migration args={file_path:'…'}` (Tier 4) |
+| Presence heartbeat | `SELECT roadmap.fn_pulse($1,$2)` | `mcp_agent action=pulse args={agency_id, state:'online'\|'busy'\|'away'\|'offline'}` → `agentPulse()` in `src/infra/agency/presence-ops.ts` (Tier 2) |
+| Record/clear listener presence | `INSERT/DELETE roadmap.listener_subscription` | `mcp_agent action=subscribe`/`unsubscribe`; in-process LISTEN owners call `recordListenerSubscription(listenClient, …)` / `removeListenerSubscription(…)` from `presence-ops.ts` so the recorded `established_pid` is the LISTEN backend (Tier 2) |
+| FK-anchor registry row at boot | `INSERT INTO roadmap_workforce.agent_registry …` | `ensureAgentRegistryRow(identity)` in `presence-ops.ts` (or `mcp_agent action=register`) |
+
+Backend-pid footgun: `roadmap.fn_listener_reconcile_drift()` keys on `listener_subscription.established_pid` vs `pg_stat_activity`. The pooled `query()` wrapper acquires a fresh backend per call, so a pooled `INSERT` records the wrong pid and reconcile flags the row stale immediately. Always record the listener row on the **same** `pg.Client` that holds the `LISTEN` (see `liaison-agent.ts`). Implementing proposal: P1109 (Tier 1/2/4 shipped; Tier 5 apply-migration gated to operator).
+
 ## 4a. Folder Discipline (mandatory for every cubic agent)
 
 AgentHive is shared infrastructure. Multiple agencies, projects, and providers share this repo. Every file you write is a vote on what belongs in the repo forever. Be ruthless about where things go.
