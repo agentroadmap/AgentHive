@@ -14,8 +14,10 @@ import { describe, test } from "node:test";
 import {
 	aimdNext,
 	computeEffectiveCap,
+	DEFAULT_TARGET_QUOTA_PCT,
 	isMeterAvailable,
 	nextCapacity,
+	resolveTargetQuotaPct,
 	type AimdConfig,
 	type MeterSignal,
 } from "./capacity-controller.ts";
@@ -62,6 +64,61 @@ describe("computeEffectiveCap (P1699 AC-1 formula)", () => {
 	});
 	test("never negative", () => {
 		assert.equal(computeEffectiveCap(10, 0, 0.98), 0);
+	});
+});
+
+describe("resolveTargetQuotaPct (P1699 AC-1 knob precedence)", () => {
+	test("agency override wins when valid", () => {
+		assert.equal(resolveTargetQuotaPct(0.5, 0.8), 0.5);
+	});
+	test("falls through to global flag when no override", () => {
+		assert.equal(resolveTargetQuotaPct(null, 0.8), 0.8);
+		assert.equal(resolveTargetQuotaPct(undefined, 0.8), 0.8);
+	});
+	test("falls through to default 0.98 when neither set", () => {
+		assert.equal(resolveTargetQuotaPct(null, null), DEFAULT_TARGET_QUOTA_PCT);
+		assert.equal(resolveTargetQuotaPct(null, null), 0.98);
+	});
+	test("invalid override (0, >1, NaN, negative) is ignored, not clamped", () => {
+		assert.equal(resolveTargetQuotaPct(0, 0.8), 0.8); // 0 not a meaningful throttle
+		assert.equal(resolveTargetQuotaPct(1.5, 0.8), 0.8); // out of range
+		assert.equal(resolveTargetQuotaPct(Number.NaN, 0.8), 0.8);
+		assert.equal(resolveTargetQuotaPct(-0.2, 0.8), 0.8);
+	});
+	test("invalid flag falls through to default", () => {
+		assert.equal(resolveTargetQuotaPct(null, 2), DEFAULT_TARGET_QUOTA_PCT);
+	});
+	test("pct=1 (full quota) is valid", () => {
+		assert.equal(resolveTargetQuotaPct(1, 0.8), 1);
+	});
+});
+
+describe("AC-1 verify: knob changes computed cap when meter is present", () => {
+	// meter present: remaining_quota = 100 (non-null signal), max_in_flight huge
+	// so the quota term binds and the knob is what moves the cap.
+	const remaining = 100;
+	const maxInFlight = 1000;
+	test("resolved knob drives effective cap end-to-end", () => {
+		const capDefault = computeEffectiveCap(
+			maxInFlight,
+			remaining,
+			resolveTargetQuotaPct(null, null), // → 0.98
+		);
+		const capOverride = computeEffectiveCap(
+			maxInFlight,
+			remaining,
+			resolveTargetQuotaPct(0.5, null), // agency override → 0.5
+		);
+		const capFlag = computeEffectiveCap(
+			maxInFlight,
+			remaining,
+			resolveTargetQuotaPct(null, 0.1), // global flag → 0.1
+		);
+		assert.equal(capDefault, 98);
+		assert.equal(capOverride, 50);
+		assert.equal(capFlag, 10);
+		// the knob visibly and monotonically changes the cap
+		assert.ok(capFlag < capOverride && capOverride < capDefault);
 	});
 });
 
