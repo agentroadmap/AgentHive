@@ -1,6 +1,6 @@
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
-import { describeTable } from "./pg-handlers.ts";
+import { describeTable, lintMigration } from "./pg-handlers.ts";
 
 function textResult(text: string): CallToolResult {
 	return { content: [{ type: "text", text }] };
@@ -41,6 +41,33 @@ export function registerSchemaTools(server: McpServer): void {
 				);
 			}
 			const result = await describeTable(table);
+			return jsonResult(result);
+		},
+	});
+
+	server.addTool({
+		name: "schema_lint_migration",
+		description:
+			"Validate SQL migration by executing it inside a SAVEPOINT and ROLLBACKing. Catches fabrication patterns: non-existent columns, invalid CHECK constraint values, forward-references, and JSDoc comment blocks. Returns {valid: bool, errors: string[], warnings: string[]}.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				sql: {
+					type: "string",
+					description:
+						"Raw SQL code to lint. The linter will execute it inside a transaction and roll back, catching schema violations without side effects.",
+				},
+			},
+			required: ["sql"],
+		},
+		handler: async (args: Record<string, unknown>) => {
+			const sql = args.sql;
+			if (typeof sql !== "string" || sql.length === 0) {
+				return textResult(
+					`schema_lint_migration requires { sql: string }. Got: ${JSON.stringify(args)}`,
+				);
+			}
+			const result = await lintMigration(sql);
 			return jsonResult(result);
 		},
 	});
