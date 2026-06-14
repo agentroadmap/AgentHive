@@ -27,11 +27,21 @@ export const TIER_RELIABILITY_PRIOR: Record<string, number> = {
 	free: 0.3,
 };
 
-/** AC-9: task classes that must NOT downshift below the reliability floor. */
+/**
+ * AC-9 / P3309 AC-4: task classes that must NOT downshift below the reliability
+ * floor. Covers BOTH the legacy vocabulary ({merge,architecture}) and the
+ * canonical P3310 squad_dispatch vocabulary ({gate_review,mcp_protocol}) so the
+ * Haiku-regression guard holds regardless of which classifier produced the
+ * task_class. These mirror the is_hard=true rows in reliability_floor for
+ * critical (gate/merge/architecture/protocol) work.
+ */
 export const DOWNSHIFT_LOCKED_TASK_CLASSES: ReadonlySet<string> = new Set([
+	// legacy vocabulary
 	"gate_review",
 	"merge",
 	"architecture",
+	// canonical P3310 vocabulary (squad_dispatch CHECK)
+	"mcp_protocol",
 ]);
 
 // ---------------------------------------------------------------------------

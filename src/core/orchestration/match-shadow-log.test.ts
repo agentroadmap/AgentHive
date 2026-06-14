@@ -89,9 +89,18 @@ describe("computeShadowLog — shadow vs active", () => {
 	it("result object exposes NO route field — cannot alter live routing", async () => {
 		mockGet.mockResolvedValue(false);
 		const r = await computeShadowLog(baseInput);
-		// Safety invariant: the only keys are the three log columns.
+		// Safety invariant: only log-column keys are present. P3309 added the
+		// composed axis columns (task_class/difficulty_score/reliability_score);
+		// NONE of them is a route — the function still cannot change routing.
 		expect(Object.keys(r).sort()).toEqual(
-			["legacy_choice", "matcher_choice", "shadow_mode"].sort(),
+			[
+				"difficulty_score",
+				"legacy_choice",
+				"matcher_choice",
+				"reliability_score",
+				"shadow_mode",
+				"task_class",
+			].sort(),
 		);
 		expect("route" in r).toBe(false);
 		expect("chosenRouteId" in r).toBe(false);

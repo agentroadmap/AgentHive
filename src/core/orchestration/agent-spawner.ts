@@ -52,6 +52,7 @@ import {
 } from "../workflow/state-names.ts";
 import { checkAgencyCapacity } from "./capacity-filter.ts";
 import { computeShadowLog } from "./match-shadow-log.ts";
+import { getTierRank } from "./resolvers/tier-aware-resolver.ts";
 import {
 	getMcpInitDiagnosisReport,
 	getMcpInitDiagnostics,
@@ -1016,13 +1017,23 @@ async function logRouteDecision({
 		matcher_choice: null,
 		legacy_choice: null,
 		shadow_mode: true,
+		task_class: null,
+		difficulty_score: null,
+		reliability_score: null,
 	}));
+
+	// P3309: persist the composed axis signals (P3310 difficulty/task_class +
+	// P3311 reliability) alongside the shadow payload. required_tier is the int
+	// rank of the legacy tier hint (P1091 vocabulary); null when no hint given.
+	const requiredTierRank =
+		requiredTier != null ? getTierRank(requiredTier) : null;
 
 	await query(
 		`INSERT INTO roadmap.route_decision_log
 		   (proposal_id, role, agency_identity, chosen_route_id, eliminated_routes,
-		    matcher_choice, legacy_choice, shadow_mode)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		    matcher_choice, legacy_choice, shadow_mode,
+		    task_class, difficulty_score, required_tier, reliability_score)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
 		[
 			proposalId,
 			role,
@@ -1032,6 +1043,10 @@ async function logRouteDecision({
 			shadow.matcher_choice ? JSON.stringify(shadow.matcher_choice) : null,
 			shadow.legacy_choice ? JSON.stringify(shadow.legacy_choice) : null,
 			shadow.shadow_mode,
+			shadow.task_class,
+			shadow.difficulty_score,
+			requiredTierRank,
+			shadow.reliability_score,
 		],
 	);
 }
