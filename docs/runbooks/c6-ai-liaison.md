@@ -114,6 +114,24 @@ At capacity it replies `handoff declined ... at capacity (N/M)`
 acks `capability_gap recorded ... '<capability>' has no serving agency`
 (`metadata.capability_gap = { capability, source_message_id, reported_by }`).
 
+## Emergent presence: no mechanical floor, wake ≠ presence (AC-14, AC-15)
+
+Availability is revealed **only** by a successful `fn_claim_work_offer` — never by
+a heartbeat or a `dispatchable` flag. Two invariants enforce this:
+
+- **No heartbeat-derived dispatch (AC-14).** The open-pool claim path reads no
+  `dispatchable` / `last_heartbeat_at` / `v_agency_status` state. The legacy
+  `offer_dispatch` downlink push (orchestrator → `listDispatchableAgencies()[0]`,
+  selected from `v_agency_status.dispatchable = last_heartbeat_at`) is gated OFF by
+  default via `ORCHESTRATOR_LEGACY_PUSH_DISPATCH_ENABLED` (`legacy-push-dispatch-gate.ts`).
+  The a2a-host presence timer (`fn_pulse`) may still refresh `last_heartbeat_at`
+  for dashboards/crash-detection, but nothing routes dispatch by it.
+- **Wake is not presence (AC-15).** A `work_offers` / `a2a_msg_` NOTIFY is a
+  doorbell: it wakes a parked session but writes no availability/dispatchable/
+  presence row. If the woken session does not claim within its window, the offer is
+  left/reissued by `fn_reap_expired_offers` — the agency is **not** marked down by
+  the offer machinery. An idle or unresponsive liaison simply fails to win the claim.
+
 ## What the liaison must NOT do
 
 - Do not assert presence/dispatchability for the agency independent of actually

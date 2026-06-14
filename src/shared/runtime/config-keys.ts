@@ -1100,6 +1100,34 @@ export const FlagKeys = {
 		envOverride: false,
 	} satisfies ConfigKey<boolean>,
 
+	// V3-C6 (P1438) AC-14: legacy heartbeat-derived "offer_dispatch downlink" push.
+	// After posting an open-pool work offer the orchestrator used to ALSO push a
+	// targeted offer_dispatch to listDispatchableAgencies()[0] — selecting a target
+	// from v_agency_status.dispatchable, which is computed from agency.last_heartbeat_at.
+	// That is a mechanical presence floor: it routes dispatch by heartbeat, not by an
+	// actual claim. In C6 the open-pool offer + emergent-presence claim already decide
+	// dispatch, so this push is redundant AND a "no heartbeat-derived dispatchability
+	// path for open-pool offers" violation. Default OFF; flip true only to roll back to
+	// legacy push-dispatch (no code revert needed).
+	ORCHESTRATOR_LEGACY_PUSH_DISPATCH_ENABLED: {
+		name: "ORCHESTRATOR_LEGACY_PUSH_DISPATCH_ENABLED",
+		class: "flag" as const,
+		parse: (v: string) => {
+			try {
+				return JSON.parse(v) === true;
+			} catch {
+				return v.toLowerCase() === "true" || v === "1";
+			}
+		},
+		required: false,
+		defaultValue: false,
+		description:
+			"V3-C6 AC-14: when true, re-enables the legacy heartbeat-derived offer_dispatch downlink push (default false = pure open-pool dispatch)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<boolean>,
+
 	// V3-C6 (P1438): when true, each agency liaison runs its own AgencyClaimLoop
 	// (self-claim). Composes with ORCHESTRATOR_OFFER_CLAIM_ENABLED: cutover sets
 	// orchestrator's loop off + this on; rollback flips both back (no code revert).

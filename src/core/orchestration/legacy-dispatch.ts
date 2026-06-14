@@ -35,6 +35,7 @@ import { loadStateNames } from "../workflow/state-names.ts";
 import { mcpText } from "../../../scripts/mcp-result.ts";
 import { getMcpUrl } from "../../shared/runtime/endpoints.ts";
 import { listDispatchableAgencies } from "../../infra/agency/liaison-service.ts";
+import { isLegacyPushDispatchEnabled } from "./legacy-push-dispatch-gate.ts";
 import {
 	storeMessage,
 	getNextSequence,
@@ -2387,46 +2388,52 @@ Without set_maturity=mature, the gate will not re-run and your work remains invi
 			`📬 Enhancer offer ${dispatchId} posted for ${target.display_id} (revising hold #${target.hold_decision_id}; reason=${reason})`,
 		);
 
-		// P904-A2: send offer_dispatch downlink so agencies receive push notification
-		try {
-			const agencies = await listDispatchableAgencies();
-			if (agencies.length > 0) {
-				const targetAgency = agencies[0];
-				const envelope = createMessageEnvelope({
-					agencyId: targetAgency.agency_id,
-					direction: "orchestrator->liaison",
-					kind: "offer_dispatch",
-					payload: {
-						offer_id: String(dispatchId),
-						dispatch_id: dispatchId,
-						proposal_id: target.id,
-						squad_name: `P${target.id}-enhance`,
-						role: "enhancer",
-						required_capabilities:
-							requiredCapabilities.length > 0 ? requiredCapabilities : ["enhancer"],
-						route_hint: "anthropic",
-					},
-				});
-				const sequence = await getNextSequence(targetAgency.agency_id);
-				await storeMessage({
-					...(envelope as any),
-					sequence,
-					signature: "stub-orchestrator",
-				});
-				logger.log(
-					`📮 Enhancer offer_dispatch sent to ${targetAgency.agency_id} for dispatch ${dispatchId}`,
-				);
-			} else {
+		// P904-A2: send offer_dispatch downlink so agencies receive push notification.
+		// P1438 C6 AC-14: gated OFF by default — selecting the target from
+		// listDispatchableAgencies() (v_agency_status.dispatchable = last_heartbeat_at)
+		// is a heartbeat-derived dispatchability path. The open-pool offer above is the
+		// dispatch; emergent-presence claim picks it up.
+		if (await isLegacyPushDispatchEnabled()) {
+			try {
+				const agencies = await listDispatchableAgencies();
+				if (agencies.length > 0) {
+					const targetAgency = agencies[0];
+					const envelope = createMessageEnvelope({
+						agencyId: targetAgency.agency_id,
+						direction: "orchestrator->liaison",
+						kind: "offer_dispatch",
+						payload: {
+							offer_id: String(dispatchId),
+							dispatch_id: dispatchId,
+							proposal_id: target.id,
+							squad_name: `P${target.id}-enhance`,
+							role: "enhancer",
+							required_capabilities:
+								requiredCapabilities.length > 0 ? requiredCapabilities : ["enhancer"],
+							route_hint: "anthropic",
+						},
+					});
+					const sequence = await getNextSequence(targetAgency.agency_id);
+					await storeMessage({
+						...(envelope as any),
+						sequence,
+						signature: "stub-orchestrator",
+					});
+					logger.log(
+						`📮 Enhancer offer_dispatch sent to ${targetAgency.agency_id} for dispatch ${dispatchId}`,
+					);
+				} else {
+					logger.warn(
+						`Enhancer dispatch ${dispatchId}: no dispatchable agencies, offer queued only`,
+						{ reason: "no_dispatchable_agency" },
+					);
+				}
+			} catch (err) {
 				logger.warn(
-					`Enhancer dispatch ${dispatchId}: no dispatchable agencies, offer queued only`,
-					{ reason: "no_dispatchable_agency" },
+					`Failed to emit liaison message for enhancer dispatch ${dispatchId}:`,
+					err,
 				);
 			}
-		} catch (err) {
-			logger.warn(
-				`Failed to emit liaison message for enhancer dispatch ${dispatchId}:`,
-				err,
-			);
 		}
 	} catch (err) {
 		const errMsg = err instanceof Error ? err.message : String(err);

@@ -5,6 +5,7 @@ import {
 } from "../../infra/agency/liaison-message-service.ts";
 import { createMessageEnvelope } from "../../infra/agency/liaison-message-types.ts";
 import { listDispatchableAgencies } from "../../infra/agency/liaison-service.ts";
+import { isLegacyPushDispatchEnabled } from "./legacy-push-dispatch-gate.ts";
 import { closePool, getPool, query } from "../../infra/postgres/pool.ts";
 import { pulseHeartbeat } from "../../infra/pulse/heartbeat.ts";
 import { enqueueNotification } from "../notifications/enqueue.ts";
@@ -1016,45 +1017,51 @@ export class Orchestrator {
 					`[Orchestrator] stall liaison offer ${dispatchId} posted for ${stall.displayId}`,
 				);
 
-				// Push notification to first dispatchable agency
-				try {
-					const agencies = await listDispatchableAgencies();
-					if (agencies.length > 0) {
-						const targetAgency = agencies[0];
-						const envelope = createMessageEnvelope({
-							agencyId: targetAgency.agency_id,
-							direction: "orchestrator->liaison",
-							kind: "offer_dispatch",
-							payload: {
-								offer_id: String(dispatchId),
-								dispatch_id: dispatchId,
-								proposal_id: stall.id,
-								squad_name: `P${stall.id}-stall-liaison`,
-								role: "orchestrator-liaison-investigator",
-								required_capabilities: ["orchestrator-liaison-investigator"],
-								route_hint: ORCHESTRATOR_LIAISON_PROVIDER,
-							},
-						});
-						const sequence = await getNextSequence(targetAgency.agency_id);
-						await storeMessage({
-							...(envelope as any),
-							sequence,
-							signature: "stub-orchestrator",
-						});
-						console.log(
-							`[Orchestrator] stall liaison offer_dispatch sent to ${targetAgency.agency_id} for dispatch ${dispatchId}`,
-						);
-					} else {
+				// P1438 C6 AC-14: the open-pool offer above is the dispatch. The
+				// legacy heartbeat-derived offer_dispatch downlink push (target =
+				// listDispatchableAgencies()[0], chosen by v_agency_status.dispatchable
+				// = last_heartbeat_at) is a mechanical presence floor and is gated OFF
+				// by default — emergent-presence claim decides who picks this up.
+				if (await isLegacyPushDispatchEnabled()) {
+					try {
+						const agencies = await listDispatchableAgencies();
+						if (agencies.length > 0) {
+							const targetAgency = agencies[0];
+							const envelope = createMessageEnvelope({
+								agencyId: targetAgency.agency_id,
+								direction: "orchestrator->liaison",
+								kind: "offer_dispatch",
+								payload: {
+									offer_id: String(dispatchId),
+									dispatch_id: dispatchId,
+									proposal_id: stall.id,
+									squad_name: `P${stall.id}-stall-liaison`,
+									role: "orchestrator-liaison-investigator",
+									required_capabilities: ["orchestrator-liaison-investigator"],
+									route_hint: ORCHESTRATOR_LIAISON_PROVIDER,
+								},
+							});
+							const sequence = await getNextSequence(targetAgency.agency_id);
+							await storeMessage({
+								...(envelope as any),
+								sequence,
+								signature: "stub-orchestrator",
+							});
+							console.log(
+								`[Orchestrator] stall liaison offer_dispatch sent to ${targetAgency.agency_id} for dispatch ${dispatchId}`,
+							);
+						} else {
+							console.warn(
+								`[Orchestrator] stall liaison dispatch ${dispatchId}: no dispatchable agencies`,
+								{ reason: "no_dispatchable_agency" },
+							);
+						}
+					} catch (err) {
 						console.warn(
-							`[Orchestrator] stall liaison dispatch ${dispatchId}: no dispatchable agencies`,
-							{ reason: "no_dispatchable_agency" },
+							`[Orchestrator] failed to emit liaison message for stall dispatch ${dispatchId}:`,
+							err instanceof Error ? err.message : err,
 						);
 					}
-				} catch (err) {
-					console.warn(
-						`[Orchestrator] failed to emit liaison message for stall dispatch ${dispatchId}:`,
-						err instanceof Error ? err.message : err,
-					);
 				}
 				return;
 			} catch (err) {
