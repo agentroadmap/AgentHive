@@ -41,6 +41,7 @@ import {
 	decideRecoveryAction,
 	type RecoveryDecision,
 } from "./recovery-action.ts";
+import { hasActiveOverride } from "./quota-override.ts";
 
 export type QueryFn = typeof defaultQuery;
 
@@ -238,12 +239,22 @@ export class AgencyClaimLoop {
 			// P465: subscription-aware claim policy — refuse new claims that would
 			// breach the safety margin. On refusal, self-declare throttled so the
 			// orchestrator re-routes any pending offers to an unthrottled agency.
+			// P3000 AC-10d: check for an operator-granted quota override FIRST; if
+			// one is found (and consumed if single_use), skip the subscription check.
 			const sqlExec = (sql: string, params?: unknown[]) => this.query(sql, params);
-			const policyResult = await evaluateSubscriptionPolicy(
-				this.agencyIdentity,
-				sqlExec,
-				this.logger,
-			);
+			const quotaOverride = await hasActiveOverride(this.agencyIdentity, sqlExec as unknown as Parameters<typeof hasActiveOverride>[1]).catch(() => null);
+			if (quotaOverride) {
+				this.logger.log(
+					`[AgencyClaim:${this.agencyIdentity}] P3000 quota override active (id=${quotaOverride.id}, grantedBy=${quotaOverride.grantedBy}, singleUse=${quotaOverride.singleUse}) — skipping subscription policy`,
+				);
+			}
+			const policyResult = quotaOverride
+				? { allowed: true, reason: null, resets_at: null, tightest_window: null }
+				: await evaluateSubscriptionPolicy(
+					this.agencyIdentity,
+					sqlExec,
+					this.logger,
+				);
 			if (!policyResult.allowed) {
 				this.logger.warn(
 					`[AgencyClaim:${this.agencyIdentity}] subscription policy refused claim: ${policyResult.reason}`,
