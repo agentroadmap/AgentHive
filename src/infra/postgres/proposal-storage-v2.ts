@@ -543,14 +543,15 @@ export async function transitionProposal(
 		);
 	}
 
-	// Validate transition exists
+	// Validate transition exists — read proposal.workflow_name directly (AC-4:
+	// single authoritative source, consistent with gate_decision resolution).
+	// The old JOIN chain through workflows→workflow_templates→proposal_type_config
+	// could disagree when workflows.template_id has drifted from proposal.type.
 	const { rowCount } = await query(
 		`SELECT 1
      FROM roadmap_proposal.proposal_valid_transitions pvt
-     JOIN workflows w ON w.proposal_id = $1
-     JOIN workflow_templates wt ON wt.id = w.template_id
-     JOIN roadmap_proposal.proposal_type_config ptc ON ptc.workflow_name = wt.name
-     WHERE pvt.workflow_name = ptc.workflow_name
+     JOIN roadmap_proposal.proposal p ON p.id = $1
+     WHERE pvt.workflow_name = p.workflow_name
        AND LOWER(pvt.from_state) = LOWER($2)
        AND LOWER(pvt.to_state) = LOWER($3)
      LIMIT 1`,

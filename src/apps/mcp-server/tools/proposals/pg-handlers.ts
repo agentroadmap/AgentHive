@@ -458,13 +458,15 @@ export class PgProposalHandlers {
 		type?: string;
 	}): Promise<CallToolResult> {
 		try {
-			// P461: Reject type changes — route to schema reconciliation (P436)
+			// P461: Reject type changes — type and workflow_name are coupled; a
+			// change requires reconciling both proposal.type and workflows.template_id
+			// atomically. Route to a direct DB operation (see P436/P3326 docs).
 			if ((args as any).type !== undefined) {
 				return {
 					content: [
 						{
 							type: "text",
-							text: "⚠️ prop_update: type changes are not permitted via this MCP surface. Use roadmap.fn_reconcile_proposal_type or migration P436. Affected key: 'type'.",
+							text: "⚠️ prop_update: type changes are not permitted via this MCP surface. To change a proposal's type, update proposal.type AND roadmap.workflows.template_id atomically via a SQL migration (see P436). Affected key: 'type'.",
 						},
 					],
 				};
