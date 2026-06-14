@@ -340,6 +340,72 @@ class ConfigResolver {
 	}
 
 	/**
+	 * P827 AC-11: derive the discrete connection config for the dedicated
+	 * direct-LISTEN pool from the control pool's own options, overriding ONLY the
+	 * port (PGPORT_DIRECT bypasses PgBouncer transaction mode).
+	 *
+	 * CRITICAL: when the control pool was built from a `connectionString` (the
+	 * P518 / AGENTHIVE_CONTROL_DSN cutover path), `pg` IGNORES every discrete
+	 * field — `{ connectionString, port }` keeps the connectionString's port and
+	 * database. Spreading `pool.options` and setting `port` was therefore a
+	 * silent no-op: the LISTEN client stayed on PgBouncer (:6432) AND on whatever
+	 * DB the DSN named — never the direct port. We parse the connectionString into
+	 * discrete host/port/user/password/database so the direct port actually wins
+	 * and the LISTEN client lands on the hiveCentral control DB (the DSN's DB),
+	 * not process.env.PGDATABASE (=agenthive), where the trigger never fires.
+	 *
+	 * Returns a discrete config object (never carrying `connectionString`), so the
+	 * `port` override is always honored by `pg`.
+	 */
+	static buildDirectListenPoolConfig(
+		poolOptions: Record<string, any>,
+		directPort: number,
+	): Record<string, any> {
+		const opts = poolOptions ?? {};
+		const connStr: string | undefined =
+			typeof opts.connectionString === "string"
+				? opts.connectionString
+				: undefined;
+
+		if (connStr) {
+			// Parse the DSN into discrete params; override port with the direct port.
+			// Carry forward non-connection options (search_path, timeouts) but DROP
+			// connectionString so `pg` honors the discrete fields.
+			const {
+				connectionString: _drop,
+				port: _dropPort,
+				host: _dropHost,
+				user: _dropUser,
+				password: _dropPw,
+				database: _dropDb,
+				...rest
+			} = opts;
+			try {
+				const u = new URL(connStr);
+				const cfg: Record<string, any> = {
+					...rest,
+					host: decodeURIComponent(u.hostname),
+					port: directPort,
+					max: 1,
+				};
+				if (u.username) cfg.user = decodeURIComponent(u.username);
+				if (u.password) cfg.password = decodeURIComponent(u.password);
+				// pathname is "/dbname"; strip the leading slash.
+				const db = u.pathname.replace(/^\//, "");
+				if (db) cfg.database = decodeURIComponent(db);
+				return cfg;
+			} catch {
+				// Unparseable DSN — fall back to discrete spread (best-effort).
+				return { ...rest, port: directPort, max: 1 };
+			}
+		}
+
+		// Discrete-params control pool: spread and override the port. The DB/host
+		// already point at hiveCentral via the discrete options.
+		return { ...opts, port: directPort, max: 1 };
+	}
+
+	/**
 	 * Set up a NOTIFY listener for runtime_flag_changed events.
 	 * Uses PGPORT_DIRECT for PgBouncer bypass if available.
 	 * Never throws — LISTEN is best-effort; TTL cache covers the hot-reload gap.
@@ -356,14 +422,17 @@ class ConfigResolver {
 					directPort > 0 &&
 					directPort <= 65535
 				) {
-					// Create a dedicated direct-Postgres pool (bypasses PgBouncer transaction mode)
+					// Create a dedicated direct-Postgres pool (bypasses PgBouncer transaction mode).
+					// P827 AC-11: build discrete config so the direct port + control DB
+					// (hiveCentral) are honored even when the control pool uses a DSN.
 					const { Pool } = await import("pg");
 					const poolOptions = (this.pool as any).options ?? {};
-					this.directListenPool = new Pool({
-						...poolOptions,
-						port: directPort,
-						max: 1,
-					});
+					this.directListenPool = new Pool(
+						ConfigResolver.buildDirectListenPoolConfig(
+							poolOptions,
+							directPort,
+						),
+					);
 					client = await this.directListenPool.connect();
 				} else {
 					client = await this.pool.connect();
@@ -1077,6 +1146,40 @@ export async function initConfig(opts: {
 	await resolver.init(opts);
 	globalResolver = resolver;
 	return resolver;
+}
+
+/**
+ * P827 AC-11: bootstrap the global resolver against the hiveCentral control
+ * pool. This is the single wiring point every long-lived service should call at
+ * startup so that DB-backed scoped flag resolution + runtime_flag_changed
+ * hot-reload are actually live (today `runtimeConfig.get()` throws "Resolver not
+ * initialized" everywhere, so every flag silently falls back to env/default).
+ *
+ * Uses getControlPool() from the P497/P518 pool registry, which builds the pool
+ * from AGENTHIVE_CONTROL_DSN (→ hiveCentral). The resolver's LISTEN client is
+ * derived from that pool's options via buildDirectListenPoolConfig(), so it
+ * also lands on hiveCentral — never process.env.PGDATABASE (=agenthive).
+ *
+ * Idempotent: if a resolver is already initialized this is a no-op unless
+ * `force` is set. Pass `scopeContext` to bind project/host/agency scope.
+ */
+export async function initConfigFromControlPool(opts?: {
+	yamlConfig?: Record<string, any>;
+	envFilePath?: string;
+	scopeContext?: ScopeContext;
+	force?: boolean;
+}): Promise<ConfigResolver> {
+	if (globalResolver && !opts?.force) {
+		return globalResolver;
+	}
+	const { getControlPool } = await import("../../postgres/pool-registry.js");
+	const pool = getControlPool();
+	return initConfig({
+		pool,
+		yamlConfig: opts?.yamlConfig,
+		envFilePath: opts?.envFilePath,
+		scopeContext: opts?.scopeContext,
+	});
 }
 
 /**
