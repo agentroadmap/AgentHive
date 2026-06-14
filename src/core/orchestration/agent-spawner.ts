@@ -20,7 +20,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { hostname } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import {
 	getLatestQuotaSnapshot,
 	validateModelForDispatch,
@@ -87,6 +87,15 @@ import { assertNotRepoRoot } from "./worktree-guard.ts";
 
 const WORKTREE_ROOT = getWorktreeRoot();
 const GITCONFIG_ROOT = join(getProjectRoot(), ".git", "worktrees-config");
+
+export function resolveSpawnWorktreePath(
+	worktreeName: string,
+	worktreeRoot: string = WORKTREE_ROOT,
+): string {
+	return isAbsolute(worktreeName)
+		? worktreeName
+		: join(worktreeRoot, worktreeName);
+}
 
 // ─── Live child registry (shutdown plumbing) ─────────────────────────────────
 //
@@ -826,7 +835,7 @@ async function loadEnvAgent(
 	worktreeName: string,
 	worktreeRoot: string = WORKTREE_ROOT,
 ): Promise<Record<string, string>> {
-	const path = join(worktreeRoot, worktreeName, ".env.agent");
+	const path = join(resolveSpawnWorktreePath(worktreeName, worktreeRoot), ".env.agent");
 	let raw: string;
 	try {
 		raw = await readFile(path, "utf8");
@@ -2078,7 +2087,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 
 	// P404: provision scratch directory for this agent run
 	let scratchUuid: string | null = null;
-	const worktreePath = join(worktreeRoot, worktree);
+	const worktreePath = resolveSpawnWorktreePath(worktree, worktreeRoot);
 	try {
 		const scratch = await provisionScratch(
 			randomUUID(),
