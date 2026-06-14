@@ -256,3 +256,54 @@ test("P1438 AC-16: posting never queries presence/dispatchable; preflight checks
 		"capability preflight (provider_registry + capabilities) must run",
 	);
 });
+
+test("P3314: postWorkOffer skips INSERT+NOTIFY when a live (proposal, role) offer already exists", async () => {
+	process.env.AGENTHIVE_MAX_INFLIGHT_OFFERS = "20";
+	const calls: Array<{ sql: string; params: unknown[] }> = [];
+	const queue = (async (sql: string, params?: unknown[]) => {
+		calls.push({ sql, params: params ?? [] });
+		if (/pg_notify/i.test(sql)) return { rows: [] } as never;
+		if (/FROM roadmap_proposal\.proposal\b/i.test(sql) && /WHERE id/i.test(sql)) {
+			return {
+				rows: [
+					{
+						project_id: 1,
+						status: "DEVELOP",
+						maturity: "new",
+						gate_scanner_paused: false,
+						gate_paused_by: null,
+						gate_paused_at: null,
+					},
+				],
+			} as never;
+		}
+		if (/provider_registry/i.test(sql)) return { rows: [{ count: 1 }] } as never;
+		// the dedup guard SELECT (id, by proposal_id + dispatch_role + live status) →
+		// an existing live offer is present
+		if (/dispatch_role = \$2/i.test(sql) && /offer_status IN/i.test(sql)) {
+			return { rows: [{ id: 555 }] } as never;
+		}
+		if (/recent_runs/i.test(sql)) return { rows: [{ recent_runs: 0 }] } as never;
+		if (/INSERT INTO/i.test(sql)) return { rows: [{ id: 999, attempt_count: 1, was_replay: false }] } as never;
+		if (/count/i.test(sql)) return { rows: [{ count: 0 }] } as never;
+		return { rows: [] } as never;
+	}) as never;
+
+	const result = await postWorkOffer(
+		{ proposalId: 4243, squadName: "P4243-test", role: "developer", task: "x" },
+		queue,
+	);
+
+	assert.equal(result.deduped, true, "result must be flagged deduped");
+	assert.equal(result.dispatchId, 555, "dispatchId must point at the existing live offer");
+	assert.equal(
+		calls.some((c) => /INSERT INTO roadmap_workforce\.squad_dispatch/.test(c.sql)),
+		false,
+		"dedup must skip the INSERT (no duplicate offer row)",
+	);
+	assert.equal(
+		calls.some((c) => /pg_notify/.test(c.sql)),
+		false,
+		"dedup must skip the wake NOTIFY (no re-ring)",
+	);
+});

@@ -251,6 +251,9 @@ export interface WorkOfferResult {
 	attemptCount: number;
 	/** P908-D: UUID threaded through the offer pipeline for observability trace correlation. */
 	traceId: string;
+	/** P3314: true when posting was skipped because a live offer already exists
+	 *  for this (proposal_id, role). dispatchId points at the existing offer. */
+	deduped?: boolean;
 }
 
 function computeIdempotencyKey(parts: {
@@ -669,6 +672,35 @@ async function postWorkOfferImpl(
 				checkCaps,
 			);
 		}
+	}
+
+	// P3314: offer-dedup guard. The orchestrator re-posts the same (proposal, role)
+	// every scan cycle (~15 min). Because the idempotency_key includes
+	// dispatch_version, each re-post is a NEW row (the ON CONFLICT below only
+	// matches an identical key), so the open pool fills with duplicate offers —
+	// fatal under ORCHESTRATOR_MAX_INFLIGHT_OFFERS=1 (V3 phase-1). In the open-pool
+	// model exactly one live offer per (proposal, role) is needed: whoever claims
+	// it wins. Skip the INSERT (and the wake NOTIFY) when a live, non-expired offer
+	// already exists; the existing offer stays in the pool for the AI liaison.
+	const { rows: liveDup } = await queryFn<{ id: number }>(
+		`SELECT id FROM roadmap_workforce.squad_dispatch
+		  WHERE proposal_id = $1 AND dispatch_role = $2
+		    AND offer_status IN ('open', 'claimed', 'active')
+		    AND (claim_expires_at IS NULL OR claim_expires_at > now())
+		  ORDER BY id
+		  LIMIT 1`,
+		[input.proposalId, input.role],
+	);
+	if (liveDup[0]?.id) {
+		// A live offer for this (proposal, role) already exists — skip the INSERT and
+		// the wake NOTIFY; the existing offer stays in the pool for the AI liaison.
+		return {
+			dispatchId: liveDup[0].id,
+			replay: false,
+			attemptCount: 0,
+			traceId,
+			deduped: true,
+		};
 	}
 
 	const idempotencyKey = computeIdempotencyKey({
