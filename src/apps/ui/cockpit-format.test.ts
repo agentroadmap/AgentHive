@@ -1,7 +1,11 @@
 import assert from "node:assert";
 import { describe, test } from "node:test";
 import {
+	buildWorkforceSubheaderParts,
 	type CapacityView,
+	type CockpitCounts,
+	formatCockpitHeaderCounts,
+	formatDriftMarker,
 	formatHeadroomBadge,
 	formatReadyCoolingLabel,
 	formatRelativeTime,
@@ -46,6 +50,101 @@ describe("P1374 AC-3: ready/cooling split", () => {
 			assert.equal(formatReadyCoolingLabel(r, 0), `${r} ready`);
 			assert.equal(formatReadyCoolingLabel(r, 3), `${r} ready · 3 cooling`);
 		}
+	});
+});
+
+describe("P1377 AC-2/AC-7: cockpit header counts", () => {
+	const counts: CockpitCounts = {
+		total_agents: 269,
+		total_providers: 3,
+		online_count: 2,
+		registered_agencies: 4,
+		drift_count: 265,
+	};
+
+	test("renders exact 'agents · providers · online · registered' order", () => {
+		assert.equal(
+			formatCockpitHeaderCounts(counts),
+			"269 agents · 3 providers · 2 online · 4 registered",
+		);
+	});
+
+	test("the word 'agencies' must NOT appear in the header", () => {
+		const out = formatCockpitHeaderCounts(counts);
+		assert.ok(
+			!/agencies/i.test(out),
+			`header must not contain 'agencies': ${out}`,
+		);
+	});
+
+	test("uses middle-dot ' · ' dividers (exactly 3)", () => {
+		const out = formatCockpitHeaderCounts(counts);
+		assert.equal(out.split(" · ").length, 4);
+	});
+});
+
+describe("P1377 AC-3/AC-8: workforce subheader parts", () => {
+	const counts: CockpitCounts = {
+		total_agents: 100,
+		total_providers: 3,
+		online_count: 5,
+		registered_agencies: 20,
+		drift_count: 80,
+	};
+
+	test("returns EXACTLY 4 elements in agents,providers,online,registered order", () => {
+		const parts = buildWorkforceSubheaderParts(counts);
+		assert.equal(parts.length, 4);
+		assert.deepEqual(parts, [
+			"100 agents",
+			"3 providers",
+			"5 online",
+			"20 registered",
+		]);
+	});
+
+	test("joined with ' · ' yields the canonical subheader line", () => {
+		assert.equal(
+			buildWorkforceSubheaderParts(counts).join(" · "),
+			"100 agents · 3 providers · 5 online · 20 registered",
+		);
+	});
+
+	test("no element contains the word 'agencies'", () => {
+		for (const p of buildWorkforceSubheaderParts(counts)) {
+			assert.ok(!/agencies/i.test(p), `part must not say 'agencies': ${p}`);
+		}
+	});
+});
+
+describe("P1377 AC-3/AC-9: drift marker", () => {
+	test("drift agent renders ' [DRIFT]', registered renders ''", () => {
+		assert.equal(formatDriftMarker(true), " [DRIFT]");
+		assert.equal(formatDriftMarker(false), "");
+		assert.equal(formatDriftMarker(undefined), "");
+	});
+
+	test("5-agent fixture: 3 registered + 2 drift ⇒ [DRIFT] exactly twice", () => {
+		// Simulate the render path's per-agent marker emission.
+		const agents = [
+			{ id: "alice", is_drift: false },
+			{ id: "bob", is_drift: false },
+			{ id: "carol", is_drift: false },
+			{ id: "dave", is_drift: true },
+			{ id: "erin", is_drift: true },
+		];
+		const rendered = agents.map(
+			(a) => `${a.id}${formatDriftMarker(a.is_drift)}`,
+		);
+		const blob = rendered.join("\n");
+		const markerCount = (blob.match(/\[DRIFT\]/g) ?? []).length;
+		assert.equal(markerCount, 2, "exactly two [DRIFT] markers");
+		// the 3 registered agents carry no marker
+		assert.ok(!/alice \[DRIFT\]/.test(blob));
+		assert.ok(!/bob \[DRIFT\]/.test(blob));
+		assert.ok(!/carol \[DRIFT\]/.test(blob));
+		assert.ok(/dave \[DRIFT\]/.test(blob));
+		assert.ok(/erin \[DRIFT\]/.test(blob));
 	});
 });
 

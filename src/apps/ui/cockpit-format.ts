@@ -90,6 +90,63 @@ export function formatRelativeTime(ms: number): string {
 }
 
 /**
+ * P1377: canonical workforce counts the cockpit renders. Mirror of
+ * WorkforceMetrics (src/shared/queries/workforce-counts.ts) — kept structural
+ * here so cockpit-format stays DB/import-light and headlessly testable.
+ *
+ * NOTE: the soft dependency on P1372 — `drift_count > 0` is EXPECTED until
+ * P1372's register_agency action populates roadmap.agency rows for every active
+ * agent_registry row. Same note applies to AC-5's implementation-notes caveat.
+ */
+export interface CockpitCounts {
+	total_agents: number;
+	total_providers: number;
+	online_count: number;
+	registered_agencies: number;
+	drift_count: number;
+}
+
+/**
+ * P1377 AC-2/AC-7: top-of-screen header counts fragment. Renders EXACTLY:
+ *   `{total_agents} agents · {total_providers} providers · {online_count} online · {registered_agencies} registered`
+ * The word "agencies" must NOT appear (the old header conflated providers with
+ * agencies). Returns bare text (no blessed tags) so it is exact-match testable;
+ * the caller composes it into the titled header line.
+ */
+export function formatCockpitHeaderCounts(c: CockpitCounts): string {
+	return (
+		`${c.total_agents} agents · ${c.total_providers} providers · ` +
+		`${c.online_count} online · ${c.registered_agencies} registered`
+	);
+}
+
+/**
+ * P1377 AC-3/AC-8: workforce panel subheader parts — EXACTLY 4 elements in this
+ * order: agents, providers, online, registered. The caller wraps each in colour
+ * tags and joins with ` · `. Returned as an array so tests can assert the exact
+ * length and ordering independent of colour markup.
+ */
+export function buildWorkforceSubheaderParts(c: CockpitCounts): string[] {
+	return [
+		`${c.total_agents} agents`,
+		`${c.total_providers} providers`,
+		`${c.online_count} online`,
+		`${c.registered_agencies} registered`,
+	];
+}
+
+/**
+ * P1377 AC-3/AC-9: drift marker for an agent's provider-group line. An agent in
+ * agent_registry (active, un-reaped) with NO matching roadmap.agency row is
+ * "drift" and renders a `[DRIFT]` ASCII marker; registered agents render no
+ * marker. Returns " [DRIFT]" (leading space, so it appends cleanly after the
+ * provider token) when drifting, else "".
+ */
+export function formatDriftMarker(isDrift: boolean | undefined): string {
+	return isDrift ? " [DRIFT]" : "";
+}
+
+/**
  * AC-5 per-agency headroom badge: `[X% reset in Tm]`.
  *   - X = rounded headroom_pct
  *   - Tm = relative time until reset (uses formatRelativeTime)
