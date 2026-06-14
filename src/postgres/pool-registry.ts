@@ -188,12 +188,19 @@ export function setVault(v: VaultInterface): void {
  * plain env var refs continue to work, vault:// refs that require a configured
  * backend fail with clear errors.
  */
-export function createBridgeAdapter(sharedVault: VaultInterface): VaultInterface {
+export function createBridgeAdapter(
+	sharedVault: VaultInterface | (() => Promise<{ read(ref: string): Promise<string> }>),
+): VaultInterface {
 	return {
 		async read(ref: string): Promise<string> {
-			// Route vault:// scheme refs to the shared vault chooser
+			// Route vault:// scheme refs to the shared vault chooser.
+			// P1072: the shared chooser's getVault() is now async, so the bridge
+			// resolves it lazily per-read. A plain VaultInterface (sync object)
+			// is still accepted for backward-compat (tests / setVault()).
 			if (ref.startsWith("vault://")) {
-				return sharedVault.read(ref);
+				const resolved =
+					typeof sharedVault === "function" ? await sharedVault() : sharedVault;
+				return resolved.read(ref);
 			}
 			// Plain env var name fallback
 			return envVault.read(ref);
@@ -209,7 +216,9 @@ export function createBridgeAdapter(sharedVault: VaultInterface): VaultInterface
  */
 export function getVault(): VaultInterface {
 	if (!_vault) {
-		_vault = createBridgeAdapter(getSharedVault());
+		// P1072: getSharedVault() is now async; pass it as a getter so the bridge
+		// resolves the DB-driven adapter lazily on each read.
+		_vault = createBridgeAdapter(getSharedVault);
 	}
 	return _vault;
 }

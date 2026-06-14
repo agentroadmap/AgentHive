@@ -248,7 +248,7 @@ async function step3CreateRole(ctx: SagaContext): Promise<SagaResult> {
  */
 async function step4VaultWrite(ctx: SagaContext): Promise<SagaResult> {
   try {
-    const vault = getVault();
+    const vault = await getVault();
 
     // Build DSN
     const dsn = `postgres://${ctx.dbRole}:${ctx.dbPassword}@127.0.0.1:6432/${ctx.dbName}?application_name=agenthive-tenant-${ctx.slug}`;
