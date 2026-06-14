@@ -767,6 +767,58 @@ export class PgProposalHandlers {
 				};
 			}
 
+			// P3311: source-side premature-maturity block. Refuse to mark a DEVELOP
+			// proposal 'mature' (= ready for the D3 gate) when it has ACs but ZERO
+			// passing — there is no verified implementation to gate. This is the
+			// symmetric partner of the postWorkOffer demote-guard: without it, the
+			// enhancer revise-loop (and any worker) re-matures unbuilt proposals
+			// faster than the gate guard can demote them, producing an endless
+			// mature<->new oscillation (the D3 skeptic-beta dispatch loop). Blocking
+			// the maturation at the source makes the proposal SETTLE at 'new' so a
+			// developer is dispatched instead of the gate. Gated by the same flag as
+			// the postWorkOffer guard; default on.
+			const prematureBlockEnabled =
+				(process.env.AGENTHIVE_PREMATURE_GATE_GUARD_ENABLED ?? "true").toLowerCase() !==
+				"false";
+			if (prematureBlockEnabled && args.maturity === Maturity.MATURE) {
+				const { rows: gateRows } = await query<{
+					status: string | null;
+					total: number;
+					passing: number;
+				}>(
+					`SELECT p.status,
+					        count(ac.*)::int AS total,
+					        count(ac.*) FILTER (WHERE ac.status = 'pass')::int AS passing
+					   FROM roadmap_proposal.proposal p
+					   LEFT JOIN roadmap_proposal.proposal_acceptance_criteria ac
+					     ON ac.proposal_id = p.id
+					  WHERE p.id = $1
+					  GROUP BY p.status`,
+					[id],
+				);
+				const gate = gateRows[0];
+				if (
+					gate &&
+					gate.status?.toUpperCase() === RfcStates.DEVELOP &&
+					gate.total > 0 &&
+					gate.passing === 0
+				) {
+					return {
+						content: [
+							{
+								type: "text",
+								text:
+									`prop_set_maturity refused: P${id} is in DEVELOP with 0/${gate.total} passing acceptance criteria — ` +
+									`there is no verified implementation to gate, so it cannot be matured. ` +
+									`Deliver the code, then mark ACs passing via mcp_proposal action=verify_ac ` +
+									`(status=pass with evidence) before setting maturity=mature. ` +
+									`Maturity left unchanged; the proposal stays 'new' so a developer is dispatched.`,
+							},
+						],
+					};
+				}
+			}
+
 			// Attribution: explicit agent/author/actor arg, else the active lease
 			// holder. Never default to 'system' (admin identity + erased attribution).
 			const maturityActor = await resolveActingIdentity(
