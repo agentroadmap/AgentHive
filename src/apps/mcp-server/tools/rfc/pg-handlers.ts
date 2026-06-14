@@ -1443,41 +1443,40 @@ export async function recordGateDecision(args: {
 		const { rows: propRows } = await query<{
 			status: string;
 			maturity: string;
+			workflow_name: string;
 		}>(
-			`SELECT status, maturity FROM roadmap_proposal.proposal WHERE id = $1`,
+			`SELECT status, maturity, workflow_name FROM roadmap_proposal.proposal WHERE id = $1`,
 			[proposalId],
 		);
 		if (!propRows.length) {
 			return { content: [{ type: "text", text: `Proposal ${args.proposal_id} not found.` }] };
 		}
-		const { status: fromState, maturity } = propRows[0];
+		const { status: fromState, maturity, workflow_name: proposalWorkflow } = propRows[0];
 
 		// Resolve the forward gate target so the fn_apply_gate_advance trigger
-		// actually advances status on an 'advance' decision. This handler used to
-		// write to_state = from_state, which made the trigger's idempotency check
-		// (status == to_state -> RETURN NULL) a permanent no-op: gate_decision
-		// recorded a row but never advanced, contradicting the tool description.
-		// Resolve via the SAME workflow source the prop_transition validator uses
-		// (the `workflows` table + workflow_templates), so the two paths agree
-		// even for proposals whose proposal.workflow_name has drifted. Pick the
-		// single forward transition for this from_state (allowed_reasons that
-		// represent a gate advance, never the backward iterate/revision/reject
-		// ones). Falls back to from_state (no-op) for non-advance decisions or
-		// when no forward transition exists.
+		// actually advances status on an 'advance' decision.
+		// IMPORTANT: use proposal.workflow_name (read above) — NOT the workflows
+		// JOIN chain (workflows→workflow_templates→name). The JOIN chain can drift
+		// (P2754): a Standard RFC proposal may have its `workflows` row pointing at
+		// an Architecture RFC template, causing advance to resolve REVIEW→COMPLETE
+		// instead of REVIEW→DEVELOP. The canonical source is proposal.workflow_name.
+		// Order COMPLETE last so intermediate stages are preferred when multiple
+		// forward transitions exist for the same from_state.
 		let toState = fromState;
 		if (args.decision === "advance") {
 			const { rows: fwd } = await query<{ to_state: string }>(
 				`SELECT pvt.to_state
-				   FROM workflows w
-				   JOIN workflow_templates wt ON wt.id = w.template_id
-				   JOIN roadmap_proposal.proposal_valid_transitions pvt
-				     ON pvt.workflow_name = wt.name
-				  WHERE w.proposal_id = $1
+				   FROM roadmap_proposal.proposal_valid_transitions pvt
+				  WHERE pvt.workflow_name = $1
 				    AND LOWER(pvt.from_state) = LOWER($2)
-				    AND pvt.allowed_reasons && ARRAY['mature','decision','deploy','accepted','submit','approve','advance','quorum_met']::text[]
-				  ORDER BY pvt.to_state
+				    AND pvt.allowed_reasons && ARRAY['mature','decision','deploy','accepted','submit',
+				        'approve','advance','quorum_met',
+				        'gate_approved','decision_made','deployment_ready']::text[]
+				  ORDER BY
+				    CASE UPPER(pvt.to_state) WHEN 'COMPLETE' THEN 999 ELSE 0 END,
+				    pvt.to_state
 				  LIMIT 1`,
-				[proposalId, fromState],
+				[proposalWorkflow, fromState],
 			);
 			if (fwd.length) toState = fwd[0].to_state;
 		}
