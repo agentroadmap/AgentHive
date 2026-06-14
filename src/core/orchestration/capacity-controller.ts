@@ -73,6 +73,39 @@ export function isMeterAvailable(signal: MeterSignal | null): boolean {
 }
 
 /**
+ * AC-1 knob default. Lives in `core.runtime_flag` as
+ * `ORCHESTRATOR_TARGET_QUOTA_PCT` (hot-reloadable via the runtime_flag_changed
+ * NOTIFY); this constant is the in-code fallback when the flag is absent.
+ */
+export const DEFAULT_TARGET_QUOTA_PCT = 0.98;
+
+/**
+ * AC-1 knob resolution (pure). Picks the effective `target_quota_pct` from, in
+ * precedence order:
+ *   1. the per-agency `provider_registry.target_quota_pct_override` (if set),
+ *   2. the global `ORCHESTRATOR_TARGET_QUOTA_PCT` runtime flag (if set),
+ *   3. `DEFAULT_TARGET_QUOTA_PCT` (0.98).
+ *
+ * The DB/flag *reads* belong to the caller (config.get + a provider_registry
+ * lookup); this function only encodes the precedence + validity rules so they
+ * are unit-testable without a DB. Out-of-range or non-finite values are
+ * ignored at each level (treated as "not set") rather than clamped, so a typo'd
+ * override silently falls through to the flag/default instead of capping
+ * dispatch at a bogus value.
+ */
+export function resolveTargetQuotaPct(
+	agencyOverride: number | null | undefined,
+	globalFlag: number | null | undefined,
+	fallback: number = DEFAULT_TARGET_QUOTA_PCT,
+): number {
+	const isValid = (n: number | null | undefined): n is number =>
+		n != null && Number.isFinite(n) && n > 0 && n <= 1;
+	if (isValid(agencyOverride)) return agencyOverride;
+	if (isValid(globalFlag)) return globalFlag;
+	return isValid(fallback) ? fallback : DEFAULT_TARGET_QUOTA_PCT;
+}
+
+/**
  * AC-1 formula: effective cap = min(max_in_flight, floor(remaining_quota *
  * target_quota_pct)), never below zero. Pure function of its inputs; the knob
  * (target_quota_pct, default 0.98) visibly changes the computed cap.
