@@ -51,6 +51,7 @@ import {
 	RfcStates,
 } from "../workflow/state-names.ts";
 import { checkAgencyCapacity } from "./capacity-filter.ts";
+import { computeShadowLog } from "./match-shadow-log.ts";
 import {
 	getMcpInitDiagnosisReport,
 	getMcpInitDiagnostics,
@@ -963,6 +964,7 @@ async function logRouteDecision({
 	agencyIdentity,
 	projectId,
 	roleProfileId,
+	requiredTier = null,
 }: {
 	provider: string;
 	chosenRouteId: number;
@@ -971,6 +973,8 @@ async function logRouteDecision({
 	agencyIdentity: string | null;
 	projectId: number | null;
 	roleProfileId: number | null;
+	/** P3312 AC-5: tier hint, used to derive provisional difficulty for the shadow matcher. */
+	requiredTier?: string | null;
 }): Promise<void> {
 	// Params: $1=provider, $2=winner id, $3=host, $4=projectId, $5=agencyIdentity, $6=roleProfileId
 	const { rows } = await query<{
@@ -994,16 +998,40 @@ async function logRouteDecision({
 			reason: r.first_failing_layer,
 		}));
 
+	// P3312 AC-5/AC-8: compute the shadow-mode matcher payload. This is the single
+	// integration point consulted by BOTH the spawn resolver and offer-dispatch
+	// (offer-dispatch → spawnAgent → resolveModelRoute → logRouteDecision). When
+	// ADAPTIVE_MATCHER_ENABLED=false (default) the matcher is logged ONLY; the legacy
+	// choice (chosenRouteId) is what was acted on, so live routing is unchanged.
+	// computeShadowLog never returns a route, so it cannot alter behavior.
+	const shadow = await computeShadowLog({
+		provider,
+		chosenRouteId,
+		role,
+		agencyIdentity,
+		projectId,
+		requiredTier,
+		host: AGENTHIVE_HOST,
+	}).catch(() => ({
+		matcher_choice: null,
+		legacy_choice: null,
+		shadow_mode: true,
+	}));
+
 	await query(
 		`INSERT INTO roadmap.route_decision_log
-		   (proposal_id, role, agency_identity, chosen_route_id, eliminated_routes)
-		 VALUES ($1, $2, $3, $4, $5)`,
+		   (proposal_id, role, agency_identity, chosen_route_id, eliminated_routes,
+		    matcher_choice, legacy_choice, shadow_mode)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 		[
 			proposalId,
 			role,
 			agencyIdentity,
 			chosenRouteId,
 			JSON.stringify(eliminatedRoutes),
+			shadow.matcher_choice ? JSON.stringify(shadow.matcher_choice) : null,
+			shadow.legacy_choice ? JSON.stringify(shadow.legacy_choice) : null,
+			shadow.shadow_mode,
 		],
 	);
 }
@@ -1194,6 +1222,7 @@ async function resolveModelRoute(
 				agencyIdentity,
 				projectId,
 				roleProfileId,
+				requiredTier,
 			}).catch((err) => {
 				console.warn(
 					"[P772] route_decision_log write failed (non-blocking):",
@@ -1273,6 +1302,7 @@ async function resolveModelRoute(
 			agencyIdentity,
 			projectId,
 			roleProfileId,
+			requiredTier,
 		}).catch((err) => {
 			console.warn(
 				"[P772] route_decision_log write failed (non-blocking):",
@@ -1327,6 +1357,7 @@ async function resolveModelRoute(
 				agencyIdentity,
 				projectId,
 				roleProfileId,
+				requiredTier,
 			}).catch((err) => {
 				console.warn(
 					"[P772] route_decision_log write failed (non-blocking):",
