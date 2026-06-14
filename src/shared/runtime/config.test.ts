@@ -219,4 +219,115 @@ describe("ConfigResolver scoped runtime_flag resolution (P827)", () => {
 		await r.cleanup(); // must not throw
 		assert.ok(true);
 	});
+
+	// ── AC-6: hot-reload latency is synchronous on notify ────────────────────
+	test("AC-6: runtime_flag_changed eviction is synchronous (<500ms) and next get() re-reads", async () => {
+		const queries: string[][] = [];
+		const r = new ConfigResolver();
+		await r.init({
+			pool: mockPool({ global: "v2" }, queries),
+			scopeContext: {},
+		});
+		const dbCache = (r as never as { dbCache: Map<string, unknown> }).dbCache;
+		// Seed a fresh cached value that would otherwise be served without a query.
+		dbCache.set("runtime_flag:USE_OFFER_DISPATCH:global", {
+			value: "v1",
+			resolvedAt: Date.now(),
+		});
+
+		const t0 = Date.now();
+		(
+			r as never as { handleFlagNotification: (p: string) => void }
+		).handleFlagNotification(
+			JSON.stringify({ flag_name: "USE_OFFER_DISPATCH", scope: "global" }),
+		);
+		const evictMs = Date.now() - t0;
+		assert.ok(evictMs < 500, `eviction must be <500ms (was ${evictMs}ms)`);
+		assert.equal(
+			dbCache.has("runtime_flag:USE_OFFER_DISPATCH:global"),
+			false,
+			"notify evicted the cached entry",
+		);
+
+		// Next get() re-queries the DB and returns the updated value.
+		const got = await (
+			r as never as { getScopedFlagValue: (f: string) => Promise<unknown> }
+		).getScopedFlagValue("USE_OFFER_DISPATCH");
+		assert.equal(got, "v2", "post-notify get() returns the new DB value");
+		assert.deepEqual(queries, [["USE_OFFER_DISPATCH", "global"]]);
+		await r.cleanup();
+	});
+});
+
+// ── AC-11: direct-LISTEN pool must target the control DB (hiveCentral) ───────
+describe("ConfigResolver.buildDirectListenPoolConfig (P827 AC-11)", () => {
+	test("connectionString control pool: port overridden to direct port, DSN db/host honored", () => {
+		// Simulates a control pool built from AGENTHIVE_CONTROL_DSN (P518 path).
+		const poolOptions = {
+			connectionString:
+				"postgresql://xiaomi:secret@10.0.0.5:6432/hiveCentral",
+			options: "-c search_path=core",
+			max: 10,
+		};
+		const cfg = ConfigResolver.buildDirectListenPoolConfig(poolOptions, 5432);
+		// connectionString MUST be dropped, else pg ignores the discrete port.
+		assert.equal(
+			cfg.connectionString,
+			undefined,
+			"connectionString must be stripped so discrete fields win",
+		);
+		assert.equal(cfg.port, 5432, "direct port must be applied");
+		assert.equal(
+			cfg.database,
+			"hiveCentral",
+			"LISTEN client must target hiveCentral (the DSN db), NOT PGDATABASE",
+		);
+		assert.equal(cfg.host, "10.0.0.5", "host from DSN");
+		assert.equal(cfg.user, "xiaomi", "user from DSN");
+		assert.equal(cfg.password, "secret", "password from DSN");
+		assert.equal(cfg.options, "-c search_path=core", "search_path carried");
+		assert.equal(cfg.max, 1, "dedicated single-connection LISTEN pool");
+	});
+
+	test("discrete control pool: port overridden, host/db preserved", () => {
+		const poolOptions = {
+			host: "127.0.0.1",
+			port: 6432,
+			database: "hiveCentral",
+			user: "xiaomi",
+			options: "-c search_path=core",
+		};
+		const cfg = ConfigResolver.buildDirectListenPoolConfig(poolOptions, 5432);
+		assert.equal(cfg.port, 5432, "direct port overrides PgBouncer port");
+		assert.equal(cfg.database, "hiveCentral", "control db preserved");
+		assert.equal(cfg.host, "127.0.0.1");
+		assert.equal(cfg.max, 1);
+	});
+
+	test("URL-encoded credentials in DSN are decoded", () => {
+		const poolOptions = {
+			connectionString:
+				"postgresql://user%40org:p%40ss%3Aword@h:6432/hiveCentral",
+		};
+		const cfg = ConfigResolver.buildDirectListenPoolConfig(poolOptions, 5432);
+		assert.equal(cfg.user, "user@org");
+		assert.equal(cfg.password, "p@ss:word");
+		assert.equal(cfg.database, "hiveCentral");
+	});
+
+	test("unparseable connectionString falls back to discrete spread without throwing", () => {
+		const cfg = ConfigResolver.buildDirectListenPoolConfig(
+			{ connectionString: "not a url", options: "-c search_path=core" },
+			5432,
+		);
+		assert.equal(cfg.port, 5432);
+		assert.equal(cfg.max, 1);
+		assert.equal(cfg.connectionString, undefined);
+	});
+
+	test("empty pool options: still yields a valid direct-port config", () => {
+		const cfg = ConfigResolver.buildDirectListenPoolConfig({}, 5432);
+		assert.equal(cfg.port, 5432);
+		assert.equal(cfg.max, 1);
+	});
 });
