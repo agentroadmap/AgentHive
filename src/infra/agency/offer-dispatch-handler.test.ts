@@ -772,3 +772,172 @@ test("handleOfferDispatch: payload task overrides generic fallback even without 
 		"generic fallback must NOT appear when payload.task is set",
 	);
 });
+
+// ── P3000 AC-6: cost-quota refusal at dispatch time ───────────────────────────
+
+test("handleOfferDispatch: cost-quota exceeded returns offer via fn_return_work_offer, no spawn", async () => {
+	_resetActiveSpawnForTest();
+	_resetMaxInFlightCacheForTest();
+	let spawnCalled = false;
+	const execCalls: Array<{ sql: string; params: unknown[] }> = [];
+
+	// Mock exec that returns quota data indicating over-budget agent
+	const exec: SqlExec = async (sql, params) => {
+		execCalls.push({ sql, params: params ?? [] });
+		if (sql.includes("FROM roadmap.agency"))
+			return { rows: [{ paused_until: null }] };
+		if (sql.includes("provider_registry"))
+			return { rows: [{ max_in_flight: 8 }] };
+		// subscription policy: not throttled
+		if (sql.includes("host_model_route_throttle")) return { rows: [] };
+		if (sql.includes("COALESCE(runs_today") || sql.includes("subscription"))
+			return { rows: [] };
+		// cost-quota: agent is over budget
+		if (sql.includes("agent_cost_quota")) {
+			return {
+				rows: [
+					{
+						quota_usd_per_day: "5.00",
+						quota_usd_per_window: null,
+						window_kind: null,
+						reserved_headroom_pct: "5.00",
+						priority_tier: 3,
+					},
+				],
+			};
+		}
+		if (sql.includes("v_agent_daily_spend")) {
+			return { rows: [{ spent_today_usd: "5.50" }] }; // over $5 daily quota
+		}
+		if (sql.includes("COUNT(*)") && sql.includes("squad_dispatch")) {
+			return { rows: [{ in_flight_count: "0" }] };
+		}
+		if (sql.includes("fair_share_debt")) {
+			return {
+				rows: [{ cycles_since_dispatch: 0, reserved_override_active: false }],
+			};
+		}
+		return { rows: [] };
+	};
+
+	const msg = makeMessage({
+		offer_id: "00000000-0000-0000-0000-quota00000001",
+		role: "develop",
+		required_capabilities: [],
+		route_hint: "claude-code",
+		dispatch_id: 501,
+		claim_token: "tok-quota-1",
+		lease_ttl_seconds: 60,
+	});
+
+	await handleOfferDispatch("quota-over-budget-agent", msg, {
+		spawn: (async () => {
+			spawnCalled = true;
+			return {} as never;
+		}) as never,
+		exec,
+		logger: silentLogger(),
+		resolveWorktree: () => "wt",
+		renewalIntervalMs: 1_000_000,
+	});
+
+	assert.equal(spawnCalled, false, "spawn must NOT be called when quota exceeded");
+
+	const returnCalls = execCalls.filter((c) => c.sql.includes("fn_return_work_offer"));
+	assert.equal(
+		returnCalls.length,
+		1,
+		"fn_return_work_offer must be called to requeue the offer",
+	);
+	assert.equal(
+		returnCalls[0].params[0],
+		501,
+		"dispatch_id passed to fn_return_work_offer",
+	);
+	assert.ok(
+		String(returnCalls[0].params[3]).includes("cost_quota_refused"),
+		"return reason must identify cost_quota_refused",
+	);
+});
+
+test("handleOfferDispatch: starvation-recovery (reserved headroom) proceeds to spawn", async () => {
+	_resetActiveSpawnForTest();
+	_resetMaxInFlightCacheForTest();
+	const spawnCalls: Array<Record<string, unknown>> = [];
+	const execCalls: Array<{ sql: string; params: unknown[] }> = [];
+
+	const exec: SqlExec = async (sql, params) => {
+		execCalls.push({ sql, params: params ?? [] });
+		if (sql.includes("FROM roadmap.agency"))
+			return { rows: [{ paused_until: null }] };
+		if (sql.includes("provider_registry"))
+			return { rows: [{ max_in_flight: 8 }] };
+		if (sql.includes("host_model_route_throttle")) return { rows: [] };
+		if (sql.includes("subscription")) return { rows: [] };
+		if (sql.includes("agent_cost_quota")) {
+			return {
+				rows: [
+					{
+						quota_usd_per_day: "10.00",
+						quota_usd_per_window: null,
+						window_kind: null,
+						reserved_headroom_pct: "10.00", // $1.00 reserve
+						priority_tier: 1,
+					},
+				],
+			};
+		}
+		if (sql.includes("v_agent_daily_spend")) {
+			return { rows: [{ spent_today_usd: "10.20" }] }; // over quota
+		}
+		if (sql.includes("COUNT(*)") && sql.includes("squad_dispatch")) {
+			return { rows: [{ in_flight_count: "0" }] };
+		}
+		if (sql.includes("fair_share_debt")) {
+			// starved agent: 10+ cycles, no override flag needed
+			return {
+				rows: [
+					{
+						cycles_since_dispatch: 12, // > STARVATION_THRESHOLD(10)
+						reserved_override_active: false,
+					},
+				],
+			};
+		}
+		return { rows: [] };
+	};
+
+	const msg = makeMessage({
+		offer_id: "00000000-0000-0000-0000-starve000001",
+		role: "develop",
+		required_capabilities: [],
+		route_hint: "claude-code",
+		dispatch_id: 502,
+		claim_token: "tok-starve-1",
+		lease_ttl_seconds: 60,
+	});
+
+	await handleOfferDispatch("starved-opus-agent", msg, {
+		spawn: (async (req: Record<string, unknown>) => {
+			spawnCalls.push(req);
+			return {
+				agentRunId: "run-starve-recovery",
+				worktree: req.worktree as string,
+				exitCode: 0,
+				stdout: "ok",
+				stderr: "",
+				durationMs: 5,
+			};
+		}) as never,
+		exec,
+		logger: silentLogger(),
+		resolveWorktree: () => "wt",
+		renewalIntervalMs: 1_000_000,
+	});
+
+	for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+
+	assert.equal(spawnCalls.length, 1, "starved agent must be allowed to spawn");
+	const returnCalls = execCalls.filter((c) => c.sql.includes("fn_return_work_offer"));
+	assert.equal(returnCalls.length, 0, "offer must not be returned when headroom granted");
+});
