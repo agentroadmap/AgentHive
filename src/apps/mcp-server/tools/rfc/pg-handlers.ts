@@ -1460,50 +1460,46 @@ export async function recordGateDecision(args: {
 		// write to_state = from_state, which made the trigger's idempotency check
 		// (status == to_state -> RETURN NULL) a permanent no-op: gate_decision
 		// recorded a row but never advanced, contradicting the tool description.
-		// Resolve via the SAME workflow source the prop_transition validator uses
-		// (the `workflows` table + workflow_templates), so the two paths agree
-		// even for proposals whose proposal.workflow_name has drifted.
-		//
-		// Pick the single FORWARD transition for this from_state. We identify it by
-		// EXCLUDING the backward reasons (iterate / revision / reject / close ...)
-		// rather than allow-listing forward ones. Allow-listing forward reasons was
-		// a latent bug: every workflow has its own forward vocabulary
-		// (Architecture RFC uses {design_complete,ready_for_review} /
-		// {gate_approved,decision_made,deployment_ready}; Code Review uses
-		// {merge,mature}/{approve,quorum_met}; Governance uses {approve}/{mature,complete}),
-		// none of which overlapped the old hard-coded list — so gate_decision
-		// silently no-op'd for every non-"Standard RFC" workflow. The backward
-		// vocabulary, by contrast, is small and stable across all workflows.
-		// Falls back to from_state (no-op) for non-advance decisions, terminal
-		// states with no forward edge, or genuine ambiguity.
-		//
-		// NOTE (P2754, from P3000 branch): the query below keys on
-		// proposal.workflow_name (read above) — NOT the workflows JOIN chain
-		// (workflows→workflow_templates→name), which can drift and resolve
-		// REVIEW→COMPLETE instead of REVIEW→DEVELOP.
+		// Resolve the forward gate target via the proposal's ACTUAL workflow
+		// (workflows table → workflow_templates → proposal_valid_transitions).
+		// Order by workflow_stages.stage_order so we pick the NEXT sequential
+		// stage, never a terminal state that happens to sort alphabetically first
+		// (e.g. COMPLETE < DEVELOP). Filter to forward-only by requiring the
+		// to_state stage_order to be strictly greater than the from_state order.
+		// AC-2: return an explicit error if no forward transition exists — do NOT
+		// silently write to_state = from_state (which is an undetected no-op).
 		let toState = fromState;
 		if (args.decision === "advance") {
 			const { rows: fwd } = await query<{ to_state: string }>(
 				`SELECT pvt.to_state
-				   FROM roadmap_proposal.proposal_valid_transitions pvt
-				  WHERE pvt.workflow_name = $1
+				   FROM roadmap.workflows w
+				   JOIN roadmap.workflow_templates wt ON wt.id = w.template_id
+				   JOIN roadmap_proposal.proposal_valid_transitions pvt
+				     ON pvt.workflow_name = wt.name
+				   JOIN roadmap.workflow_stages ws_to
+				     ON ws_to.template_id = wt.id
+				    AND LOWER(ws_to.stage_name) = LOWER(pvt.to_state)
+				   JOIN roadmap.workflow_stages ws_from
+				     ON ws_from.template_id = wt.id
+				    AND LOWER(ws_from.stage_name) = LOWER($2)
+				  WHERE w.proposal_id = $1
 				    AND LOWER(pvt.from_state) = LOWER($2)
-				    AND NOT (pvt.allowed_reasons && ARRAY[
-				          'iterate','iteration','revision','revise','changes_requested',
-				          'return','reject','rejected','block','blocked','concerns_raised',
-				          'close','discard','stale','send_back'
-				        ]::text[])
-				  ORDER BY
-				    -- Prefer intermediate stages over terminal states so that
-				    -- REVIEW→DEVELOP is picked before REVIEW→COMPLETE when
-				    -- both transitions exist (e.g. Architecture RFC workflow).
-				    -- Alphabetical fallback resolves any remaining ties.
-				    CASE WHEN LOWER(pvt.to_state) IN ('complete','closed','archived','obsolete') THEN 1 ELSE 0 END,
-				    pvt.to_state
+				    AND pvt.allowed_reasons && ARRAY['mature','decision','deploy','accepted','submit','approve','advance','quorum_met']::text[]
+				    AND ws_to.stage_order > ws_from.stage_order
+				  ORDER BY ws_to.stage_order ASC
 				  LIMIT 1`,
-				[proposalWorkflow, fromState],
+				[proposalId, fromState],
 			);
-			if (fwd.length) toState = fwd[0].to_state;
+			if (fwd.length) {
+				toState = fwd[0].to_state;
+			} else {
+				return {
+					content: [{
+						type: "text",
+						text: `❌ gate_decision advance failed for proposal ${args.proposal_id}: no forward transition found from '${fromState}' in the proposal's workflow. Check that proposal_valid_transitions and workflow_stages are populated for this workflow, and that the proposal's workflows.template_id is correct (may be a P2756 workflow drift — run the drift audit in migration 272).`,
+					}],
+				};
+			}
 		}
 
 		// Shadow-mode skip: if a row with the same agent_run_id already exists,
