@@ -18,6 +18,7 @@ import {
 	isWorktreeCwd,
 	RepoRootSpawnRefused,
 } from "../worktree-guard.ts";
+import { resolveSpawnWorktreePath } from "../agent-spawner.ts";
 import {
 	isEnvWorktreeFallbackEnabled,
 	resolveExecutorWorktreeFallback,
@@ -109,6 +110,20 @@ test("AC-3: opt-in flag with empty env var yields undefined (no shared default)"
 			AGENTHIVE_DEFAULT_EXECUTOR_WORKTREE: "   ",
 		}),
 		undefined,
+	);
+});
+
+test("P3315: absolute worktree hints are not joined under WORKTREE_ROOT", () => {
+	assert.equal(
+		resolveSpawnWorktreePath("/data/code/worktree/claude2", "/data/code/worktree"),
+		"/data/code/worktree/claude2",
+	);
+});
+
+test("P3315: relative worktree hints still resolve under WORKTREE_ROOT", () => {
+	assert.equal(
+		resolveSpawnWorktreePath("codex2", "/data/code/worktree"),
+		"/data/code/worktree/codex2",
 	);
 });
 
