@@ -474,62 +474,103 @@ async function cmdDbPing(target: string) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  db ping command                                                   */
+/*  config set command (P828 AC-38)                                   */
 /* ------------------------------------------------------------------ */
 
-async function cmdDbPing(target: string) {
-	const targets = target === "all" ? ["postgres", "pgbouncer"] : [target];
-
-	for (const t of targets) {
-		if (t === "pgbouncer") {
-			const host = process.env.PGBOUNCER_HOST ?? "127.0.0.1";
-			const port = Number(process.env.PGBOUNCER_PORT ?? process.env.PGPORT ?? 6432);
-			const user = process.env.PGBOUNCER_ADMIN_USER ?? process.env.PGUSER ?? "agenthive";
-			clack.log.info(`Pinging PgBouncer at ${host}:${port} (user: ${user})…`);
-			const start = Date.now();
-			try {
-				// Auth via ~/.pgpass — never PGPASSWORD
-				const out = run([
-					"psql",
-					`-h`, host,
-					`-p`, String(port),
-					`-U`, user,
-					`pgbouncer`,
-					`-c`, `SHOW VERSION`,
-					`-t`, `-A`,
-				]);
-				const ms = Date.now() - start;
-				clack.log.success(`PgBouncer OK — ${out.trim()} (${ms}ms)`);
-			} catch (e: any) {
-				clack.log.error(`PgBouncer UNREACHABLE at ${host}:${port} — ${e.message}`);
-				process.exitCode = 1;
-			}
-		} else if (t === "postgres") {
-			const host = process.env.PGHOST ?? "127.0.0.1";
-			const port = Number(process.env.PGPORT_DIRECT ?? process.env.PGPORT ?? 5432);
-			const user = process.env.PGUSER ?? "agenthive";
-			clack.log.info(`Pinging PostgreSQL at ${host}:${port} (user: ${user})…`);
-			const start = Date.now();
-			try {
-				run([
-					"psql",
-					`-h`, host,
-					`-p`, String(port),
-					`-U`, user,
-					`-c`, `SELECT 1`,
-					`-t`, `-A`,
-				]);
-				const ms = Date.now() - start;
-				clack.log.success(`PostgreSQL OK (${ms}ms)`);
-			} catch (e: any) {
-				clack.log.error(`PostgreSQL UNREACHABLE at ${host}:${port} — ${e.message}`);
-				process.exitCode = 1;
-			}
-		} else {
-			clack.log.error(`Unknown target '${t}'. Use: postgres | pgbouncer | all`);
-			process.exitCode = 1;
-		}
+/**
+ * P828 AC-38: `agenthive config set --key <k> --value <v> --operator-id <id>`.
+ *
+ * Mutates a runtime config key through the audited ConfigResolver.set() path so
+ * the mutation lands in core.config_mutation_log + core.runtime_flag with a
+ * pg_notify and synchronous cache eviction. The --operator-id is the operator's
+ * control_identity.principal id (the FK set() resolves against); it is placed in
+ * agentContextStorage as an operator-kind verified principal so set()'s authority
+ * gate grants operator rights. --value is parsed by the key's own parser (passed
+ * through verbatim; for JSON values quote them, e.g. --value 'true').
+ */
+async function cmdConfigSet(opts: {
+	key?: string;
+	value?: string;
+	operatorId?: string;
+}): Promise<void> {
+	const keyName = opts.key?.trim();
+	const operatorId = opts.operatorId?.trim();
+	if (!keyName) {
+		clack.log.error("--key is required.");
+		process.exitCode = 1;
+		return;
 	}
+	if (opts.value === undefined) {
+		clack.log.error("--value is required.");
+		process.exitCode = 1;
+		return;
+	}
+	if (!operatorId) {
+		clack.log.error(
+			"--operator-id is required (control_identity.principal id of the operator).",
+		);
+		process.exitCode = 1;
+		return;
+	}
+
+	const { agentContextStorage } = await import(
+		"../shared/identity/agent-context.ts"
+	);
+	const { getConfigKeyByName } = await import(
+		"../shared/runtime/config-keys.ts"
+	);
+	const { initConfigFromControlPool, set: configSet } = await import(
+		"../shared/runtime/config.ts"
+	);
+
+	let key: ReturnType<typeof getConfigKeyByName>;
+	try {
+		key = getConfigKeyByName(keyName);
+	} catch (e: any) {
+		clack.log.error(e?.message ?? String(e));
+		process.exitCode = 1;
+		return;
+	}
+
+	// The key's parser turns the raw --value string into the typed value set()
+	// will store + re-validate. A parse failure here is reported before any DB I/O.
+	let parsed: unknown;
+	try {
+		parsed = key.parse(opts.value);
+	} catch (e: any) {
+		clack.log.error(`Invalid --value for ${keyName}: ${e?.message ?? e}`);
+		process.exitCode = 1;
+		return;
+	}
+
+	try {
+		await initConfigFromControlPool();
+	} catch (e: any) {
+		clack.log.error(`Control-plane pool init failed: ${e?.message ?? e}`);
+		process.exitCode = 1;
+		return;
+	}
+
+	await agentContextStorage.run(
+		{
+			verified: {
+				principal_id: operatorId,
+				principal_kind: "operator",
+				parent_principal_id: null,
+			},
+		},
+		async () => {
+			try {
+				await configSet(key as never, parsed as never);
+				clack.log.success(
+					`config set: ${keyName} = ${opts.value} (operator ${operatorId})`,
+				);
+			} catch (e: any) {
+				clack.log.error(`config set failed: ${e?.message ?? e}`);
+				process.exitCode = 1;
+			}
+		},
+	);
 }
 
 /* ------------------------------------------------------------------ */
@@ -572,5 +613,22 @@ program
 	.description("Ping a database endpoint: postgres | pgbouncer | all")
 	.argument("[target]", "postgres | pgbouncer | all", "all")
 	.action(cmdDbPing);
+
+// P828 AC-38: audited runtime config mutation from the CLI.
+const configCmd = program
+	.command("config")
+	.description("Runtime config administration");
+configCmd
+	.command("set")
+	.description(
+		"Set a runtime config key via the audited ConfigResolver.set() path",
+	)
+	.requiredOption("--key <key>", "Config key name (e.g. USE_OFFER_DISPATCH)")
+	.requiredOption("--value <value>", "New value (parsed by the key's parser)")
+	.requiredOption(
+		"--operator-id <id>",
+		"Operator's control_identity.principal id (audit FK)",
+	)
+	.action((opts) => cmdConfigSet(opts));
 
 program.parse();

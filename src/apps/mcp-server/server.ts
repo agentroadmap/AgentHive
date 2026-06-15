@@ -3216,6 +3216,97 @@ export async function createMcpServer(
 		},
 	});
 
+	// P828: Config mutation + audit surface — config_get / config_mutation /
+	// list_config_mutations. Sit on top of ConfigResolver.set() (audited) and
+	// core.config_mutation_log. Routed via mcp_ops in consolidated.ts.
+	const { configGet, configMutation, listConfigMutations } = await import(
+		"./tools/ops/config-mutation-ops.ts"
+	);
+	server.addTool({
+		name: "config_get",
+		description:
+			"P828 AC-22: read a runtime config key's current resolved value + scope/class metadata. " +
+			"No mutation. Args: { key_name }.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				key_name: {
+					type: "string",
+					description:
+						"Config key name (e.g. USE_OFFER_DISPATCH, PROJECT_TOKEN_BUDGET).",
+				},
+			},
+			required: ["key_name"],
+		},
+		handler: (args) => {
+			return configGet(args as Record<string, unknown> as never).then((r) => ({
+				content: [{ type: "text", text: JSON.stringify(r, null, 2) }],
+			}));
+		},
+	});
+	server.addTool({
+		name: "config_mutation",
+		description:
+			"P828 AC-23: mutate a runtime config key via the audited ConfigResolver.set() path. " +
+			"Requires a verified caller identity (read from agentContextStorage) or the " +
+			"AGENTHIVE_EMERGENCY_OPERATOR_DID override. Writes core.config_mutation_log + " +
+			"runtime_flag, fires pg_notify, evicts the local cache. Args: { key_name, value }.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				key_name: {
+					type: "string",
+					description: "Config key name to mutate (flag/registry/structural).",
+				},
+				value: {
+					description: "New value (type per the key's parser).",
+				},
+			},
+			required: ["key_name", "value"],
+		},
+		handler: (args) => {
+			return configMutation(args as Record<string, unknown> as never).then(
+				(r) => ({
+					content: [{ type: "text", text: JSON.stringify(r, null, 2) }],
+				}),
+			);
+		},
+	});
+	server.addTool({
+		name: "list_config_mutations",
+		description:
+			"P828 AC-25: paginated, newest-first read of core.config_mutation_log filtered by " +
+			"(key_name, scope). Args: { key_name?, scope?, limit?, offset? }.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				key_name: {
+					type: "string",
+					description: "Optional exact key_name filter.",
+				},
+				scope: {
+					type: "string",
+					description: "Optional exact scope filter (e.g. 'global').",
+				},
+				limit: {
+					type: "number",
+					description: "Max rows (default 50, clamped to [1, 500]).",
+				},
+				offset: {
+					type: "number",
+					description: "Row offset for pagination (default 0).",
+				},
+			},
+		},
+		handler: (args) => {
+			return listConfigMutations(args as Record<string, unknown> as never).then(
+				(r) => ({
+					content: [{ type: "text", text: JSON.stringify(r, null, 2) }],
+				}),
+			);
+		},
+	});
+
 	// P1129: Agency lifecycle tools — agency_start / agency_status
 	// (function API since 1a876799 — agency-ops.ts exports no class; a stale
 	// class-based registration block kept resurfacing through merges and

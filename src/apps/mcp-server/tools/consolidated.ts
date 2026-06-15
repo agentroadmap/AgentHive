@@ -366,6 +366,10 @@ const opsRoutes: RouteMap = {
 	ref_get_term: "ref_get_term",
 	// P498: Config audit tool
 	config_audit: "config_audit",
+	// P828: Config mutation + audit surface
+	config_get: "config_get",
+	config_mutation: "config_mutation",
+	list_config_mutations: "list_config_mutations",
 	// P895: Backup harness
 	backup_take: "backup_take",
 	backup_verify: "backup_verify",
