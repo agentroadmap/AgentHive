@@ -40,6 +40,8 @@ export interface OperatorAuthContext {
 	targetIdentity?: string;
 	targetProjectId?: number;
 	requestSummary?: Record<string, unknown>;
+	// P3508 AC-5: when set, the token's scoped_project_id (if non-NULL) must match.
+	targetProjectId?: number;
 }
 
 export function hashOperatorToken(rawToken: string): string {
@@ -172,7 +174,7 @@ export async function authorizeOperator(
 
 	const sha = hashOperatorToken(raw);
 
-	// 3. Lookup + check action allowlist + revocation/expiry.
+	// 3. Lookup + check action allowlist + revocation/expiry + project scope.
 	const { rows } = await query<{
 		id: number;
 		operator_name: string;
@@ -327,201 +329,6 @@ export async function authorizeOperator(
 }
 
 /**
- * Token-only authorization path (AC-9c, P3508).
- *
- * Identical logic to authorizeOperator() but operates on a raw token string
- * instead of an HTTP Request. Used by MCP handlers (e.g. project_create_v2)
- * that receive the token as a string argument rather than an Authorization header.
- *
- * Writes audit rows with remoteAddr=null (no network context available).
- */
-export async function authorizeOperatorByToken(
-	rawToken: string,
-	ctx: OperatorAuthContext,
-): Promise<OperatorAuthOutcome> {
-	// 1. Are any tokens configured?
-	const { rows: configRows } = await query<{ token_count: number | string }>(
-		`SELECT COUNT(*)::int AS token_count
-		   FROM roadmap.operator_token
-		  WHERE revoked_at IS NULL
-		    AND (expires_at IS NULL OR expires_at > now())`,
-	);
-	const activeTokenCount = Number(configRows[0]?.token_count ?? 0);
-
-	if (activeTokenCount === 0) {
-		const out: OperatorAuthOutcome = {
-			decision: "unconfigured",
-			operatorName: null,
-			tokenId: null,
-			failureReason: "No active operator_token rows configured.",
-			httpStatus: 503,
-		};
-		await logAudit({
-			action: ctx.action,
-			decision: out.decision,
-			operatorName: null,
-			tokenId: null,
-			targetKind: ctx.targetKind,
-			targetIdentity: ctx.targetIdentity,
-			requestSummary: ctx.requestSummary,
-			remoteAddr: null,
-			responseStatus: out.httpStatus,
-			failureReason: out.failureReason,
-		});
-		return out;
-	}
-
-	const sha = hashOperatorToken(rawToken);
-
-	const { rows } = await query<{
-		id: number;
-		operator_name: string;
-		allowed_actions: string[];
-		revoked_at: string | null;
-		expires_at: string | null;
-		scoped_project_id: number | null;
-	}>(
-		`SELECT id, operator_name, allowed_actions, revoked_at, expires_at, scoped_project_id
-		   FROM roadmap.operator_token
-		  WHERE token_sha256 = $1`,
-		[sha],
-	);
-
-	const row = rows[0];
-	const denyOutcome = (reason: string, status = 403): OperatorAuthOutcome => ({
-		decision: "deny",
-		operatorName: row?.operator_name ?? null,
-		tokenId: row?.id ?? null,
-		failureReason: reason,
-		httpStatus: status,
-	});
-
-	if (!row) {
-		const out = denyOutcome("Token not recognized.", 401);
-		await logAudit({
-			action: ctx.action,
-			decision: out.decision,
-			operatorName: out.operatorName,
-			tokenId: out.tokenId,
-			targetKind: ctx.targetKind,
-			targetIdentity: ctx.targetIdentity,
-			requestSummary: ctx.requestSummary,
-			remoteAddr: null,
-			responseStatus: out.httpStatus,
-			failureReason: out.failureReason,
-		});
-		return out;
-	}
-
-	if (row.revoked_at) {
-		const out = denyOutcome("Token revoked.");
-		await logAudit({
-			action: ctx.action,
-			decision: out.decision,
-			operatorName: out.operatorName,
-			tokenId: out.tokenId,
-			targetKind: ctx.targetKind,
-			targetIdentity: ctx.targetIdentity,
-			requestSummary: ctx.requestSummary,
-			remoteAddr: null,
-			responseStatus: out.httpStatus,
-			failureReason: out.failureReason,
-		});
-		return out;
-	}
-
-	if (row.expires_at && new Date(row.expires_at).getTime() <= Date.now()) {
-		const out = denyOutcome("Token expired.");
-		await logAudit({
-			action: ctx.action,
-			decision: out.decision,
-			operatorName: out.operatorName,
-			tokenId: out.tokenId,
-			targetKind: ctx.targetKind,
-			targetIdentity: ctx.targetIdentity,
-			requestSummary: ctx.requestSummary,
-			remoteAddr: null,
-			responseStatus: out.httpStatus,
-			failureReason: out.failureReason,
-		});
-		return out;
-	}
-
-	const allowed = row.allowed_actions ?? [];
-	const actionAllowed = allowed.includes("*") || allowed.includes(ctx.action);
-	if (!actionAllowed) {
-		const out = denyOutcome(
-			`Action '${ctx.action}' not in allowed_actions for operator '${row.operator_name}'.`,
-		);
-		await logAudit({
-			action: ctx.action,
-			decision: out.decision,
-			operatorName: out.operatorName,
-			tokenId: out.tokenId,
-			targetKind: ctx.targetKind,
-			targetIdentity: ctx.targetIdentity,
-			requestSummary: ctx.requestSummary,
-			remoteAddr: null,
-			responseStatus: out.httpStatus,
-			failureReason: out.failureReason,
-		});
-		return out;
-	}
-
-	// Project scope check (matches authorizeOperator logic).
-	// Coerce to number: PG may return bigint columns as strings via the driver.
-	if (
-		row.scoped_project_id !== null &&
-		ctx.targetProjectId !== undefined &&
-		Number(ctx.targetProjectId) !== Number(row.scoped_project_id)
-	) {
-		const out = denyOutcome(
-			`project scope: token scoped to project ${row.scoped_project_id}, ` +
-			`caller targets project ${ctx.targetProjectId}.`,
-		);
-		await logAudit({
-			action: ctx.action,
-			decision: out.decision,
-			operatorName: out.operatorName,
-			tokenId: out.tokenId,
-			targetKind: ctx.targetKind,
-			targetIdentity: ctx.targetIdentity,
-			requestSummary: ctx.requestSummary,
-			remoteAddr: null,
-			responseStatus: out.httpStatus,
-			failureReason: out.failureReason,
-		});
-		return out;
-	}
-
-	void query(
-		`UPDATE roadmap.operator_token SET last_used_at = now() WHERE id = $1`,
-		[row.id],
-	).catch(() => {});
-
-	const out: OperatorAuthOutcome = {
-		decision: "allow",
-		operatorName: row.operator_name,
-		tokenId: row.id,
-		failureReason: null,
-		httpStatus: 200,
-	};
-	await logAudit({
-		action: ctx.action,
-		decision: out.decision,
-		operatorName: out.operatorName,
-		tokenId: out.tokenId,
-		targetKind: ctx.targetKind,
-		targetIdentity: ctx.targetIdentity,
-		requestSummary: ctx.requestSummary,
-		remoteAddr: null,
-		responseStatus: 200,
-		failureReason: null,
-	});
-	return out;
-}
-
-/**
  * Convenience helper: run authorizeOperator() and translate non-"allow"
  * outcomes into a Response. Returns null when the call should proceed.
  */
@@ -546,4 +353,21 @@ export async function requireOperator(
 		{ status: outcome.httpStatus },
 	);
 	return { outcome, rejected };
+}
+
+/**
+ * P3508 AC-9(c): Token-string variant of authorizeOperator for MCP paths where
+ * there is no HTTP request object (the token arrives as a string argument).
+ *
+ * Identical hash → DB lookup → allowed_actions → project-scope → audit-write
+ * flow as authorizeOperator(); the only difference is token extraction.
+ */
+export async function authorizeOperatorByToken(
+	rawToken: string,
+	ctx: OperatorAuthContext,
+): Promise<OperatorAuthOutcome> {
+	const fakeReq = new Request("http://localhost/mcp", {
+		headers: { authorization: `Bearer ${rawToken}` },
+	});
+	return authorizeOperator(fakeReq, ctx);
 }

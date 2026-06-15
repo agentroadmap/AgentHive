@@ -3354,14 +3354,28 @@ export class RoadmapServer {
 		displayOrNumericId: string,
 		req: Request,
 	): Promise<Response> {
+		// P3508 AC-3: derive project_id from proposal so scoped tokens can be checked.
+		const isNumeric = /^\d+$/.test(displayOrNumericId);
+		let targetProjectId: number | undefined;
+		try {
+			const { rows: projRows } = await query<{ project_id: number | null }>(
+				`SELECT project_id FROM roadmap_proposal.proposal
+				  WHERE ${isNumeric ? "id = $1" : "display_id = $1"} LIMIT 1`,
+				[isNumeric ? Number(displayOrNumericId) : displayOrNumericId],
+			);
+			const pid = projRows[0]?.project_id;
+			if (pid !== null && pid !== undefined) targetProjectId = pid;
+		} catch {
+			// non-fatal: fall through without project scope check
+		}
 		const auth = await requireOperator(req, {
 			action: "state-machine.resume",
 			targetKind: "proposal",
 			targetIdentity: displayOrNumericId,
+			targetProjectId,
 		});
 		if (auth.rejected) return auth.rejected;
 
-		const isNumeric = /^\d+$/.test(displayOrNumericId);
 		try {
 			const { rows } = await query<{
 				id: number;
@@ -6211,10 +6225,9 @@ agenthive_msg_send_rate_limit_violations_by_reason_total{reason="${reason}"} ${c
 	 * AC-2: writes to control_audit.operator_action_log.
 	 */
 	private async handleControlStop(req: Request): Promise<Response> {
-		const auth = await requireOperator(req, { action: "control.stop" });
-		if (auth.rejected) return auth.rejected;
 		try {
-			const body = await req.json() as Record<string, unknown>;
+			// P3508 AC-3: read body first so we can derive target project_id before auth.
+			const body = await req.clone().json() as Record<string, unknown>;
 			const scopeType = body.scope_type as ScopeType | undefined;
 			const scopeId = typeof body.scope_id === "string" ? body.scope_id
 				: String(body.scope_id ?? "");
@@ -6232,6 +6245,40 @@ agenthive_msg_send_rate_limit_violations_by_reason_total{reason="${reason}"} ${c
 			if (!scopeId) {
 				return Response.json({ error: "scope_id is required" }, { status: 400 });
 			}
+
+			// P3508 AC-3/AC-9(b): derive project_id from DB, not caller-supplied value.
+			let targetProjectId: number | undefined;
+			try {
+				if (scopeType === "proposal") {
+					const isNum = /^\d+$/.test(scopeId);
+					const { rows } = await query<{ project_id: number | null }>(
+						`SELECT project_id FROM roadmap_proposal.proposal
+						  WHERE ${isNum ? "id = $1::bigint" : "display_id = $1"} LIMIT 1`,
+						[isNum ? Number(scopeId) : scopeId],
+					);
+					const pid = rows[0]?.project_id;
+					if (pid != null) targetProjectId = pid;
+				} else if (scopeType === "dispatch") {
+					const { rows } = await query<{ project_id: number | null }>(
+						`SELECT p.project_id
+						   FROM roadmap_proposal.proposal p
+						   JOIN roadmap.work_dispatch d ON d.proposal_id = p.id
+						  WHERE d.id = $1::bigint LIMIT 1`,
+						[Number(scopeId)],
+					);
+					const pid = rows[0]?.project_id;
+					if (pid != null) targetProjectId = pid;
+				}
+				// agency/host/worker/provider_route are cross-project — no project scope.
+			} catch {
+				// non-fatal: proceed without project scope enforcement
+			}
+
+			const auth = await requireOperator(req, {
+				action: "control.stop",
+				targetProjectId,
+			});
+			if (auth.rejected) return auth.rejected;
 
 			const actor = auth.outcome.operatorName ?? "operator";
 			const result = await operatorStop({ scopeType, scopeId, reason, actor });

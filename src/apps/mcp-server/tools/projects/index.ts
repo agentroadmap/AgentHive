@@ -120,22 +120,27 @@ export function registerProjectTools(server: McpServer): void {
 			required: ["slug", "name"],
 		},
 		async handler(args: Record<string, unknown>): Promise<CallToolResult> {
-			// P3508 AC-6: if an operator_token is supplied, enforce project.create ACL
-			if (args.operator_token) {
-				const auth = await authorizeOperatorByToken(
-					args.operator_token as string,
-					{ action: "project.create" },
-				);
-				if (auth.decision !== "allow") {
+			// P3508 AC-6: gate project creation behind operator token when provided.
+			const rawToken = args.operator_token as string | undefined;
+			if (rawToken) {
+				const outcome = await authorizeOperatorByToken(rawToken, {
+					action: "project.create",
+					targetKind: "project",
+					targetIdentity: args.slug as string | undefined,
+					requestSummary: { slug: args.slug, name: args.name },
+				});
+				if (outcome.decision !== "allow") {
 					return {
 						content: [
 							{
 								type: "text",
 								text: JSON.stringify({
 									ok: false,
-									error: "unauthorized",
-									reason: auth.failureReason ?? "operator token rejected",
-								}),
+									error: outcome.failureReason ?? "Forbidden",
+									decision: outcome.decision,
+									action: "project.create",
+									http_status: outcome.httpStatus,
+								}, null, 2),
 							},
 						],
 					};

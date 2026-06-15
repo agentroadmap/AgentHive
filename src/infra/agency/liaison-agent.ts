@@ -172,6 +172,19 @@ export async function runLiaisonAgent(
 		: await connectListenClient(identity);
 	await listenClient.query(`LISTEN "${channel}"`);
 	console.log(`${log} LISTEN active on: ${channel}`);
+	// P1107 AC-4/AC-32: register subscription so watchdog + operators can verify
+	// which agents are actively listening without querying pg_stat_activity.
+	const listenPid = listenClient.processID ?? null;
+	await query(
+		`INSERT INTO roadmap.listener_subscription (agent_identity, channel, established_at, established_pid)
+		 VALUES ($1, $2, now(), $3)
+		 ON CONFLICT (agent_identity, channel) DO UPDATE SET
+		   established_at = now(),
+		   established_pid = EXCLUDED.established_pid`,
+		[identity, channel, listenPid],
+	).catch((err) =>
+		console.warn(`${log} listener_subscription INSERT failed (non-fatal):`, err instanceof Error ? err.message : err),
+	);
 
 	// P1109 Tier-2 (AC-4 / AC-6): record listener presence in
 	// roadmap.listener_subscription from the SAME client that holds the LISTEN, so
