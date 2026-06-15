@@ -1,4 +1,6 @@
 import { execSync } from "node:child_process";
+import pLimit from "p-limit";
+import { getControlPool, getProjectDb } from "../../postgres/pool-registry.ts";
 import {
 	appendFileSync,
 	createReadStream,
@@ -1171,6 +1173,14 @@ export class RoadmapServer {
 				return await this.handleListProjects();
 			if (pathname === "/api/control-plane/overview" && method === "GET")
 				return await this.handleControlPlaneOverview(req);
+			if (pathname === "/api/control-plane/fleet" && method === "GET")
+				return await this.handleControlPlaneFleet();
+			if (pathname === "/api/control-plane/efficiency" && method === "GET")
+				return await this.handleControlPlaneEfficiency();
+			if (pathname === "/api/control-plane/identity" && method === "GET")
+				return await this.handleControlPlaneIdentity();
+			if (pathname === "/api/control-plane/platform" && method === "GET")
+				return await this.handleControlPlanePlatform();
 			if (pathname === "/api/operator/audit" && method === "GET")
 				return await this.handleOperatorAudit(req);
 			if (pathname === "/api/operator/tokens" && method === "POST")
@@ -4165,6 +4175,210 @@ export class RoadmapServer {
 				{ error: "Failed to load control-plane overview" },
 				{ status: 500 },
 			);
+		}
+	}
+
+	// ── Cross-project fan-out helpers ────────────────────────────────────────────
+
+	private async _crossProjectFanOut<T>(
+		queryFn: (pool: import("pg").Pool, project: { project_id: number; slug: string; name: string }) => Promise<T>,
+	): Promise<{ data: T[]; errors: Array<{ project_id: number; slug: string; error: string }>; partial: boolean }> {
+		const ctrl = getControlPool();
+		const { rows: projects } = await ctrl.query<{ project_id: number; slug: string; name: string }>(
+			"SELECT project_id, slug, name FROM roadmap.project WHERE status='active' ORDER BY project_id",
+		);
+
+		const CONTROL_PLANE_CONCURRENCY = 5;
+		const limit = pLimit(CONTROL_PLANE_CONCURRENCY);
+
+		const results = await Promise.allSettled(
+			projects.map((p) =>
+				limit(() =>
+					Promise.race([
+						getProjectDb(p.slug).then((pool) => queryFn(pool, p)),
+						new Promise<never>((_, rej) =>
+							setTimeout(() => rej(new Error("timeout")), 5000),
+						),
+					]),
+				),
+			),
+		);
+
+		const data: T[] = [];
+		const errors: Array<{ project_id: number; slug: string; error: string }> = [];
+		for (let i = 0; i < results.length; i++) {
+			const r = results[i];
+			if (r.status === "fulfilled") {
+				data.push(r.value);
+			} else {
+				errors.push({
+					project_id: projects[i].project_id,
+					slug: projects[i].slug,
+					error: (r.reason as Error)?.message ?? String(r.reason),
+				});
+			}
+		}
+		return { data, errors, partial: errors.length > 0 };
+	}
+
+	private async handleControlPlaneFleet(): Promise<Response> {
+		try {
+			const ctrl = getControlPool();
+
+			// Control-plane layer: agency registry + route health
+			const [agenciesResult, routesResult] = await Promise.all([
+				ctrl.query<{
+					id: number; display_name: string; host_id: string | null;
+					status: string; last_heartbeat: string | null;
+				}>(
+					`SELECT id, display_name, host_id, status, last_heartbeat
+					 FROM roadmap.agency
+					 ORDER BY id`,
+				),
+				ctrl.query<{ model_name: string; is_enabled: boolean; priority: number }>(
+					`SELECT model_name, is_enabled, priority FROM roadmap.model_routes ORDER BY priority`,
+				),
+			]);
+
+			// Tenant layer: per-project runtime counts
+			const fanOut = await this._crossProjectFanOut(async (pool, p) => {
+				const [runsRow, cubicsRow] = await Promise.all([
+					pool.query<{ active_runs: string }>(
+						`SELECT COUNT(*) AS active_runs FROM roadmap.agent_runs WHERE status='running'`,
+					),
+					pool.query<{ active_cubics: string }>(
+						`SELECT COUNT(*) AS active_cubics FROM roadmap.cubics WHERE status='active'`,
+					),
+				]);
+				return {
+					project_id: p.project_id,
+					slug: p.slug,
+					name: p.name,
+					active_runs: Number(runsRow.rows[0]?.active_runs ?? 0),
+					active_cubics: Number(cubicsRow.rows[0]?.active_cubics ?? 0),
+				};
+			});
+
+			return Response.json({
+				agencies: agenciesResult.rows,
+				routes: routesResult.rows,
+				projects: fanOut.data,
+				errors: fanOut.errors,
+				partial: fanOut.partial,
+			});
+		} catch (error) {
+			console.error("Error loading control-plane fleet:", error);
+			return Response.json({ error: "Failed to load fleet" }, { status: 500 });
+		}
+	}
+
+	private async handleControlPlaneEfficiency(): Promise<Response> {
+		try {
+			const fanOut = await this._crossProjectFanOut(async (pool, p) => {
+				const { rows } = await pool.query<{
+					total_cost_usd: string | null;
+					total_runs: string;
+					runs_last_24h: string;
+					avg_duration_ms: string | null;
+				}>(
+					`SELECT
+					   COALESCE(SUM(cost_usd), 0)::text AS total_cost_usd,
+					   COUNT(*)::text AS total_runs,
+					   COUNT(*) FILTER (WHERE started_at > now() - interval '24 hours')::text AS runs_last_24h,
+					   AVG(duration_ms)::text AS avg_duration_ms
+					 FROM roadmap.agent_runs`,
+				);
+				return {
+					project_id: p.project_id,
+					slug: p.slug,
+					name: p.name,
+					total_cost_usd: Number(rows[0]?.total_cost_usd ?? 0),
+					total_runs: Number(rows[0]?.total_runs ?? 0),
+					runs_last_24h: Number(rows[0]?.runs_last_24h ?? 0),
+					avg_duration_ms: rows[0]?.avg_duration_ms != null ? Number(rows[0].avg_duration_ms) : null,
+				};
+			});
+
+			return Response.json(fanOut);
+		} catch (error) {
+			console.error("Error loading control-plane efficiency:", error);
+			return Response.json({ error: "Failed to load efficiency" }, { status: 500 });
+		}
+	}
+
+	private async handleControlPlaneIdentity(): Promise<Response> {
+		try {
+			const ctrl = getControlPool();
+
+			// Principal/agency registry lives in hiveCentral
+			const { rows: agencies } = await ctrl.query<{
+				id: number; display_name: string; host_id: string | null; status: string;
+			}>(
+				`SELECT id, display_name, host_id, status FROM roadmap.agency ORDER BY id`,
+			);
+
+			const fanOut = await this._crossProjectFanOut(async (pool, p) => {
+				const { rows } = await pool.query<{ agent_count: string; active_count: string }>(
+					`SELECT
+					   COUNT(*)::text AS agent_count,
+					   COUNT(*) FILTER (WHERE status = 'active')::text AS active_count
+					 FROM roadmap_workforce.agent_registry`,
+				);
+				return {
+					project_id: p.project_id,
+					slug: p.slug,
+					name: p.name,
+					agent_count: Number(rows[0]?.agent_count ?? 0),
+					active_agents: Number(rows[0]?.active_count ?? 0),
+				};
+			});
+
+			return Response.json({
+				agencies,
+				projects: fanOut.data,
+				errors: fanOut.errors,
+				partial: fanOut.partial,
+			});
+		} catch (error) {
+			console.error("Error loading control-plane identity:", error);
+			return Response.json({ error: "Failed to load identity" }, { status: 500 });
+		}
+	}
+
+	private async handleControlPlanePlatform(): Promise<Response> {
+		try {
+			const ctrl = getControlPool();
+
+			// Route health from hiveCentral
+			const { rows: routes } = await ctrl.query<{
+				model_name: string; route_provider: string; is_enabled: boolean; priority: number; tier: string | null;
+			}>(
+				`SELECT model_name, route_provider, is_enabled, priority, tier
+				 FROM roadmap.model_routes ORDER BY tier NULLS LAST, priority`,
+			);
+
+			// Migration drift: count applied migrations per tenant
+			const fanOut = await this._crossProjectFanOut(async (pool, p) => {
+				const { rows } = await pool.query<{ migration_count: string }>(
+					`SELECT COUNT(*)::text AS migration_count FROM public.schema_migrations`,
+				).catch(() => ({ rows: [{ migration_count: "0" }] }));
+				return {
+					project_id: p.project_id,
+					slug: p.slug,
+					name: p.name,
+					migration_count: Number(rows[0]?.migration_count ?? 0),
+				};
+			});
+
+			return Response.json({
+				routes,
+				projects: fanOut.data,
+				errors: fanOut.errors,
+				partial: fanOut.partial,
+			});
+		} catch (error) {
+			console.error("Error loading control-plane platform:", error);
+			return Response.json({ error: "Failed to load platform" }, { status: 500 });
 		}
 	}
 
