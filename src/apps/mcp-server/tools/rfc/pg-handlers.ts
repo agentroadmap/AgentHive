@@ -1475,10 +1475,18 @@ export async function recordGateDecision(args: {
 		// RFC template, causing advance to resolve REVIEW→COMPLETE instead of REVIEW→DEVELOP.
 		// The canonical source is proposal.workflow_name, looked up in workflow_templates by
 		// name, then the next stage determined deterministically by stage_order+1.
-		// Falls back to from_state (no-op) when: workflow_name has no matching template,
-		// current status is not a recognised stage in that template, or it is the terminal stage.
+		// Falls back to from_state (no-op) when no workflows row exists (AC-8) or errors
+		// when a workflow exists but has no forward stage (terminal/drift — AC-2).
 		let toState = fromState;
 		if (args.decision === "advance") {
+			// Check workflow assignment separately so we can distinguish AC-8 (no row)
+			// from AC-2 (row present but no next stage — terminal or drift).
+			const { rows: wfRows } = await query<{ exists: boolean }>(
+				`SELECT EXISTS(SELECT 1 FROM workflows WHERE proposal_id = $1) AS exists`,
+				[proposalId],
+			);
+			const hasWorkflow = wfRows[0]?.exists ?? false;
+
 			const { rows: fwd } = await query<{ to_state: string }>(
 				`SELECT UPPER(ws_next.stage_name) AS to_state
 				   FROM roadmap.workflow_templates wt
@@ -1492,7 +1500,25 @@ export async function recordGateDecision(args: {
 				  LIMIT 1`,
 				[proposalWorkflow, fromState],
 			);
-			if (fwd.length) toState = fwd[0].to_state;
+
+			if (fwd.length) {
+				toState = fwd[0].to_state;
+			} else if (!hasWorkflow) {
+				// AC-8: no workflows row — log and no-op (workflow not yet assigned)
+				console.warn(`[gate_decision] proposal ${proposalId} has no workflows row — advance is a no-op`);
+			} else {
+				// AC-2: workflows row exists but no next stage — terminal or template drift
+				return errorResult(
+					"Gate advance aborted",
+					new Error(
+						`No forward stage edge found for proposal ${args.proposal_id} in state ${fromState}. ` +
+						`Check that workflows.template_id is set to the correct template for this proposal ` +
+						`(run: SELECT w.proposal_id, wt.name FROM roadmap.workflows w ` +
+						`JOIN roadmap.workflow_templates wt ON wt.id = w.template_id ` +
+						`WHERE w.proposal_id = ${proposalId}).`,
+					),
+				);
+			}
 		}
 
 		// Shadow-mode skip: if a row with the same agent_run_id already exists,
@@ -1548,10 +1574,16 @@ export async function recordGateDecision(args: {
 				[proposalId],
 			);
 			const newState = after[0]?.status ?? fromState;
-			advanceNote =
-				newState.toUpperCase() === toState.toUpperCase()
-					? ` ADVANCED: ${fromState} → ${newState}`
-					: ` (status NOT advanced — still ${newState}; expected ${fromState} → ${toState}. Check for state drift.)`;
+			if (newState.toUpperCase() === toState.toUpperCase()) {
+				// AC-6: sync workflows.current_stage atomically with the advance
+				await query(
+					`UPDATE roadmap.workflows SET current_stage = $1 WHERE proposal_id = $2`,
+					[newState, proposalId],
+				);
+				advanceNote = ` → status ADVANCED ${fromState} → ${newState}. [Atomic: workflows.current_stage synced]`;
+			} else {
+				advanceNote = ` (status NOT advanced — still ${newState}; expected ${fromState} → ${toState}. Check for state drift.)`;
+			}
 		}
 
 		return {

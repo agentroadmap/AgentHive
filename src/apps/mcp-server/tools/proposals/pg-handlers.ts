@@ -460,7 +460,7 @@ export class PgProposalHandlers {
 					content: [
 						{
 							type: "text",
-							text: "⚠️ prop_update: type changes are not permitted via this MCP surface. Use roadmap.fn_reconcile_proposal_type or migration P436. Affected key: 'type'.",
+							text: "⚠️ prop_update: type changes are not permitted via this MCP surface. To change a proposal's workflow template, run: UPDATE roadmap.workflows SET template_id=<target-template-id>, current_stage='<current-status>' WHERE proposal_id=<id>; (list templates: SELECT id, name FROM roadmap.workflow_templates;). Affected key: 'type'.",
 						},
 					],
 				};
