@@ -121,6 +121,16 @@ migration-schema-lint:
       [ "$fail" = "0" ] && echo "OK: all roadmap.* table refs covered by migration DDL."
       exit $fail
 
+migration-continuity-check:
+  stage: check
+  script:
+    - npm ci
+    - npm run check:migration-continuity
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
+
 # ─── Stage 2: Test ────────────────────────────────────────────
 test:
   stage: test
