@@ -21,6 +21,7 @@ import {
 	dlqStats,
 	liaisonStuckMessages,
 } from "./dlq-handlers.ts";
+import { issueUserToken, rotateUserToken } from "./token-lifecycle.ts";
 
 const msgMarkReadSchema: JsonSchema = {
 	type: "object",
@@ -858,6 +859,118 @@ export function registerMessageTools(server: McpServer): void {
 			pgHandlers.tailMessages(input as { agent: string; limit?: number }),
 	);
 
+	// P1105 Phase D — bearer token lifecycle (operator-gated; AC-7/10/13/15/17).
+	const tokenIssueTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "token_issue",
+			description:
+				"P1105: Issue a stateless HS256 bearer token for a registered user/* identity. " +
+				"OPERATOR-ONLY (AC-17): the caller must be a verified operator principal; non-operator callers get 403 and are audited. " +
+				"Returns a JWT whose payload decodes to {sub, aud='agenthive-msg-send', exp, iat, key_id}. " +
+				"The token verifies under the same AGENTHIVE_USER_JWT_SECRET that msg_send checks (one authoritative verifier).",
+			inputSchema: {
+				type: "object",
+				properties: {
+					agent_identity: {
+						type: "string",
+						description: "user/<operator> identity (must be registered, agent_type='user')",
+					},
+					ttl_seconds: {
+						type: "number",
+						description: "Token lifetime in seconds (default 3600, max 3600)",
+					},
+				},
+				required: ["agent_identity"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				agent_identity: { type: "string" },
+				ttl_seconds: { type: "number" },
+			},
+			required: ["agent_identity"],
+		} as JsonSchema,
+		async (input) => {
+			const r = await issueUserToken(
+				input as { agent_identity?: string; ttl_seconds?: number },
+			);
+			if (!r.ok) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `⛔ ${r.status} token_issue denied: ${r.reason}`,
+						},
+					],
+				};
+			}
+			return {
+				content: [
+					{
+						type: "text",
+						text: JSON.stringify({ token: r.token, key_id: r.key_id }),
+					},
+				],
+			};
+		},
+	);
+
+	const tokenRotateTool: McpToolHandler = createSimpleValidatedTool(
+		{
+			name: "token_rotate",
+			description:
+				"P1105: Rotate the signing key for a user/* identity. OPERATOR-ONLY (AC-17). " +
+				"Inserts a new roadmap.agent_token_key row keyed YYYY-MM with expires_at=now()+30d; " +
+				"the previous key remains valid until its own expires_at (rotation grace window).",
+			inputSchema: {
+				type: "object",
+				properties: {
+					agent_identity: {
+						type: "string",
+						description: "user/<operator> identity to rotate the key for",
+					},
+					new_secret_hash: {
+						type: "string",
+						description: "Argon2/opaque hash of the new signing secret",
+					},
+				},
+				required: ["agent_identity", "new_secret_hash"],
+			},
+		},
+		{
+			type: "object",
+			properties: {
+				agent_identity: { type: "string" },
+				new_secret_hash: { type: "string" },
+			},
+			required: ["agent_identity", "new_secret_hash"],
+		} as JsonSchema,
+		async (input) => {
+			const r = await rotateUserToken(
+				input as { agent_identity?: string; new_secret_hash?: string },
+			);
+			if (!r.ok) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `⛔ ${r.status} token_rotate denied: ${r.reason}`,
+						},
+					],
+				};
+			}
+			return {
+				content: [
+					{
+						type: "text",
+						text: JSON.stringify({ rotated: true, key_id: r.key_id }),
+					},
+				],
+			};
+		},
+	);
+
 	server.addTool(sendTool);
 	server.addTool(readTool);
 	server.addTool(markReadTool);
@@ -878,4 +991,6 @@ export function registerMessageTools(server: McpServer): void {
 	server.addTool(dlqStatsTool);
 	server.addTool(liaisonStuckTool);
 	server.addTool(msgTailTool);
+	server.addTool(tokenIssueTool);
+	server.addTool(tokenRotateTool);
 }

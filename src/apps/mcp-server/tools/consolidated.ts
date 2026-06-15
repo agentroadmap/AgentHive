@@ -228,6 +228,9 @@ const messageRoutes: RouteMap = {
 	search_mentions: "protocol_pg_search_mentions",
 	notifications: "protocol_pg_notifications",
 	mark_mention_read: "protocol_pg_mark_read",
+	// P1105 Phase D — bearer token lifecycle (operator-gated)
+	token_issue: "token_issue",
+	token_rotate: "token_rotate",
 };
 
 const agentRoutes: RouteMap = {
