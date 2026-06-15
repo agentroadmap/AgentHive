@@ -224,7 +224,7 @@ export function registerProposalTools(
 				type: {
 					type: "string",
 					description:
-						"FORBIDDEN: type changes are not permitted via this MCP surface. Fix workflow drift via SQL: UPDATE roadmap.workflows SET template_id=14 WHERE proposal_id=<id>.",
+						"FORBIDDEN: type changes require workflow reconciliation. Call roadmap.fn_reconcile_proposal_type(proposal_id, target_type) — implemented in migration 272 (P3326).",
 				},
 			},
 			required: ["id"],

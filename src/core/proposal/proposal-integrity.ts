@@ -185,8 +185,7 @@ async function validateTransitionRule(
      FROM roadmap_proposal.proposal_valid_transitions pvt
      JOIN roadmap.workflows w ON w.proposal_id = $1
      JOIN roadmap.workflow_templates wt ON wt.id = w.template_id
-     JOIN roadmap_proposal.proposal_type_config ptc ON ptc.workflow_name = wt.name
-     WHERE pvt.workflow_name = ptc.workflow_name
+     WHERE pvt.workflow_name = wt.name
        AND LOWER(pvt.from_state) = LOWER($2)
        AND LOWER(pvt.to_state) = LOWER($3)
      UNION ALL
@@ -489,8 +488,7 @@ export async function validateRole(
      FROM roadmap_proposal.proposal_valid_transitions pvt
      JOIN roadmap.workflows w ON w.proposal_id = $1
      JOIN roadmap.workflow_templates wt ON wt.id = w.template_id
-     JOIN roadmap_proposal.proposal_type_config ptc ON ptc.workflow_name = wt.name
-     WHERE pvt.workflow_name = ptc.workflow_name
+     WHERE pvt.workflow_name = wt.name
        AND LOWER(pvt.from_state) = LOWER($2)
        AND LOWER(pvt.to_state) = LOWER($3)
      LIMIT 1`,
