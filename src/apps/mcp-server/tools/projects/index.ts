@@ -28,6 +28,7 @@ import {
 	updateProjectRegistry,
 } from "./handlers.ts";
 import { projectCreate } from "./lifecycle-handlers.ts";
+import { authorizeOperatorByToken } from "../../../server/operator-auth.ts";
 
 export function registerProjectTools(server: McpServer): void {
 	server.addTool({
@@ -87,7 +88,7 @@ export function registerProjectTools(server: McpServer): void {
 	server.addTool({
 		name: "project_create_v2",
 		description:
-			"Create a new project with transactional safety (P483 Phase 1). Validates slug, creates DB registry entry, queues worktree directory creation. Returns {ok, project, worktree_created, repair_needed, note}. Pre-freezes signature for P432 project_attach.",
+			"Create a new project with transactional safety (P483 Phase 1). Validates slug, creates DB registry entry, queues worktree directory creation. Returns {ok, project, worktree_created, repair_needed, note}. Pre-freezes signature for P432 project_attach. P3508 AC-6: pass operator_token to gate creation to admin principals only.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -110,10 +111,41 @@ export function registerProjectTools(server: McpServer): void {
 					description:
 						"(Optional) Workflow template to clone for new project. Deferred to P483 Phase 2 (requires workflow_templates composite PK).",
 				},
+				operator_token: {
+					type: "string",
+					description:
+						"(Optional) Operator bearer token. When provided, the token is validated: allowed_actions must contain 'project.create' or '*'. Non-admin callers receive a structured 403 and an audit row is written.",
+				},
 			},
 			required: ["slug", "name"],
 		},
 		async handler(args: Record<string, unknown>): Promise<CallToolResult> {
+			// P3508 AC-6: gate project creation behind operator token when provided.
+			const rawToken = args.operator_token as string | undefined;
+			if (rawToken) {
+				const outcome = await authorizeOperatorByToken(rawToken, {
+					action: "project.create",
+					targetKind: "project",
+					targetIdentity: args.slug as string | undefined,
+					requestSummary: { slug: args.slug, name: args.name },
+				});
+				if (outcome.decision !== "allow") {
+					return {
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify({
+									ok: false,
+									error: outcome.failureReason ?? "Forbidden",
+									decision: outcome.decision,
+									action: "project.create",
+									http_status: outcome.httpStatus,
+								}, null, 2),
+							},
+						],
+					};
+				}
+			}
 			return projectCreate({
 				slug: args.slug as string | undefined,
 				name: args.name as string | undefined,

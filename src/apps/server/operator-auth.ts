@@ -39,6 +39,8 @@ export interface OperatorAuthContext {
 	targetKind?: string;
 	targetIdentity?: string;
 	requestSummary?: Record<string, unknown>;
+	// P3508 AC-5: when set, the token's scoped_project_id (if non-NULL) must match.
+	targetProjectId?: number;
 }
 
 export function hashOperatorToken(rawToken: string): string {
@@ -171,15 +173,16 @@ export async function authorizeOperator(
 
 	const sha = hashOperatorToken(raw);
 
-	// 3. Lookup + check action allowlist + revocation/expiry.
+	// 3. Lookup + check action allowlist + revocation/expiry + project scope.
 	const { rows } = await query<{
 		id: number;
 		operator_name: string;
 		allowed_actions: string[];
 		revoked_at: string | null;
 		expires_at: string | null;
+		scoped_project_id: number | null;
 	}>(
-		`SELECT id, operator_name, allowed_actions, revoked_at, expires_at
+		`SELECT id, operator_name, allowed_actions, revoked_at, expires_at, scoped_project_id
 		   FROM roadmap.operator_token
 		  WHERE token_sha256 = $1`,
 		[sha],
@@ -266,6 +269,31 @@ export async function authorizeOperator(
 		return out;
 	}
 
+	// P3508 AC-5: project scope check — only when token has a scoped_project_id AND
+	// the caller supplied a targetProjectId. Full-scope tokens (NULL) always pass.
+	if (
+		row.scoped_project_id !== null &&
+		ctx.targetProjectId !== undefined &&
+		ctx.targetProjectId !== row.scoped_project_id
+	) {
+		const out = denyOutcome(
+			`Token project scope mismatch: token is scoped to project ${row.scoped_project_id}, target project is ${ctx.targetProjectId}.`,
+		);
+		await logAudit({
+			action: ctx.action,
+			decision: out.decision,
+			operatorName: out.operatorName,
+			tokenId: out.tokenId,
+			targetKind: ctx.targetKind,
+			targetIdentity: ctx.targetIdentity,
+			requestSummary: ctx.requestSummary,
+			remoteAddr,
+			responseStatus: out.httpStatus,
+			failureReason: out.failureReason,
+		});
+		return out;
+	}
+
 	// allowed
 	void query(
 		`UPDATE roadmap.operator_token SET last_used_at = now() WHERE id = $1`,
@@ -321,4 +349,21 @@ export async function requireOperator(
 		{ status: outcome.httpStatus },
 	);
 	return { outcome, rejected };
+}
+
+/**
+ * P3508 AC-9(c): Token-string variant of authorizeOperator for MCP paths where
+ * there is no HTTP request object (the token arrives as a string argument).
+ *
+ * Identical hash → DB lookup → allowed_actions → project-scope → audit-write
+ * flow as authorizeOperator(); the only difference is token extraction.
+ */
+export async function authorizeOperatorByToken(
+	rawToken: string,
+	ctx: OperatorAuthContext,
+): Promise<OperatorAuthOutcome> {
+	const fakeReq = new Request("http://localhost/mcp", {
+		headers: { authorization: `Bearer ${rawToken}` },
+	});
+	return authorizeOperator(fakeReq, ctx);
 }

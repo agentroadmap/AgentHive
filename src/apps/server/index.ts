@@ -1168,6 +1168,8 @@ export class RoadmapServer {
 			}
 			if (pathname === "/api/projects" && method === "GET")
 				return await this.handleListProjects();
+			if (pathname === "/api/projects" && method === "POST")
+				return await this.handleCreateProject(req);
 			if (pathname === "/api/control-plane/overview" && method === "GET")
 				return await this.handleControlPlaneOverview(req);
 			if (pathname === "/api/operator/audit" && method === "GET")
@@ -3320,14 +3322,28 @@ export class RoadmapServer {
 		displayOrNumericId: string,
 		req: Request,
 	): Promise<Response> {
+		// P3508 AC-3: derive project_id from proposal so scoped tokens can be checked.
+		const isNumeric = /^\d+$/.test(displayOrNumericId);
+		let targetProjectId: number | undefined;
+		try {
+			const { rows: projRows } = await query<{ project_id: number | null }>(
+				`SELECT project_id FROM roadmap_proposal.proposal
+				  WHERE ${isNumeric ? "id = $1" : "display_id = $1"} LIMIT 1`,
+				[isNumeric ? Number(displayOrNumericId) : displayOrNumericId],
+			);
+			const pid = projRows[0]?.project_id;
+			if (pid !== null && pid !== undefined) targetProjectId = pid;
+		} catch {
+			// non-fatal: fall through without project scope check
+		}
 		const auth = await requireOperator(req, {
 			action: "state-machine.resume",
 			targetKind: "proposal",
 			targetIdentity: displayOrNumericId,
+			targetProjectId,
 		});
 		if (auth.rejected) return auth.rejected;
 
-		const isNumeric = /^\d+$/.test(displayOrNumericId);
 		try {
 			const { rows } = await query<{
 				id: number;
@@ -3501,6 +3517,52 @@ export class RoadmapServer {
 				{ error: "Failed to list projects" },
 				{ status: 500 },
 			);
+		}
+	}
+
+	// P3508 AC-8: create a new project. Gated by requireOperator(action='project.create').
+	// Returns {ok, project_id, slug, name} on success; 403 on auth failure.
+	// The action sentinel 'project.create' is shared with the MCP path (AC-6).
+	private async handleCreateProject(req: Request): Promise<Response> {
+		const auth = await requireOperator(req, { action: "project.create" });
+		if (auth.rejected) return auth.rejected;
+		try {
+			const body = await req.json() as Record<string, unknown>;
+			const slug = typeof body.slug === "string" ? body.slug.trim() : "";
+			const name = typeof body.name === "string" ? body.name.trim() : "";
+			if (!slug || !name) {
+				return Response.json({ error: "slug and name are required" }, { status: 400 });
+			}
+			const SLUG_PATTERN = /^[a-z][a-z0-9-]*[a-z0-9]$/;
+			if (!SLUG_PATTERN.test(slug) || slug.length < 3 || slug.length > 64) {
+				return Response.json(
+					{ error: "slug must match ^[a-z][a-z0-9-]*[a-z0-9]$ (3-64 chars)" },
+					{ status: 400 },
+				);
+			}
+			const worktreeRoot = typeof body.worktree_root === "string"
+				? body.worktree_root.trim() || null
+				: null;
+			const { rows } = await query<{ project_id: number; slug: string; name: string }>(
+				`INSERT INTO roadmap.project (slug, name, worktree_root, status, bootstrap_status, host, port)
+				 VALUES ($1, $2, $3, 'active', 'pending', 'localhost', 5432)
+				 RETURNING project_id, slug, name`,
+				[slug, name, worktreeRoot ?? `${process.env.AGENTHIVE_WORKTREES_ROOT ?? "/data/code"}/${slug}/worktree`],
+			);
+			return Response.json({
+				ok: true,
+				project_id: rows[0]?.project_id,
+				slug: rows[0]?.slug,
+				name: rows[0]?.name,
+				operator: auth.outcome.operatorName,
+			});
+		} catch (err) {
+			const msg = (err as Error).message ?? "";
+			if (msg.includes("duplicate key") || msg.includes("unique")) {
+				return Response.json({ error: "Project slug already exists" }, { status: 409 });
+			}
+			console.error("[projects] create failed:", msg);
+			return Response.json({ error: "Failed to create project" }, { status: 500 });
 		}
 	}
 
@@ -5923,10 +5985,9 @@ agenthive_msg_send_rate_limit_violations_by_reason_total{reason="${reason}"} ${c
 	 * AC-2: writes to control_audit.operator_action_log.
 	 */
 	private async handleControlStop(req: Request): Promise<Response> {
-		const auth = await requireOperator(req, { action: "control.stop" });
-		if (auth.rejected) return auth.rejected;
 		try {
-			const body = await req.json() as Record<string, unknown>;
+			// P3508 AC-3: read body first so we can derive target project_id before auth.
+			const body = await req.clone().json() as Record<string, unknown>;
 			const scopeType = body.scope_type as ScopeType | undefined;
 			const scopeId = typeof body.scope_id === "string" ? body.scope_id
 				: String(body.scope_id ?? "");
@@ -5944,6 +6005,40 @@ agenthive_msg_send_rate_limit_violations_by_reason_total{reason="${reason}"} ${c
 			if (!scopeId) {
 				return Response.json({ error: "scope_id is required" }, { status: 400 });
 			}
+
+			// P3508 AC-3/AC-9(b): derive project_id from DB, not caller-supplied value.
+			let targetProjectId: number | undefined;
+			try {
+				if (scopeType === "proposal") {
+					const isNum = /^\d+$/.test(scopeId);
+					const { rows } = await query<{ project_id: number | null }>(
+						`SELECT project_id FROM roadmap_proposal.proposal
+						  WHERE ${isNum ? "id = $1::bigint" : "display_id = $1"} LIMIT 1`,
+						[isNum ? Number(scopeId) : scopeId],
+					);
+					const pid = rows[0]?.project_id;
+					if (pid != null) targetProjectId = pid;
+				} else if (scopeType === "dispatch") {
+					const { rows } = await query<{ project_id: number | null }>(
+						`SELECT p.project_id
+						   FROM roadmap_proposal.proposal p
+						   JOIN roadmap.work_dispatch d ON d.proposal_id = p.id
+						  WHERE d.id = $1::bigint LIMIT 1`,
+						[Number(scopeId)],
+					);
+					const pid = rows[0]?.project_id;
+					if (pid != null) targetProjectId = pid;
+				}
+				// agency/host/worker/provider_route are cross-project — no project scope.
+			} catch {
+				// non-fatal: proceed without project scope enforcement
+			}
+
+			const auth = await requireOperator(req, {
+				action: "control.stop",
+				targetProjectId,
+			});
+			if (auth.rejected) return auth.rejected;
 
 			const actor = auth.outcome.operatorName ?? "operator";
 			const result = await operatorStop({ scopeType, scopeId, reason, actor });
