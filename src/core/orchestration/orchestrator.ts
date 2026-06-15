@@ -64,20 +64,12 @@ import {
  */
 
 // ─── Configuration ────────────────────────────────────────────────────────────
-
-/** Maximum proposals processed per scanQueues() call. */
-const SCAN_BATCH_LIMIT = Number(process.env.AGENTHIVE_SCAN_BATCH_LIMIT ?? 20);
-
-/**
- * Hours a proposal must sit mature with no dispatch before stall escalation
- * is triggered.
- */
-const STALL_THRESHOLD_HOURS = Number(
-	process.env.AGENTHIVE_STALL_THRESHOLD_HOURS ?? 4,
-);
-
-/** Maximum stalled proposals to escalate per checkStalls() call. */
-const STALL_BATCH_LIMIT = Number(process.env.AGENTHIVE_STALL_BATCH_LIMIT ?? 5);
+//
+// P1144/AC-16: SCAN_BATCH_LIMIT, STALL_THRESHOLD_HOURS, STALL_BATCH_LIMIT,
+// IMPLICIT_GATE_POLL_INTERVAL_MS, ENHANCER_REVISE_INTERVAL_MS,
+// RECONCILER_INTERVAL_MS, HEARTBEAT_INTERVAL_MS and ENABLE_OFFER_CLAIM_LOOP
+// were dead module-level consts after loadOrchestratorFlags() moved env>DB>default
+// resolution onto instance fields (this.scanBatchLimit, etc.). Removed.
 
 /**
  * If set, stall escalation Tier 1 spawns an AI liaison agent using this
@@ -110,27 +102,6 @@ const ENABLE_POLLING = process.env.AGENTHIVE_ORCHESTRATOR_POLL === "1";
 const ORCHESTRATOR_IDENTITY =
 	process.env.AGENTHIVE_ORCHESTRATOR_IDENTITY ??
 	"agenthive/agency-orchestrator";
-
-/**
- * Escape hatch: set AGENTHIVE_OFFER_CLAIM_LOOP=0 to disable the
- * orchestrator-side claim loop (e.g. emergency rollback). Default on.
- */
-const ENABLE_OFFER_CLAIM_LOOP =
-	(process.env.AGENTHIVE_OFFER_CLAIM_LOOP ?? "1") !== "0";
-
-/** Implicit gate poll interval in ms (set 0 to disable). */
-const IMPLICIT_GATE_POLL_INTERVAL_MS = Number(
-	process.env.AGENTHIVE_IMPLICIT_GATE_POLL_MS ?? 30_000,
-);
-
-/** Enhancer-revise autonomous loop interval (90 s legacy default). */
-const ENHANCER_REVISE_INTERVAL_MS = 90_000;
-
-/** P611 stranded-advance reconciler interval (30 s legacy default). */
-const RECONCILER_INTERVAL_MS = 30_000;
-
-/** Observability heartbeat interval (60 s legacy default). */
-const HEARTBEAT_INTERVAL_MS = 60_000;
 
 /** P765: agency liveness scanner interval (silent → dormant/offline + alert). */
 const AGENCY_LIVENESS_SCAN_INTERVAL_MS = Number(
@@ -240,22 +211,30 @@ export class Orchestrator {
 	 * All failures are swallowed so a missing DB does not block orchestrator startup.
 	 */
 	private async loadOrchestratorFlags(): Promise<void> {
+		// P1144/AC-18: record env|db|default provenance per flag for the boot summary.
+		const sources: Record<string, string> = {};
 		const tryFlag = async <T>(
 			envKey: string | null,
 			flagKey: any,
 			def: T,
 			coerce: (s: string) => T,
 		): Promise<T> => {
+			const label = String(flagKey);
 			if (envKey !== null && process.env[envKey] !== undefined) {
 				try {
-					return coerce(process.env[envKey]!);
+					const v = coerce(process.env[envKey]!);
+					sources[label] = "env";
+					return v;
 				} catch {
 					// fall through to DB
 				}
 			}
 			try {
-				return await runtimeConfig.get(flagKey);
+				const v = (await runtimeConfig.get(flagKey)) as T;
+				sources[label] = "db";
+				return v;
 			} catch {
+				sources[label] = "default";
 				return def;
 			}
 		};
@@ -275,6 +254,27 @@ export class Orchestrator {
 		this.stuckWorkerMs = await tryFlag("AGENTHIVE_STUCK_WORKER_WATCHDOG_INTERVAL_MS", FlagKeys.ORCHESTRATOR_STUCK_WORKER_MS, 60_000, Number);
 		this.heartbeatMs = await tryFlag("AGENTHIVE_HEARTBEAT_INTERVAL_MS", FlagKeys.ORCHESTRATOR_HEARTBEAT_MS, 60_000, Number);
 		this.offerClaimEnabled = await tryFlag("AGENTHIVE_OFFER_CLAIM_LOOP", FlagKeys.ORCHESTRATOR_OFFER_CLAIM_ENABLED, true, (s) => s !== "0");
+
+		// P1144/AC-18: single boot/reload summary of all resolved orchestrator
+		// flags with their env|db|default provenance.
+		const src = (k: any) => sources[String(k)] ?? "default";
+		console.log(
+			"[Orchestrator] flags resolved: " +
+				`scanBatchLimit=${this.scanBatchLimit}(${src(FlagKeys.ORCHESTRATOR_SCAN_BATCH_LIMIT)}) ` +
+				`stallThresholdHours=${this.stallThresholdHours}(${src(FlagKeys.ORCHESTRATOR_STALL_THRESHOLD_HOURS)}) ` +
+				`stallBatchLimit=${this.stallBatchLimit}(${src(FlagKeys.ORCHESTRATOR_STALL_BATCH_LIMIT)}) ` +
+				`offerReapIntervalMs=${this.offerReapIntervalMs}(${src(FlagKeys.ORCHESTRATOR_OFFER_REAP_MS)}) ` +
+				`pokeIdleMin=${this.pokeOpts.idleThresholdMin}(${src(FlagKeys.ORCHESTRATOR_POKE_IDLE_MIN)}) ` +
+				`pokeStormCap=${this.pokeOpts.stormCap}(${src(FlagKeys.ORCHESTRATOR_POKE_STORM_CAP)}) ` +
+				`shutdownDrainMs=${this.shutdownDrainMs}(${src(FlagKeys.ORCHESTRATOR_SHUTDOWN_DRAIN_MS)}) ` +
+				`implicitGatePollMs=${this.implicitGatePollMs}(${src(FlagKeys.ORCHESTRATOR_IMPLICIT_GATE_POLL_MS)}) ` +
+				`enhancerReviseMs=${this.enhancerReviseMs}(${src(FlagKeys.ORCHESTRATOR_ENHANCER_REVISE_MS)}) ` +
+				`reconcilerMs=${this.reconcilerMs}(${src(FlagKeys.ORCHESTRATOR_RECONCILER_MS)}) ` +
+				`staleRowReaperMs=${this.staleRowReaperMs}(${src(FlagKeys.ORCHESTRATOR_STALE_ROW_REAPER_MS)}) ` +
+				`stuckWorkerMs=${this.stuckWorkerMs}(${src(FlagKeys.ORCHESTRATOR_STUCK_WORKER_MS)}) ` +
+				`heartbeatMs=${this.heartbeatMs}(${src(FlagKeys.ORCHESTRATOR_HEARTBEAT_MS)}) ` +
+				`offerClaimEnabled=${this.offerClaimEnabled}(${src(FlagKeys.ORCHESTRATOR_OFFER_CLAIM_ENABLED)})`,
+		);
 	}
 
 	/**
