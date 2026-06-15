@@ -57,6 +57,16 @@ jobs:
         continue-on-error: true
         run: npm run scan:workflow-states
 
+      # P1107 AC-8: Verify migration continuity — on-disk migration files match the
+      # recorded history table (no files tampered, no gaps inserted). Runs on every
+      # PR so migration reordering or checksum drift is caught before merge.
+      - name: Migration continuity check
+        if: ${{ env.AUDIT_DATABASE_URL != '' }}
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ env.AUDIT_DATABASE_URL }}
+        run: npm run check:migration-continuity
+
       # P690: Guard against migrations being placed in the legacy inactive runner
       # directory (database/migrations/) instead of the active path (scripts/migrations/).
       # Fails if any .sql file in database/migrations/ appears in the current PR diff.

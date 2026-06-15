@@ -49,4 +49,13 @@ if echo "$STAGED" | grep -qE '^src/.*\.tsx?$'; then
   fi
 fi
 
+# P1107 AC-8: message_type enum/DB drift guard — runs only when messaging types
+# or migrations are staged, keeping the commit fast for unrelated changes.
+if echo "$STAGED" | grep -qE '^src/infra/messaging/types\.tsx?$|^scripts/migrations/'; then
+  if ! npm run --silent check:message-type-drift >&2; then
+    echo "[pre-commit] Blocking commit: message_type enum/DB constraint drift detected (see above)." >&2
+    exit 1
+  fi
+fi
+
 exit 0

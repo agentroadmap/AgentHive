@@ -157,6 +157,19 @@ export async function runLiaisonAgent(
 		: await connectListenClient(identity);
 	await listenClient.query(`LISTEN "${channel}"`);
 	console.log(`${log} LISTEN active on: ${channel}`);
+	// P1107 AC-4/AC-32: register subscription so watchdog + operators can verify
+	// which agents are actively listening without querying pg_stat_activity.
+	const listenPid = listenClient.processID ?? null;
+	await query(
+		`INSERT INTO roadmap.listener_subscription (agent_identity, channel, established_at, established_pid)
+		 VALUES ($1, $2, now(), $3)
+		 ON CONFLICT (agent_identity, channel) DO UPDATE SET
+		   established_at = now(),
+		   established_pid = EXCLUDED.established_pid`,
+		[identity, channel, listenPid],
+	).catch((err) =>
+		console.warn(`${log} listener_subscription INSERT failed (non-fatal):`, err instanceof Error ? err.message : err),
+	);
 
 	// V3-C6 (P1438 step 3b): Conditionally start AgencyClaimLoop if flag enabled
 	// This loop allows the agency to self-claim work offers from the shared work_offers
@@ -445,6 +458,12 @@ export async function runLiaisonAgent(
 				}
 			}
 
+			// P1107 AC-4/AC-32: deregister subscription on clean shutdown so
+			// watchdog doesn't flag this agent as having a stale LISTEN row.
+			await query(
+				`DELETE FROM roadmap.listener_subscription WHERE agent_identity = $1 AND channel = $2`,
+				[identity, channel],
+			).catch(() => { /* non-fatal on shutdown path */ });
 			try {
 				await listenClient.query(`UNLISTEN "${channel}"`);
 			} catch {
