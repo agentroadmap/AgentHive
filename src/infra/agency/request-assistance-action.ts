@@ -202,7 +202,7 @@ async function postToRescueChannel(
 /**
  * Resolve an assistance request with a directive from the liaison.
  * Marks the request resolved and sends a downlink directive to the subagent
- * via message_ledger → trig_a2a_message_notify → pg_notify a2a_msg_{agent}.
+ * via message_ledger → trig_a2a_message_notify → pg_notify msg_{agent}.
  */
 export async function handleAssistanceResolve(input: {
   request_id: bigint;

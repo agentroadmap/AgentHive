@@ -132,7 +132,7 @@ describe("P1438 AC-14 + AC-15: wake→claim path reads/writes no presence", () =
 		const { loop, sql, getNotify } = makeLoop();
 		await loop.start();
 		const claimsAfterStart = sql.filter((s) => /fn_claim_work_offer/.test(s)).length;
-		getNotify()!({ channel: "a2a_msg_claude-bot-gary.a" }); // not work_offers
+		getNotify()!({ channel: "msg_claude-bot-gary.a" }); // not work_offers
 		await new Promise((r) => setTimeout(r, 20));
 		await loop.stop();
 		const claimsTotal = sql.filter((s) => /fn_claim_work_offer/.test(s)).length;

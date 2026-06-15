@@ -3,7 +3,7 @@
  *
  * Architecture:
  *   Uplink:   subagent → liaison_message (pg_notify) → LiaisonHub → orchestrator
- *   Downlink: orchestrator/hub → message_ledger (pg_notify a2a_msg_*) → subagent
+ *   Downlink: orchestrator/hub → message_ledger (pg_notify msg_*) → subagent
  *   Cross-project: hub → message_ledger channel=system:hiveCentral → observers
  *
  * Liaison is the agency-wide authority: liveness = agency liveness.
@@ -29,7 +29,7 @@ import { handleOfferDispatch } from "./offer-dispatch-handler.ts";
 
 /**
  * Write a directive to the subagent via message_ledger.
- * trig_a2a_message_notify fires pg_notify('a2a_msg_{agentIdentity}')
+ * trig_a2a_message_notify fires pg_notify('msg_{agentIdentity}')
  * which unblocks the agent's msg_read wait_ms call.
  */
 export async function sendDirectiveToAgent(

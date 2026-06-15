@@ -25,7 +25,7 @@
  *      agency↔agent replies).
  *
  * The DB INSERT trigger (fn_a2a_message_notify) emits pg_notify on
- * a2a_msg_<recipient> automatically; this module does not call pg_notify
+ * msg_<recipient> automatically; this module does not call pg_notify
  * itself.
  *
  * P920: Refactored to use CliInvocationRegistry instead of inline

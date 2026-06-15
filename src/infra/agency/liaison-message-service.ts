@@ -6,15 +6,13 @@
 import { createHmac } from 'node:crypto';
 import { Client as PgClient } from 'pg';
 import { query } from '../postgres/pool.js';
+import { agentNotifyChannel } from '../messaging/a2a-access-control.js';
 import type { LiaisonMessage, LiaisonMessageAckOutcome } from './liaison-message-types.js';
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 
 const MESSAGE_SEQUENCE_WINDOW = 100; // Buffer out-of-order messages up to this window
 const SIGNED_AT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
-// P1017 AC-4: unified channel prefix — matches fn_a2a_message_notify and
-// fn_liaison_notify_new_message (both fire 'a2a_msg_' after migration 144).
-const LISTEN_CHANNEL_PREFIX = "a2a_msg_";
 
 // Signing key: shared secret from env, falls back to deterministic dev sentinel.
 // P208 RSA key-pair integration is separate; HMAC-SHA256 is the wire implementation.
@@ -617,7 +615,7 @@ async function* createMessageListener(
     });
     await client.connect();
 
-	const channel = LISTEN_CHANNEL_PREFIX + agencyId;
+	const channel = agentNotifyChannel(agencyId);
 
 	// Buffer of incoming notification payloads, plus a resolver for the
 	// next waiter. This bridges the event-based pg notification model to

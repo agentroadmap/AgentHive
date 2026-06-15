@@ -2,7 +2,7 @@
  * P468: LiaisonMessageLog, LiaisonMessageSigner, OutOfOrderBuffer
  *
  * Class-based interface over the roadmap.liaison_message durable log.
- * Transport layer: LISTEN/NOTIFY on channel `a2a_msg_<agency_id>` (lightweight
+ * Transport layer: LISTEN/NOTIFY on channel `msg_<agency_id>` (lightweight
  * envelope — full row fetched from DB). Replay from log on partition recovery.
  *
  * Signing: HMAC-SHA256 over canonical `agencyId|kind|sortedPayload|signedAt`.

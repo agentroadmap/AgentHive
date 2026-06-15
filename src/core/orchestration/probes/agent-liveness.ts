@@ -9,7 +9,7 @@
  * Tiered design (cheapest signal wins):
  *
  *   Tier-A (free, ~1ms):  pg_stat_activity check — is some process actively
- *                         LISTENing on a2a_msg_<agent_identity>?
+ *                         LISTENing on msg_<agent_identity>?
  *                         No connection ⇒ definitely not addressable.
  *   Tier-B (free, ~1ms):  agent_health.last_heartbeat_at — was the agent's
  *                         pulseHeartbeat() within HEARTBEAT_FRESH_MS?
@@ -32,6 +32,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { agentNotifyChannel } from "../../../infra/messaging/a2a-access-control.ts";
 
 type QueryFn = <T = Record<string, unknown>>(
 	sql: string,
@@ -225,7 +226,7 @@ async function checkListenActive(
                  WHERE query = $1
                    AND state IN ('idle', 'active')
             ) AS exists`,
-			[`LISTEN "a2a_msg_${agent_identity}"`],
+			[`LISTEN "${agentNotifyChannel(agent_identity)}"`],
 		);
 		return Boolean(rows[0]?.exists);
 	} catch {
