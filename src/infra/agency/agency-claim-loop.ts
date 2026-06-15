@@ -42,6 +42,7 @@ import {
 	type RecoveryDecision,
 } from "./recovery-action.ts";
 import { evaluateCostQuota } from "./cost-quota-admission.ts";
+import { evaluateStakeAdmission } from "./stake-admission.ts";
 import { incrementDebt, resetDebt } from "./fair-share-debt.ts";
 import { hasActiveOverride } from "./quota-override.ts";
 
@@ -244,6 +245,49 @@ export class AgencyClaimLoop {
 			// P3000 AC-10d: check for an operator-granted quota override FIRST; if
 			// one is found (and consumed if single_use), skip the subscription check.
 			const sqlExec = (sql: string, params?: unknown[]) => this.query(sql, params);
+
+			// P2997 AC-7/AC-8: stake/capability-bond pre-claim gate. An agent whose
+			// bond was slashed (genuine failures consumed it) or returned (withdrawn)
+			// is not admissible until re-bonded. active/legacy agents pass. This is a
+			// hard gate (unlike the soft-fail proof layer): a slashed agent must not
+			// keep claiming work. Read failures fail-open (admit) so a transient DB
+			// hiccup never wedges the whole claim loop.
+			const stakeAdmission = await evaluateStakeAdmission(
+				this.agencyIdentity,
+				sqlExec,
+			).catch(() => null);
+			if (stakeAdmission && !stakeAdmission.allowed) {
+				this.logger.warn(
+					`[AgencyClaim:${this.agencyIdentity}] P2997 stake gate refused claim: ${stakeAdmission.reason} (status=${stakeAdmission.stakeStatus})`,
+				);
+				return null;
+			}
+
+			// P2997 AC-7: wire the EXISTING proof check (verifyAgentIdentity) into the
+			// claim path. Previously it ran only in msg_send (pg-handlers.ts). The
+			// claim loop has no per-message signature, so we verify identity presence
+			// (unsigned → soft-fail logged). In hard-fail mode (AGENTHIVE_AUTH_REQUIRED
+			// =true) an unsigned/unverifiable agent is refused at claim, not just at
+			// msg_send — closing the wiring gap named in AC-7.
+			try {
+				const { verifyAgentIdentity } = await import(
+					"../../core/identity/identity-verification.ts"
+				);
+				const proof = await verifyAgentIdentity(this.agencyIdentity);
+				if (proof.rejected) {
+					this.logger.warn(
+						`[AgencyClaim:${this.agencyIdentity}] P2997 proof gate (hard-fail) refused claim: ${proof.reason}`,
+					);
+					return null;
+				}
+			} catch (err) {
+				// Proof module load/lookup failure: fail-open (soft), never wedge claims.
+				this.logger.warn(
+					`[AgencyClaim:${this.agencyIdentity}] P2997 proof check skipped (non-fatal):`,
+					err instanceof Error ? err.message : err,
+				);
+			}
+
 			const quotaOverride = await hasActiveOverride(this.agencyIdentity, sqlExec as unknown as Parameters<typeof hasActiveOverride>[1]).catch(() => null);
 			if (quotaOverride) {
 				this.logger.log(

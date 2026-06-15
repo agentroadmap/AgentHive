@@ -1018,6 +1018,56 @@ async function runSpawn(args: {
 			);
 			// P3000: successful delivery — reset starvation debt counter.
 			if (succeeded) void resetDebt(agencyId, exec);
+
+			// P2997 AC-7/AC-8: stake settlement at the completion chokepoint.
+			//   success → returnStake (bond returned, returned-on-success semantics)
+			//   failure → slashStake, but ONLY for a non-transient, agent-attributable
+			//             cause. A degenerate auth_required exit is a provider problem
+			//             (transient class auth_rejected — NOT slashed); an empty-output
+			//             or missing-artifact "completion" is the agent's fault
+			//             (class unknown — slashable). Best-effort: stake accounting
+			//             must never block offer completion.
+			void (async () => {
+				try {
+					const { slashStake, returnStake } = await import(
+						"./stake-admission.ts"
+					);
+					if (succeeded) {
+						await returnStake(
+							{
+								agentIdentity: agencyId,
+								dispatchId,
+								proposalId: proposalId ?? null,
+							},
+							exec,
+						);
+					} else {
+						const stakeFailureClass =
+							degenerateReason === "auth_required"
+								? "auth_rejected" // transient — not slashed
+								: "unknown"; // empty output / no artifact / spawn error — slashable
+						await slashStake(
+							{
+								agentIdentity: agencyId,
+								failureClass: stakeFailureClass,
+								dispatchId,
+								proposalId: proposalId ?? null,
+								reason:
+									evidenceFailureReason ??
+									degenerateReason ??
+									spawnError?.message ??
+									"undelivered",
+							},
+							exec,
+						);
+					}
+				} catch (stakeErr) {
+					logger.warn(
+						`[OfferDispatchHandler] ${agencyId}: P2997 stake settlement failed (non-fatal) for offer=${payload.offer_id}:`,
+						stakeErr instanceof Error ? stakeErr.message : stakeErr,
+					);
+				}
+			})();
 		} catch (completionErr) {
 			logger.error(
 				`[OfferDispatchHandler] ${agencyId}: fn_complete_work_offer failed for offer ${payload.offer_id} — lease will time out and reaper will requeue:`,
