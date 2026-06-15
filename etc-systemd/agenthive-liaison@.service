@@ -18,7 +18,7 @@ Environment=PATH=/home/gary/.nvm/versions/node/v24.14.0/bin:/usr/local/bin:/usr/
 Environment=HOME=/home/gary
 # Agency identity is the systemd instance name (e.g. claude-agency-bot)
 Environment=AGENCY_ID=%i
-ExecStart=/home/gary/.nvm/versions/node/v24.14.0/bin/node --import jiti/register scripts/start-liaison.ts
+ExecStart=/usr/local/bin/bun scripts/start-liaison.ts
 Restart=on-failure
 RestartSec=15
 TimeoutStopSec=60

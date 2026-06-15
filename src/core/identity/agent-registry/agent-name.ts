@@ -59,6 +59,33 @@ export function encodeAgency(agentProvider: string): string {
 	return AGENCY_MAP[key] ?? key.replace(/[^a-z0-9]/g, "").slice(0, 2);
 }
 
+/**
+ * P1367 (amends P996): build a canonical agency alias from an agency style and
+ * optional LLM variant, hyphen-separated, with the process-type suffix last.
+ *
+ *   generateAgencyAlias({ style: "claude" })                  → "claude-a"
+ *   generateAgencyAlias({ style: "claude", variant: "mimo" }) → "claude-mimo-a"
+ *   generateAgencyAlias({ style: "codex", suffix: "l" })      → "codex-l"
+ *
+ * Hyphen (not the dotted `.a` P996 first specified) per operator preference and
+ * existing real-data patterns (codex-agency-bot, gemini-agency-bot), and to
+ * avoid dot-as-extension shell ambiguity. The `-a` (agency) / `-l` (liaison)
+ * process-type marker is always the rightmost segment; the optional LLM variant
+ * sits in the middle so the same agency style can be backed by a different model
+ * provider (e.g. claude-mimo-a = Claude-style on Xiaomi MiMo).
+ */
+export function generateAgencyAlias(opts: {
+	style: string;
+	variant?: string | null;
+	suffix?: "a" | "l";
+}): string {
+	const style = opts.style.toLowerCase().trim();
+	const suffix = opts.suffix ?? "a";
+	const variant = opts.variant?.toLowerCase().trim();
+	const mid = variant ? `-${variant}` : "";
+	return `${style}${mid}-${suffix}`;
+}
+
 /** Encode a route_provider value to its 2-3 char code. Unknown → first 3 chars. */
 export function encodeProvider(routeProvider: string): string {
 	const key = routeProvider.toLowerCase();
@@ -133,7 +160,15 @@ export function computeAbbr(
 }
 
 /** Well-known acronyms that render fully uppercased in display aliases (e.g. qa→QA, ai→AI). */
-export const ALL_CAPS_TOKENS = new Set(["qa", "ai", "ml", "sre", "ux", "ui", "api"]);
+export const ALL_CAPS_TOKENS = new Set([
+	"qa",
+	"ai",
+	"ml",
+	"sre",
+	"ux",
+	"ui",
+	"api",
+]);
 
 /**
  * Convert a raw expertise hint to PascalCase for display alias.
@@ -239,7 +274,7 @@ export function assignDisplayAlias(
 	if (isAbbrShape(agentProvider.trim())) {
 		throw new Error(
 			`assignDisplayAlias: received route abbreviation '${agentProvider}' as agentProvider. ` +
-			`Pass model_routes.agent_provider (e.g. 'Claude', 'Codex') instead.`,
+				`Pass model_routes.agent_provider (e.g. 'Claude', 'Codex') instead.`,
 		);
 	}
 

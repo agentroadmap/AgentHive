@@ -4,8 +4,14 @@
  * AC-3: A dormant agency is reactivated to 'active' when a heartbeat arrives
  *       (the CASE `WHEN status = 'dormant' THEN 'active'` branch in liaisonHeartbeat).
  *
- * AC-7: The prop_claim gateway rejects a registered agency that has no active
- *       liaison session (isRegisteredAgency=true but hasActiveLiaisonSession=false).
+ * AC-7 (SUPERSEDED by P1438 AC-19, V3-C6): the old design made the prop_claim
+ *       gateway reject a registered agency lacking an active liaison session. V3's
+ *       liaison is a cold-wakeable AI session (no per-agency service opens a
+ *       session), so that gate locked out the mandated model. The claim path now
+ *       proceeds on durable gates (registry existence + lease availability);
+ *       availability is revealed by a successful claim (emergent presence). The
+ *       e2e test below asserts the rejection is GONE. The helper `hasActiveLiaisonSession`
+ *       is retained for diagnostics only — it no longer gates claim.
  */
 
 import { test } from "node:test";
@@ -24,8 +30,23 @@ import { PgProposalHandlers } from "../../src/apps/mcp-server/tools/proposals/pg
 
 const TS = Date.now();
 
+/**
+ * liaisonRegister() requires the roadmap.agency row to already exist (it no longer
+ * auto-creates it). Seed a minimal active agency row so these integration tests can
+ * exercise the liaison/claim paths.
+ */
+async function seedTestAgency(agency_id: string, display_name: string): Promise<void> {
+	await query(
+		`INSERT INTO roadmap.agency (agency_id, display_name, provider, host_id, status)
+		 VALUES ($1, $2, 'test', 'bot', 'active')
+		 ON CONFLICT (agency_id) DO UPDATE SET status = 'active'`,
+		[agency_id, display_name],
+	);
+}
+
 test("AC-3: dormant agency heartbeat → reactivated to active", async () => {
 	const agency_id = `test-p463-ac3-${TS}`;
+	await seedTestAgency(agency_id, "P463 AC-3 Test Agency");
 
 	const { session_id } = await liaisonRegister({
 		agency_id,
@@ -71,8 +92,9 @@ test("AC-3: dormant agency heartbeat → reactivated to active", async () => {
 	await query(`DELETE FROM roadmap.agency WHERE agency_id = $1`, [agency_id]);
 });
 
-test("AC-7: claim gateway helpers — registered agency without active session is rejected", async () => {
+test("AC-7 (diagnostic, post-P1438): hasActiveLiaisonSession reflects session lifecycle — no longer gates claim", async () => {
 	const agency_id = `test-p463-ac7-${TS}`;
+	await seedTestAgency(agency_id, "P463 AC-7 Test Agency");
 
 	const { session_id } = await liaisonRegister({
 		agency_id,
@@ -113,8 +135,9 @@ test("AC-7: claim gateway helpers — registered agency without active session i
 	await query(`DELETE FROM roadmap.agency WHERE agency_id = $1`, [agency_id]);
 });
 
-test("AC-7 e2e: claimProposal() rejects registered agency with no active session", async () => {
+test("P1438 AC-19 e2e: claimProposal() does NOT reject a registered agency with no active session", async () => {
 	const agency_id = `test-p463-ac7-e2e-${TS}`;
+	await seedTestAgency(agency_id, "P463 AC-7 E2E Test Agency");
 
 	const { session_id } = await liaisonRegister({
 		agency_id,
@@ -122,26 +145,46 @@ test("AC-7 e2e: claimProposal() rejects registered agency with no active session
 		provider: "test",
 		host_id: "bot",
 	});
-	// Close the session so hasActiveLiaisonSession returns false
+	// Close the session so hasActiveLiaisonSession returns false — the old AC-7
+	// rejection condition. Under P1438 AC-19 this must NO LONGER block the claim.
 	await endLiaisonSession(session_id, "normal");
 
-	// Preconditions
+	// Preconditions: registered, but cold (no open liaison session).
 	assert.equal(await isRegisteredAgency(agency_id), true);
 	assert.equal(await hasActiveLiaisonSession(agency_id), false);
 
-	// Call the actual handler — AC-7 guard fires before any lease write.
-	// Passing null for core is safe; claimProposal never dereferences it.
+	// Call the actual handler. Passing null for core is safe; claimProposal never
+	// dereferences it on this path.
 	const handlers = new PgProposalHandlers(null as any, "");
 	const result = await handlers.claimProposal({ id: "463", agent: agency_id });
 
 	const text = (result.content[0] as { type: string; text: string }).text;
-	assert.match(
+	// AC-19 core: the session-prerequisite rejection is gone.
+	assert.doesNotMatch(
 		text,
 		/no active liaison session/i,
-		"claimProposal must surface AC-7 rejection for agency with no session",
+		"P1438 AC-19: claim must NOT be rejected for lacking a liaison session",
+	);
+	assert.doesNotMatch(
+		text,
+		/there is no per-agency service to start|cold-wake it/i,
+		"P1438 AC-19: the service-instruction error text must be gone",
+	);
+	// The claim proceeds on durable gates (lease availability). Whatever the lease
+	// outcome (claimed / already-leased / not-found), it is a real claim-path
+	// response, not the retired session gate.
+	assert.match(
+		text,
+		/claim|lease|proposal|oversized|not found/i,
+		"claim must reach the real claim/lease path once the session gate is removed",
 	);
 
 	// Cleanup
+	await query(
+		`DELETE FROM roadmap_proposal.proposal_lease WHERE proposal_id = 463
+		   AND agent_identity = $1`,
+		[agency_id],
+	).catch(() => {});
 	await query(`DELETE FROM roadmap.agency_liaison_session WHERE agency_id = $1`, [agency_id]);
 	await query(`DELETE FROM roadmap.agency WHERE agency_id = $1`, [agency_id]);
 });

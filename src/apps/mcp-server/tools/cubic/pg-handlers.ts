@@ -721,25 +721,45 @@ export class PgCubicHandlers {
 				};
 			}
 
-			await query(
-				`UPDATE roadmap.cubics
-				 SET phase = 'design',
-				     status = 'idle',
-				     lock_holder = NULL,
-				     lock_phase = NULL,
-				     locked_at = NULL,
-				     activated_at = NULL,
-				     completed_at = NULL,
-				     metadata = COALESCE(metadata, '{}'::jsonb) || '{"recycled": true}'::jsonb
-				 WHERE cubic_id = $1`,
-				[args.cubicId],
-			);
+			// P1389 AC-3: resetCode controls whether phase/status are reset
+			// Default behavior (resetCode unspecified or true): reset to design phase, idle status
+			// When resetCode=false: preserve phase/status, only mark recycled in metadata
+			const shouldReset = args.resetCode !== false;
+
+			if (shouldReset) {
+				// Full reset: phase → 'design', status → 'idle', clear locks and timestamps
+				await query(
+					`UPDATE roadmap.cubics
+					 SET phase = 'design',
+					     status = 'idle',
+					     lock_holder = NULL,
+					     lock_phase = NULL,
+					     locked_at = NULL,
+					     activated_at = NULL,
+					     completed_at = NULL,
+					     metadata = COALESCE(metadata, '{}'::jsonb) || '{"recycled": true}'::jsonb
+					 WHERE cubic_id = $1`,
+					[args.cubicId],
+				);
+			} else {
+				// Preservation mode: keep phase/status, just mark recycled
+				await query(
+					`UPDATE roadmap.cubics
+					 SET metadata = COALESCE(metadata, '{}'::jsonb) || '{"recycled": true, "preserved_phase": true}'::jsonb
+					 WHERE cubic_id = $1`,
+					[args.cubicId],
+				);
+			}
+
 			return {
 				content: [
 					{
 						type: "text",
 						text: JSON.stringify(
-							{ success: true, message: `Cubic ${args.cubicId} recycled` },
+							{
+								success: true,
+								message: `Cubic ${args.cubicId} recycled${shouldReset ? " (phase/status reset)" : " (phase/status preserved)"}`,
+							},
 							null,
 							2,
 						),

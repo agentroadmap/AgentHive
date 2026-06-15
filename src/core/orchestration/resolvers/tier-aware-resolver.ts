@@ -257,6 +257,11 @@ export async function isProviderQuotaExhausted(
 /**
  * Log a tier downshift event to route_decision_log.
  * Used by AC-8 to surface downshift decisions to the operator dashboard.
+ *
+ * BUG FIX (P3313): was incorrectly writing to `roadmap_workforce.route_decision_log`
+ * (table never existed there); fixed to write to `roadmap.route_decision_log` with
+ * correct P772+P3313 column names.  When routeId=-1 (no route available), we skip
+ * the INSERT and only emit a notification.
  */
 export async function logTierDownshift(
 	routeId: number,
@@ -265,25 +270,23 @@ export async function logTierDownshift(
 	downshift: TierDownshiftDecision,
 	reason_detail: string = "",
 ): Promise<void> {
+	const detail = JSON.stringify({
+		original_tier: downshift.originalTier,
+		downshift_tier: downshift.downshiftTier,
+		reason: downshift.reason,
+		downshift_attempt: downshift.downshiftAttempt,
+		reason_detail,
+	});
 	try {
-		await pgQuery(
-			`INSERT INTO roadmap_workforce.route_decision_log (
-        route_id, proposal_id, role, decision_kind, decision_detail, created_at
-      ) VALUES ($1, $2, $3, $4, $5, now())`,
-			[
-				routeId,
-				proposalId,
-				role,
-				"tier_downshift",
-				JSON.stringify({
-					original_tier: downshift.originalTier,
-					downshift_tier: downshift.downshiftTier,
-					reason: downshift.reason,
-					downshift_attempt: downshift.downshiftAttempt,
-					reason_detail,
-				}),
-			],
-		);
+		// Only INSERT when we have a real route id (not the -1 placeholder).
+		if (routeId > 0) {
+			await pgQuery(
+				`INSERT INTO roadmap.route_decision_log
+				   (proposal_id, role, chosen_route_id, chosen_reason)
+				 VALUES ($1, $2, $3, $4)`,
+				[proposalId, role, routeId, `tier_downshift: ${detail}`],
+			);
+		}
 	} catch (err) {
 		console.warn(
 			"[P1091] Failed to log tier_downshift:",

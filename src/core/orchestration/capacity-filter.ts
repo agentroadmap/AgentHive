@@ -37,11 +37,16 @@ export async function computeCapacityScoreMultiplier(
   provider: string,
   model: string
 ): Promise<{ multiplier: number; score: CapacityScore }> {
-  // Query agency_capacity for this (provider, model, agency_id) tuple
+  // Query agency_capacity for this (provider, model, agency_id) tuple.
+  // P1365-AC2: fall back to the provider-level wildcard row (model='*') written
+  // by the P1859 snapshot bridge when no exact model row exists; an exact match
+  // always wins over the wildcard.
   const { rows } = await query(
     `SELECT throttle_action, p_skip, headroom_pct, reset_at
      FROM roadmap_workforce.agency_capacity
-     WHERE provider = $1 AND model = $2 AND agency_id = $3`,
+     WHERE provider = $1 AND (model = $2 OR model = '*') AND agency_id = $3
+     ORDER BY CASE WHEN model = $2 THEN 0 ELSE 1 END
+     LIMIT 1`,
     [provider, model, agencyId]
   );
 
@@ -89,13 +94,18 @@ export async function computeCapacityScoreMultiplier(
 /**
  * Log a throttle decision to message_ledger for audit/observability
  * Called when a soft-throttle or hard-throttle decision affects spawn ranking
+ *
+ * P1376-AC5: throttle_source='proactive|reactive|both' identifies which cooldown
+ * window(s) contributed to the final throttle decision. Enables audit trails to
+ * distinguish proactive capacity exhaustion from reactive 429/quota backoff.
  */
 export async function logThrottleDecision(
   agencyId: string,
   provider: string,
   model: string,
   score: CapacityScore,
-  projectId: string | null
+  projectId: string | null,
+  throttleSource: 'proactive' | 'reactive' | 'both' | 'none' = 'proactive'
 ): Promise<void> {
   const metadata = {
     agency_id: agencyId,
@@ -105,6 +115,7 @@ export async function logThrottleDecision(
     p_skip: score.p_skip,
     headroom_pct: score.headroom_pct,
     reset_at: score.reset_at?.toISOString() ?? null,
+    throttle_source: throttleSource,
     reason: score.action === 'hard'
       ? 'agency_hard_throttled'
       : score.action === 'soft'
@@ -114,18 +125,22 @@ export async function logThrottleDecision(
 
   // Fire-and-forget audit log (non-blocking)
   // The resolver must not wait on this
-  query(
+  // from_agent must be a registered agent_registry identity (FK);
+  // 'system:orchestrator' was unregistered, which silently killed every
+  // audit write until P1375.
+  return query(
     `INSERT INTO roadmap.message_ledger (
       from_agent, channel, message_type, metadata, project_id
      ) VALUES ($1, $2, $3, $4, $5)`,
     [
-      'system:orchestrator',
+      'orchestrator',
       'system:capacity-throttle',
       'throttle_decision',
       JSON.stringify(metadata),
       projectId || 1, // Default to control-plane project if not specified
     ]
-  ).catch((err) => {
+  ).then(() => undefined)
+  .catch((err) => {
     console.warn('[P1365] Failed to log throttle decision:', err);
   });
 }

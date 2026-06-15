@@ -7,6 +7,17 @@
 // @ts-expect-error - blessed types may not be installed
 import type blessed from "blessed";
 import { box } from "./blessed.ts";
+// P1374 (P1365-B): pure, unit-tested throttle-state formatting logic.
+import {
+	buildWorkforceSubheaderParts,
+	type CockpitCounts,
+	formatCockpitHeaderCounts,
+	formatDriftMarker,
+	formatHeadroomBadge,
+	formatReadyCoolingLabel,
+	formatRelativeTime,
+	isCooling,
+} from "./cockpit-format.ts";
 
 export interface WorkforceAgent {
 	id: string;
@@ -18,14 +29,18 @@ export interface WorkforceAgent {
 	// 'zombie'   = legacy state — unused with new schema
 	status: "active" | "zombie" | "offline" | "throttled";
 	presenceOnline?: boolean; // true when liaison heartbeat is live
-	throttledUntil?: number;  // ms epoch — when throttle clears
+	throttledUntil?: number; // ms epoch — when throttle clears
 	currentProposal?: string;
 	statusMessage: string;
 	lastSeen?: number;
 	// P1365-AC6: Capacity awareness
-	capacityHeadroomPct?: number | null;  // headroom percentage from agency_capacity
-	capacityThrottleAction?: 'none' | 'soft' | 'hard' | null; // throttle action type
-	capacityResetAt?: number | null;      // ms epoch — when capacity resets
+	capacityHeadroomPct?: number | null; // headroom percentage from agency_capacity
+	capacityThrottleAction?: "none" | "soft" | "hard" | null; // throttle action type
+	capacityResetAt?: number | null; // ms epoch — when capacity resets
+	// P1377 AC-9: registration-drift flag. true ⇒ this agent_registry row has NO
+	// matching roadmap.agency row (LEFT JOIN miss). Populated by the caller from
+	// the same join the canonical metrics use; renders a [DRIFT] marker.
+	is_drift?: boolean;
 }
 
 export interface PipelineProposal {
@@ -63,6 +78,13 @@ export function renderCockpit(
 		pipelineCounts?: Record<string, number>;
 		ledger: LedgerEntry[];
 		messages: TerminalMessage[];
+		// P1377 AC-11: canonical workforce counts from queryWorkforceMetrics
+		// (src/shared/queries/workforce-counts.ts). The header and workforce
+		// subheader render these numbers verbatim; NO caller may independently
+		// recompute agencyCount/online/ready. Optional only so callers that
+		// haven't fetched metrics yet (e.g. the initial empty render) stay safe;
+		// when absent the panel falls back to in-memory agent-array derivation.
+		metrics?: CockpitCounts;
 		// Layout resolved by the caller (FlagKeys.TUI_COCKPIT_LAYOUT). Defaults
 		// to 'grid' when not provided so the function stays safe for any caller
 		// that hasn't been updated yet.
@@ -134,10 +156,7 @@ export function renderCockpit(
 					width: "100%",
 					// override top per slot:
 					topOverride:
-						slot === 0 ? 3
-						: slot === 1 ? "25%"
-						: slot === 2 ? "50%"
-						: "75%",
+						slot === 0 ? 3 : slot === 1 ? "25%" : slot === 2 ? "50%" : "75%",
 				};
 			}
 			// grid
@@ -239,10 +258,10 @@ export function renderCockpit(
 			.slice()
 			.reverse()
 			.forEach((m) => {
-				const time = new Date(Number(m.timestamp)).toLocaleTimeString(
-					[],
-					{ hour: "2-digit", minute: "2-digit" },
-				);
+				const time = new Date(Number(m.timestamp)).toLocaleTimeString([], {
+					hour: "2-digit",
+					minute: "2-digit",
+				});
 				terminalLog.add(
 					`[{gray-fg}${time}{/}] {bold}${m.sender_identity}{/}: ${m.content}`,
 				);
@@ -257,11 +276,27 @@ export function renderCockpit(
 		terminalLog = container._terminalLog;
 	}
 
-	// Update Dynamic Content. Header bar mirrors the panel counts —
-	// agencies = distinct provider@host groups, agents = total workers.
-	const headerAgencies = new Set(agents.map((a) => a.role || "unknown@?")).size;
+	// Update Dynamic Content. Header bar mirrors the canonical panel counts.
+	// P1377 AC-11: counts come from queryWorkforceMetrics
+	// (src/shared/queries/workforce-counts.ts) passed in as data.metrics — the
+	// header does NOT independently recompute agencyCount/online/ready. When the
+	// caller hasn't fetched metrics yet (initial empty render) we fall back to a
+	// zeroed/agent-array-derived shape so the panel stays safe.
+	// P1377 AC-13 (covers AC-5/AC-8 soft-dep note): drift_count > 0 is EXPECTED
+	// until P1372's register_agency action backfills roadmap.agency rows for
+	// every active agent_registry row. A non-zero drift count is registration
+	// drift, not a render bug.
+	const counts: CockpitCounts = data.metrics ?? {
+		total_agents: agents.length,
+		total_providers: new Set(agents.map((a) => a.role || "unknown@?")).size,
+		online_count: agents.filter((a) => a.presenceOnline).length,
+		registered_agencies: agents.filter((a) => !a.is_drift).length,
+		drift_count: agents.filter((a) => a.is_drift).length,
+	};
+	// P1377 AC-2/AC-7: header counts fragment — agents · providers · online ·
+	// registered. The word "agencies" must NOT appear here.
 	headerBox.setContent(
-		`{bold}{cyan-fg}🚀 ENGINEER'S COCKPIT{/} | Agencies: ${headerAgencies} | Agents: ${agents.length} | Pipeline: ${pipelineTotal} | Status: {green-fg}LIVE{/}`,
+		`{bold}{cyan-fg}🚀 ENGINEER'S COCKPIT{/} | ${formatCockpitHeaderCounts(counts)} | Pipeline: ${pipelineTotal} | Status: {green-fg}LIVE{/}`,
 	);
 
 	// Update Workforce — split into WORKING (has currentProposal) vs AVAILABLE
@@ -271,63 +306,62 @@ export function renderCockpit(
 	if (agents.length === 0) {
 		workforceBox.setContent("  {gray-fg}No agents registered{/}");
 	} else {
-		const totalAgents = agents.length;
-		// Count distinct provider@host groups — those are the agencies in the
-		// operator's mental model (claude@bot, codex@bot, …). The individual
-		// named entries (alice, ana, …) are workers under each agency.
-		const agencyCount = new Set(agents.map((a) => a.role || "unknown@?")).size;
-		const online = agents.filter((a) => a.presenceOnline).length;
-		const working = agents.filter((a) => a.status === "active" && a.currentProposal);
-		const idle = agents.filter((a) => a.status === "active" && !a.currentProposal);
+		// P1377: subheader counts (agents/providers/online/registered) now come
+		// from the canonical `counts` (data.metrics) via buildWorkforceSubheaderParts
+		// — NOT recomputed from the agent array here. The body sections below still
+		// derive the live dispatch buckets (working/idle/throttled/offline) from
+		// the in-memory roster, since those are presentation state, not counts.
+		const working = agents.filter(
+			(a) => a.status === "active" && a.currentProposal,
+		);
+		const idle = agents.filter(
+			(a) => a.status === "active" && !a.currentProposal,
+		);
 
-		// P1365-AC6: Split idle agents by capacity headroom
-		// "ready" = healthy headroom (>= 25%), "cooling" = low headroom (< 25%)
-		const ready = idle.filter((a) => {
-			const headroom = a.capacityHeadroomPct;
-			// If no headroom data, assume ready (no capacity record = healthy)
-			return headroom === null || headroom === undefined || headroom >= 25;
-		});
-		const cooling = idle.filter((a) => {
-			const headroom = a.capacityHeadroomPct;
-			// Cooling = explicit headroom < 25% OR soft-throttled by capacity
-			return headroom !== null && headroom !== undefined && headroom < 25;
-		});
+		// P1374 (P1365-B) AC-3: Split idle (dispatchable) agents by throttle_action.
+		//   cooling = soft-throttled by capacity (throttle_action='soft') — still
+		//             dispatchable (deprioritized per P1373), stays in AVAILABLE.
+		//   ready   = throttle_action='none' or no capacity row.
+		// Hard-throttled agents never reach here (status='throttled' → THROTTLED).
+		// Headroom (< 25%) is surfaced as a per-agent badge below, independent of
+		// the ready/cooling bucketing.
+		const cooling = idle.filter((a) => isCooling(a));
+		const ready = idle.filter((a) => !isCooling(a));
 
 		const throttled = agents.filter((a) => a.status === "throttled");
 		const offline = agents.filter((a) => a.status === "offline");
 
 		const cols = ((screen as any).program?.cols as number | undefined) ?? 160;
 		// Layout is the resolved layout from the caller (FlagKeys.TUI_COCKPIT_LAYOUT).
-		const panelBudget = layout === "stacked"
-			? Math.max(60, cols - 6)
-			: Math.max(40, Math.floor(cols / 2) - 6);
+		const panelBudget =
+			layout === "stacked"
+				? Math.max(60, cols - 6)
+				: Math.max(40, Math.floor(cols / 2) - 6);
 
 		const lines: string[] = [];
-		// Header: agencies + agents counts, liaison responsiveness, dispatch
-		// states. Operator request (2026-05-22): "agencies #, registered,
-		// online (liaison responsive, token available or to reset time)".
-		// P1365-AC6: Split "ready" and "cooling" to show capacity awareness.
-		const parts = [
-			`{bold}${agencyCount}{/} agencies`,
-			`{bold}${totalAgents}{/} agents`,
-			`{green-fg}${online}{/} online`,
-			`{bold}${working.length}{/} working`,
+		// P1377 AC-3/AC-8: workforce subheader — EXACTLY 4 canonical parts in
+		// order: agents, providers, online, registered. Built from the canonical
+		// metrics (data.metrics, via `counts`) by buildWorkforceSubheaderParts so
+		// the SQL, the header, the subheader, and the unit tests agree by
+		// construction. The dispatch-state detail (working/ready/cooling/
+		// throttled/offline) is rendered on a SEPARATE second line below so this
+		// primary parts array stays exactly 4 elements.
+		const subParts = buildWorkforceSubheaderParts(counts);
+		const taggedSubParts = [
+			`{bold}${subParts[0]}{/}`,
+			`{bold}${subParts[1]}{/}`,
+			`{green-fg}${subParts[2]}{/}`,
+			`{bold}${subParts[3]}{/}`,
 		];
-		// Show "N ready · M cooling" format for capacity awareness
+		lines.push(taggedSubParts.join(" · "));
+
+		// Second line: live dispatch-state detail (not part of the canonical 4).
+		// P1365-AC6 / P1374 AC-3 — working, ready/cooling, throttled, offline.
+		const stateParts = [`{bold}${working.length}{/} working`];
 		if (ready.length > 0 || cooling.length > 0) {
-			parts.push(`{cyan-fg}${ready.length}{/} ready`);
-			if (cooling.length > 0) {
-				// Show shortest reset window for cooling agencies
-				const coolingResets = cooling
-					.map((a) => a.capacityResetAt)
-					.filter((t): t is number => typeof t === "number" && t > Date.now())
-					.sort((a, b) => a - b);
-				const nextCoolingReset = coolingResets[0];
-				const coolingResetIn = nextCoolingReset
-					? ` (reset ${formatRelativeTime(nextCoolingReset - Date.now())})`
-					: "";
-				parts.push(`{yellow-fg}${cooling.length} cooling${coolingResetIn}{/}`);
-			}
+			stateParts.push(
+				`{cyan-fg}${formatReadyCoolingLabel(ready.length, cooling.length)}{/}`,
+			);
 		}
 		if (throttled.length > 0) {
 			// Show shortest reset window so operator knows when to expect capacity.
@@ -339,12 +373,12 @@ export function renderCockpit(
 			const resetIn = nextReset
 				? ` (next reset ${formatRelativeTime(nextReset - Date.now())})`
 				: "";
-			parts.push(`{yellow-fg}${throttled.length} throttled${resetIn}{/}`);
+			stateParts.push(`{yellow-fg}${throttled.length} throttled${resetIn}{/}`);
 		}
 		if (offline.length > 0) {
-			parts.push(`{gray-fg}${offline.length} offline{/}`);
+			stateParts.push(`{gray-fg}${offline.length} offline{/}`);
 		}
-		lines.push(parts.join(" · "));
+		lines.push(stateParts.join(" · "));
 		lines.push("");
 
 		if (working.length > 0) {
@@ -352,9 +386,10 @@ export function renderCockpit(
 			working.forEach((a) => {
 				const role = `{gray-fg}(${a.role}){/}`;
 				const task = a.currentProposal ?? "";
-				const taskFit = task.length > panelBudget - a.id.length - 10
-					? `${task.substring(0, panelBudget - a.id.length - 11)}…`
-					: task;
+				const taskFit =
+					task.length > panelBudget - a.id.length - 10
+						? `${task.substring(0, panelBudget - a.id.length - 11)}…`
+						: task;
 				lines.push(`  {bold}${a.id}{/} ${role} -> {yellow-fg}${taskFit}{/}`);
 			});
 			lines.push("");
@@ -362,41 +397,65 @@ export function renderCockpit(
 
 		if (ready.length > 0 || cooling.length > 0) {
 			lines.push(`{cyan-fg}[ ] AVAILABLE{/}`);
+			const nowMs = Date.now();
 
-			// Show READY agencies
+			// P1374 AC-5: per-agent low-headroom badge "[X% reset in Tm]".
+			// Pure formatter from cockpit-format.ts; returns "" when headroom is
+			// missing or >= 25%, so it composes cleanly into either layout below.
+			const badge = (a: WorkforceAgent) =>
+				formatHeadroomBadge(a.capacityHeadroomPct, a.capacityResetAt, nowMs);
+
+			// AC-4: READY agents grouped by provider@host with a "(count)" badge.
+			// Per-agent names carry the low-headroom badge inline when applicable.
+			// P1377 AC-9: registration drift is per-agent, so we sub-key the group
+			// by provider + is_drift. A drift sub-group renders a [DRIFT] marker
+			// after the provider token (e.g. "claude@bot [DRIFT] (2): alice, bob");
+			// registered sub-groups render no marker.
 			if (ready.length > 0) {
-				const byProvider = new Map<string, string[]>();
+				const byProvider = new Map<string, WorkforceAgent[]>();
+				// Composite key keeps render order stable: "<provider> <0|1>".
 				ready.forEach((a) => {
-					const key = a.role || "unknown@?";
+					const provider = a.role || "unknown@?";
+					const key = `${provider} ${a.is_drift ? "1" : "0"}`;
 					if (!byProvider.has(key)) byProvider.set(key, []);
-					byProvider.get(key)!.push(a.id);
+					byProvider.get(key)!.push(a);
 				});
-				const orderedProviders = Array.from(byProvider.keys()).sort();
-				orderedProviders.forEach((provider) => {
-					const names = byProvider.get(provider) ?? [];
-					const joined = names.join(", ");
-					const labelLen = provider.length + String(names.length).length + 5;
-					const fit = joined.length > panelBudget - labelLen
-						? `${joined.substring(0, panelBudget - labelLen - 1)}…`
-						: joined;
-					lines.push(`  {gray-fg}${provider}{/} (${names.length}): ${fit}`);
+				const orderedKeys = Array.from(byProvider.keys()).sort();
+				orderedKeys.forEach((key) => {
+					const group = byProvider.get(key) ?? [];
+					const provider = key.slice(0, key.indexOf(" "));
+					const isDriftGroup = key.endsWith(" 1");
+					const driftMarker = formatDriftMarker(isDriftGroup);
+					const rendered = group.map((a) => {
+						const b = badge(a);
+						return b ? `${a.id} {yellow-fg}${b}{/}` : a.id;
+					});
+					const joined = rendered.join(", ");
+					const labelLen =
+						provider.length +
+						driftMarker.length +
+						String(group.length).length +
+						5;
+					const fit =
+						joined.length > panelBudget - labelLen
+							? `${joined.substring(0, panelBudget - labelLen - 1)}…`
+							: joined;
+					const driftTag = isDriftGroup ? " {red-fg}[DRIFT]{/}" : "";
+					lines.push(
+						`  {gray-fg}${provider}{/}${driftTag} (${group.length}): ${fit}`,
+					);
 				});
 			}
 
-			// Show COOLING agencies with headroom info
+			// AC-3/AC-5: COOLING (soft-throttled) agents stay in AVAILABLE, one per
+			// line with role and the low-headroom badge.
 			if (cooling.length > 0) {
 				lines.push(`  {yellow-fg}[cooling]{/}`);
 				cooling.forEach((a) => {
-					const headroom = a.capacityHeadroomPct !== undefined ? a.capacityHeadroomPct : null;
-					const resetMs = a.capacityResetAt;
-					const resetTime = resetMs && resetMs > Date.now()
-						? formatRelativeTime(resetMs - Date.now())
-						: "unknown";
-					const headroomStr = headroom !== null && headroom !== undefined
-						? `${headroom.toFixed(1)}%`
-						: "N/A";
 					const role = `{gray-fg}(${a.role}){/}`;
-					lines.push(`  {bold}${a.id}{/} ${role} [{yellow-fg}${headroomStr} headroom↓{/} reset ${resetTime}]`);
+					const b = badge(a);
+					const badgeStr = b ? ` {yellow-fg}${b}{/}` : "";
+					lines.push(`  {bold}${a.id}{/} ${role}${badgeStr}`);
 				});
 			}
 		}
@@ -408,13 +467,17 @@ export function renderCockpit(
 				const resetIn = a.throttledUntil
 					? formatRelativeTime(a.throttledUntil - Date.now())
 					: "unknown";
-				lines.push(`  {bold}${a.id}{/} {gray-fg}(${a.role}){/} -> reset ${resetIn}`);
+				lines.push(
+					`  {bold}${a.id}{/} {gray-fg}(${a.role}){/} -> reset ${resetIn}`,
+				);
 			});
 		}
 
 		if (offline.length > 0) {
 			lines.push("");
-			lines.push(`{gray-fg}(.) offline: ${offline.map((a) => a.id).join(", ")}{/}`);
+			lines.push(
+				`{gray-fg}(.) offline: ${offline.map((a) => a.id).join(", ")}{/}`,
+			);
 		}
 
 		workforceBox.setContent(lines.join("\n"));
@@ -449,7 +512,9 @@ export function renderCockpit(
 	// proposals is the recent-activity list when the caller pre-sorted by
 	// modified_at DESC; otherwise we degrade to "last 5 from the tail".
 	pipelineLines.push("\nRecent Activity:");
-	const recent = data.pipelineCounts ? proposals : proposals.slice(-5).reverse();
+	const recent = data.pipelineCounts
+		? proposals
+		: proposals.slice(-5).reverse();
 	// Pipeline panel is ~half the screen width. Estimate the usable width
 	// from the terminal columns; minus the "• PXXXX: " prefix and borders,
 	// leaves roughly half - 14. Fall back to a generous 70 if cols unknown.
@@ -457,9 +522,10 @@ export function renderCockpit(
 	const titleBudget = Math.max(20, Math.floor(cols / 2) - 14);
 	recent.forEach((p) => {
 		const title = p.title ?? "";
-		const trimmed = title.length > titleBudget
-			? `${title.substring(0, titleBudget - 1)}…`
-			: title;
+		const trimmed =
+			title.length > titleBudget
+				? `${title.substring(0, titleBudget - 1)}…`
+				: title;
 		pipelineLines.push(`• ${p.display_id}: ${trimmed}`);
 	});
 	// blessed's setContent on this scrollable+tags=true box leaves stale
@@ -472,7 +538,7 @@ export function renderCockpit(
 	if (ledger.length === 0) {
 		ledgerBox.setContent(
 			"  {gray-fg}No spending data in last 7 days.{/}\n" +
-			"  {gray-fg}Budget writers not yet wired (tracked as P1018).{/}",
+				"  {gray-fg}Budget writers not yet wired (tracked as P1018).{/}",
 		);
 	} else {
 		const ledgerLines = ledger.map((l) => {
@@ -501,14 +567,4 @@ export function renderCockpit(
 	}
 
 	screen.render();
-}
-
-function formatRelativeTime(ms: number): string {
-	if (ms < 0) return "now";
-	const seconds = Math.round(ms / 1000);
-	if (seconds < 60) return `in ${seconds}s`;
-	const minutes = Math.round(seconds / 60);
-	if (minutes < 60) return `in ${minutes}m`;
-	const hours = Math.round(minutes / 60);
-	return `in ${hours}h`;
 }

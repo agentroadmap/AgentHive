@@ -25,7 +25,10 @@ import {
 	liveChildCount,
 } from "./agent-spawner.ts";
 import { ObservabilityWriter } from "../observability/observability-writer.ts";
-import { postWorkOffer } from "../pipeline/post-work-offer.ts";
+import {
+	isTerminalProposalStatus,
+	postWorkOffer,
+} from "../pipeline/post-work-offer.ts";
 import { ROLE_TO_REQUIRED_CAPABILITIES } from "./offer-dispatch.ts";
 import { reapStaleRows } from "../pipeline/reap-stale-rows.ts";
 import { enqueueNotification } from "../notifications/enqueue.ts";
@@ -35,12 +38,14 @@ import { loadStateNames } from "../workflow/state-names.ts";
 import { mcpText } from "../../../scripts/mcp-result.ts";
 import { getMcpUrl } from "../../shared/runtime/endpoints.ts";
 import { listDispatchableAgencies } from "../../infra/agency/liaison-service.ts";
+import { isLegacyPushDispatchEnabled } from "./legacy-push-dispatch-gate.ts";
 import {
 	storeMessage,
 	getNextSequence,
 } from "../../infra/agency/liaison-message-service.ts";
 import { createMessageEnvelope } from "../../infra/agency/liaison-message-types.ts";
 import { resolveGateRole, getGateRoleRegistry } from "./gate-role-resolver.ts";
+import { resolveExecutorWorktreeFallback } from "./executor-worktree-fallback.ts";
 import {
 	bootCancelPokeAttempts,
 	runOfferReaper,
@@ -63,8 +68,11 @@ const MCP_URL = getMcpUrl();
 const AGENTHIVE_HOST = process.env.AGENTHIVE_HOST ?? "default";
 const WORKTREE_ROOT =
 	process.env.AGENTHIVE_WORKTREE_ROOT ?? "/data/code/worktree";
-const DEFAULT_EXECUTOR_WORKTREE =
-	process.env.AGENTHIVE_DEFAULT_EXECUTOR_WORKTREE;
+// P1445 AC-3: env-based executor worktree selection is gated (opt-in via
+// AGENTHIVE_ALLOW_ENV_WORKTREE_FALLBACK=1). In the default multi-agent config
+// this is undefined, so selectExecutorWorktree relies on the requested
+// (orchestrator-assigned) worktree instead of self-selecting from the env.
+const DEFAULT_EXECUTOR_WORKTREE = resolveExecutorWorktreeFallback();
 
 // When true, orchestrator posts work offers instead of direct-spawning.
 // Registered agency processes (e.g. copilot/agency-gary) claim and execute.
@@ -681,6 +689,69 @@ function normalizeWorktreeIdentity(value: string): string {
  * Worktrees are filesystem contexts, not provider constraints.
  */
 
+/**
+ * P1360 Change 3: Check if the worktree's provider auth is accessible.
+ * Maps worktree prefix (e.g., 'codex-*') to provider and checks for auth files/env vars.
+ * Returns true if auth is accessible, false if not.
+ */
+async function checkProviderAuthAccessible(worktree: string): Promise<boolean> {
+	const prefix = worktree.split("-")[0]; // e.g., 'codex-one' → 'codex'
+	const homeDir = process.env.HOME ?? "/root";
+
+	const authChecks: Record<string, string[]> = {
+		codex: [
+			`${homeDir}/.codex/auth.json`,
+			`${homeDir}/.openai/settings.json`,
+		],
+		gemini: [`${homeDir}/.gemini/settings.json`],
+		claude: [`${homeDir}/.claude/settings.json`],
+		copilot: [`${homeDir}/.config/github-copilot/auth.json`],
+	};
+
+	// If no known prefix mapping, assume auth exists (fail-open)
+	if (!(prefix in authChecks)) return true;
+
+	const authPaths = authChecks[prefix];
+	for (const authPath of authPaths) {
+		try {
+			await access(authPath, fsConstants.R_OK);
+			return true; // Found at least one usable auth file
+		} catch {
+			// This path is not accessible; try next
+		}
+	}
+
+	// If no auth file found, also check env vars as override
+	const envVarMap: Record<string, string[]> = {
+		codex: ["OPENAI_API_KEY", "CODEX_API_KEY"],
+		gemini: ["GEMINI_API_KEY"],
+		claude: ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"],
+		copilot: ["GH_COPILOT_TOKEN"],
+	};
+
+	if (prefix in envVarMap) {
+		const envVars = envVarMap[prefix];
+		for (const envVar of envVars) {
+			if (process.env[envVar]) return true;
+		}
+	}
+
+	return false; // No auth accessible for this provider/worktree
+}
+
+// Log provider auth unavailability once per worktree per restart
+const loggedAuthUnavailable = new Set<string>();
+function logProviderAuthUnavailable(worktree: string): void {
+	if (!loggedAuthUnavailable.has(worktree)) {
+		const prefix = worktree.split("-")[0];
+		const currentUser = process.env.USER ?? "unknown";
+		logger.warn(
+			`[selectExecutorWorktree] ${prefix} worktrees not usable by ${currentUser} — auth not accessible (no ${prefix}-auth file or env var set). Worktree: ${worktree}`,
+		);
+		loggedAuthUnavailable.add(worktree);
+	}
+}
+
 async function scoreUsableWorktree(
 	worktree: string,
 	source: string,
@@ -694,19 +765,48 @@ async function scoreUsableWorktree(
 		await access(join(dir, ".env.agent"), fsConstants.R_OK);
 		await access(dir, fsConstants.R_OK | fsConstants.W_OK | fsConstants.X_OK);
 
+		// P1360 Change 3: Check provider-auth accessibility before returning a usable candidate
+		const providerAuthOk = await checkProviderAuthAccessible(normalized);
+		if (!providerAuthOk) {
+			logProviderAuthUnavailable(normalized);
+			return null; // This worktree is not usable due to auth inaccessibility
+		}
+
 		const currentUid =
 			typeof process.getuid === "function" ? process.getuid() : null;
 		const ownedByCurrentUser =
 			currentUid !== null && dirStat.uid === currentUid;
 		const currentWorktree = normalized === basename(process.cwd());
+
+		let baseScore =
+			(ownedByCurrentUser ? 100 : 0) +
+			(currentWorktree ? 20 : 0) +
+			(source === "metadata" ? 15 : 0) +
+			(source === "env" ? 10 : 0);
+
+		// P1360 Change 2: Query recent failures for this worktree and apply penalty
+		try {
+			const { rows: failureRows } = await query<{ failure_count: number }>(
+				`SELECT COUNT(*)::int AS failure_count
+				 FROM roadmap_workforce.squad_dispatch
+				 WHERE (metadata->>'worktree_hint')::text = $1
+				   AND dispatch_status = 'failed'
+				   AND completed_at >= now() - interval '10 minutes'`,
+				[normalized],
+			);
+			const failureCount = failureRows[0]?.failure_count ?? 0;
+			baseScore -= failureCount * 10; // Each failure = -10 points
+		} catch (queryErr) {
+			logger.warn(
+				`scoreUsableWorktree(${normalized}): failed to query recent failures: ${queryErr instanceof Error ? queryErr.message : queryErr}`,
+			);
+			// Failure to query doesn't block — use base score
+		}
+
 		return {
 			worktree: normalized,
 			source,
-			score:
-				(ownedByCurrentUser ? 100 : 0) +
-				(currentWorktree ? 20 : 0) +
-				(source === "metadata" ? 15 : 0) +
-				(source === "env" ? 10 : 0),
+			score: baseScore,
 		};
 	} catch {
 		return null;
@@ -1254,6 +1354,19 @@ export async function handleStateChange(proposalId: string, newState: string) {
 	if (maturityRows[0]?.maturity === "mature") {
 		logger.log(
 			`⏭ P${proposalId} → ${newState}: maturity=mature — leaving for implicit-gate scanner`,
+		);
+		return;
+	}
+
+	// P2496 AC-5: COMPLETE (and any terminal status) is the end of the line —
+	// post zero offers. Without this guard the NOTIFY path keeps queuing dev/gate
+	// offers for completed proposals, which then sit open and starve genuine work
+	// (dispatch churn, 2026-06-09). postWorkOffer also refuses (AC-1), but
+	// short-circuiting here avoids the downstream backpressure/dispatch bookkeeping
+	// and the noisy TerminalProposalError throw on every poll cycle.
+	if (isTerminalProposalStatus(maturityRows[0]?.status)) {
+		logger.log(
+			`⏭ P${proposalId} → ${newState}: status=${maturityRows[0]?.status} is terminal — no offers for completed proposals`,
 		);
 		return;
 	}
@@ -1811,6 +1924,10 @@ async function claimImplicitGateReady(
           LIMIT 1
        ) dispatch ON true
       WHERE p.maturity = 'mature'
+        -- P2496 AC-6: never select terminal proposals for an implicit gate. The
+        -- positive allowlist below already excludes COMPLETE, but this explicit
+        -- guard keeps the invariant true even if the allowlist is later widened.
+        AND UPPER(p.status) <> 'COMPLETE'
         AND (LOWER(p.status) IN ('draft', 'review', 'develop', 'merge', 'triage', 'fix')
              OR (LOWER(p.status) = 'deliberation' AND p.type = 'governance-amendment'))
         AND dispatch.id IS NULL
@@ -2038,7 +2155,7 @@ export async function dispatchImplicitGate(
 			role,
 			task: buildImplicitGateTask(proposal, gate),
 			stage: `gate:${gate.toStage}`,
-			worktreeHint: worktree,
+			worktreeHint: null,
 			requiredCapabilities: ROLE_TO_REQUIRED_CAPABILITIES[role.toLowerCase()] ?? ["develop"],
 			gateRole: role,
 			gateFromStage: proposal.status,
@@ -2283,7 +2400,7 @@ Without set_maturity=mature, the gate will not re-run and your work remains invi
 			stage: target.status,
 			phase: "enhance",
 			timeoutMs: roleTimeoutMs("enhancer"),
-			worktreeHint: selectedWorktree,
+			worktreeHint: null,
 			requiredCapabilities:
 				requiredCapabilities.length > 0 ? requiredCapabilities : ["enhancer"],
 		});
@@ -2291,46 +2408,52 @@ Without set_maturity=mature, the gate will not re-run and your work remains invi
 			`📬 Enhancer offer ${dispatchId} posted for ${target.display_id} (revising hold #${target.hold_decision_id}; reason=${reason})`,
 		);
 
-		// P904-A2: send offer_dispatch downlink so agencies receive push notification
-		try {
-			const agencies = await listDispatchableAgencies();
-			if (agencies.length > 0) {
-				const targetAgency = agencies[0];
-				const envelope = createMessageEnvelope({
-					agencyId: targetAgency.agency_id,
-					direction: "orchestrator->liaison",
-					kind: "offer_dispatch",
-					payload: {
-						offer_id: String(dispatchId),
-						dispatch_id: dispatchId,
-						proposal_id: target.id,
-						squad_name: `P${target.id}-enhance`,
-						role: "enhancer",
-						required_capabilities:
-							requiredCapabilities.length > 0 ? requiredCapabilities : ["enhancer"],
-						route_hint: "anthropic",
-					},
-				});
-				const sequence = await getNextSequence(targetAgency.agency_id);
-				await storeMessage({
-					...(envelope as any),
-					sequence,
-					signature: "stub-orchestrator",
-				});
-				logger.log(
-					`📮 Enhancer offer_dispatch sent to ${targetAgency.agency_id} for dispatch ${dispatchId}`,
-				);
-			} else {
+		// P904-A2: send offer_dispatch downlink so agencies receive push notification.
+		// P1438 C6 AC-14: gated OFF by default — selecting the target from
+		// listDispatchableAgencies() (v_agency_status.dispatchable = last_heartbeat_at)
+		// is a heartbeat-derived dispatchability path. The open-pool offer above is the
+		// dispatch; emergent-presence claim picks it up.
+		if (await isLegacyPushDispatchEnabled()) {
+			try {
+				const agencies = await listDispatchableAgencies();
+				if (agencies.length > 0) {
+					const targetAgency = agencies[0];
+					const envelope = createMessageEnvelope({
+						agencyId: targetAgency.agency_id,
+						direction: "orchestrator->liaison",
+						kind: "offer_dispatch",
+						payload: {
+							offer_id: String(dispatchId),
+							dispatch_id: dispatchId,
+							proposal_id: target.id,
+							squad_name: `P${target.id}-enhance`,
+							role: "enhancer",
+							required_capabilities:
+								requiredCapabilities.length > 0 ? requiredCapabilities : ["enhancer"],
+							route_hint: "anthropic",
+						},
+					});
+					const sequence = await getNextSequence(targetAgency.agency_id);
+					await storeMessage({
+						...(envelope as any),
+						sequence,
+						signature: "stub-orchestrator",
+					});
+					logger.log(
+						`📮 Enhancer offer_dispatch sent to ${targetAgency.agency_id} for dispatch ${dispatchId}`,
+					);
+				} else {
+					logger.warn(
+						`Enhancer dispatch ${dispatchId}: no dispatchable agencies, offer queued only`,
+						{ reason: "no_dispatchable_agency" },
+					);
+				}
+			} catch (err) {
 				logger.warn(
-					`Enhancer dispatch ${dispatchId}: no dispatchable agencies, offer queued only`,
-					{ reason: "no_dispatchable_agency" },
+					`Failed to emit liaison message for enhancer dispatch ${dispatchId}:`,
+					err,
 				);
 			}
-		} catch (err) {
-			logger.warn(
-				`Failed to emit liaison message for enhancer dispatch ${dispatchId}:`,
-				err,
-			);
 		}
 	} catch (err) {
 		const errMsg = err instanceof Error ? err.message : String(err);

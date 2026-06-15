@@ -20,67 +20,85 @@ import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { hostname } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import {
-	validateModelForDispatch,
 	getLatestQuotaSnapshot,
+	validateModelForDispatch,
 } from "../../apps/mcp-server/tools/spending/pg-handlers.ts";
+import {
+	buildContextPackage,
+	type PackageType,
+} from "../../infra/agency/context_builder.ts";
 import { query } from "../../infra/postgres/pool.ts";
+import * as config from "../../shared/runtime/config.ts";
+import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 import {
 	getDaemonUrl,
 	getMcpUrl,
 	getMcpUrlAsync,
 } from "../../shared/runtime/endpoints.ts";
 import { getProjectRoot, getWorktreeRoot } from "../../shared/runtime/paths.ts";
-import * as config from "../../shared/runtime/config.ts";
-import { FlagKeys } from "../../shared/runtime/config-keys.ts";
-import {
-	setModelCooldown,
-	setCliFamilyCooldown,
-	isModelInCooldown,
-	setProviderCooldown,
-} from "./provider-cooldown.ts";
-import { HotfixStates, RfcStates, isTerminal } from "../workflow/state-names.ts";
-import { isWithinCapacity } from "./resolvers/capacity-guard.ts";
-import { checkAgencyCapacity } from "./capacity-filter.ts";
-import { sanitizeExtraEnv } from "./spawn-env-sanitizer.ts";
 import {
 	buildBaseName,
 	computeAbbr,
 	isLiaisonHint,
 } from "../identity/agent-registry/agent-name.ts";
 import { resolveInstanceId } from "../identity/agent-registry/registry.ts";
-import type {
-	EliminatedRoute,
-	ResolveRouteOpts,
-} from "./resolvers/route-resolver.types.ts";
+import { ObservabilityWriter } from "../observability/observability-writer.ts";
+import {
+	HotfixStates,
+	isTerminal,
+	RfcStates,
+} from "../workflow/state-names.ts";
+import { checkAgencyCapacity } from "./capacity-filter.ts";
+import { computeShadowLog } from "./match-shadow-log.ts";
+import { getTierRank } from "./resolvers/tier-aware-resolver.ts";
+import {
+	getMcpInitDiagnosisReport,
+	getMcpInitDiagnostics,
+	type McpInitTiming,
+	wrapMcpInitTimeout,
+} from "./mcp-init-wrapper.ts";
+import {
+	isModelInCooldown,
+	setCliFamilyCooldown,
+	setModelCooldown,
+	setProviderCooldown,
+} from "./provider-cooldown.ts";
+import { classifyTaskClass } from "./difficulty-assessor.ts";
+import { isWithinCapacity } from "./resolvers/capacity-guard.ts";
 import {
 	agencyPolicyFilterSql,
+	authDownFilterSql,
 	budgetFilterSql,
 	buildEliminationDiagnosticSql,
 	cooldownFilterSql,
-	authDownFilterSql,
 	hostPolicyFilterSql,
 	projectPolicyFilterSql,
 	rolePolicyFilterSql,
 } from "./resolvers/route-policy-filters.ts";
-import { ObservabilityWriter } from "../observability/observability-writer.ts";
+import type {
+	EliminatedRoute,
+	ResolveRouteOpts,
+} from "./resolvers/route-resolver.types.ts";
 import { provisionScratch, reapScratch, SCRATCH_ROOT } from "./scratch.ts";
-import {
-	buildContextPackage,
-	type PackageType,
-} from "../../infra/agency/context_builder.ts";
-import {
-	wrapMcpInitTimeout,
-	getMcpInitDiagnostics,
-	getMcpInitDiagnosisReport,
-	type McpInitTiming,
-} from "./mcp-init-wrapper.ts";
+import { sanitizeExtraEnv } from "./spawn-env-sanitizer.ts";
+import { applySpawnStagger } from "./spawn-stagger.ts";
+import { assertNotRepoRoot } from "./worktree-guard.ts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const WORKTREE_ROOT = getWorktreeRoot();
 const GITCONFIG_ROOT = join(getProjectRoot(), ".git", "worktrees-config");
+
+export function resolveSpawnWorktreePath(
+	worktreeName: string,
+	worktreeRoot: string = WORKTREE_ROOT,
+): string {
+	return isAbsolute(worktreeName)
+		? worktreeName
+		: join(worktreeRoot, worktreeName);
+}
 
 // ─── Live child registry (shutdown plumbing) ─────────────────────────────────
 //
@@ -251,6 +269,10 @@ export interface SpawnRequest {
 	parentSpanId?: string | null;
 	/** P1068 AC-3: required role slug (e.g., 'engineering/code-reviewer') for role-identity binding */
 	requiredRole?: string | null;
+	/** P1392: resolved persona body for system-prompt injection (provider-aware) */
+	persona?: string | null;
+	/** P1392: persona name/source for telemetry */
+	personaName?: string | null;
 }
 
 export interface SpawnResult {
@@ -391,7 +413,7 @@ export function buildSpawnProcessEnv(input: {
 	const baseEnv: Record<string, string> = {
 		// Carry through essential PATH
 		PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
-		HOME: process.env.HOME ?? "/var/lib/agenthive",
+		HOME: input.agentEnv.HOME ?? process.env.HOME ?? "/var/lib/agenthive",
 		...(process.env.CODEX_HOME ? { CODEX_HOME: process.env.CODEX_HOME } : {}),
 		// Agent-specific DB credentials — agent env first, then process env
 		DATABASE_URL: input.agentEnv.DATABASE_URL ?? process.env.DATABASE_URL ?? "",
@@ -453,8 +475,17 @@ function buildClaudeArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
 		"--dangerously-skip-permissions", // spawned agents need Write/Bash to do real work
 		"--model",
 		route.modelName,
-		req.task,
 	];
+
+	// P1392: Claude supports --append-system-prompt for persona injection.
+	// If persona is provided, use it as a system prompt flag instead of prepending to task.
+	if (req.persona) {
+		argv.push("--append-system-prompt", req.persona);
+	}
+
+	// Append the task (which should NOT contain the persona if we used --append-system-prompt)
+	argv.push(req.task);
+
 	const env: Record<string, string> = { ANTHROPIC_MODEL: route.modelName };
 	// DB controls base_url; set env var whenever baseUrlEnv is configured.
 	if (route.baseUrlEnv) {
@@ -494,15 +525,22 @@ function buildHermesArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
  * Build argv + env for the OpenAI Codex CLI.
  * Used when agent_provider = 'codex' (openai spec, `codex` terminal tool).
  * https://github.com/openai/codex
+ *
+ * P1392: For providers without --append-system-prompt support, persona is prepended to task.
  */
 function buildCodexArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
+	// P1392: Prepend persona to task for codex (no --append-system-prompt support)
+	const taskWithPersona = req.persona
+		? `${req.persona}\n\n${req.task}`
+		: req.task;
+
 	const argv = [
 		route.cliPath ?? "codex",
 		"exec",
 		"--dangerously-bypass-approvals-and-sandbox",
 		"--model",
 		route.modelName,
-		req.task,
+		taskWithPersona,
 	];
 	const env: Record<string, string> = {};
 	// DB controls base_url; set env var whenever baseUrlEnv is configured.
@@ -538,15 +576,22 @@ function buildOpenAICompatArgs(
  * isn't on Gemini's trusted-folders list. The agent-spawner constructs a
  * whitelist-only child env so GEMINI_CLI_TRUST_WORKSPACE doesn't propagate
  * from the parent agency process; the CLI flag is the load-bearing equivalent.
+ *
+ * P1392: For Gemini, persona is prepended to the prompt (via # Role header format).
  */
 function buildGeminiArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
+	// P1392: Prepend persona with # Role header format for gemini
+	const taskWithPersona = req.persona
+		? `# Role\n\n${req.persona}\n\n${req.task}`
+		: req.task;
+
 	const argv = [
 		route.cliPath ?? "gemini",
 		"--skip-trust",
 		"--model",
 		route.modelName,
 		"--prompt",
-		req.task,
+		taskWithPersona,
 	];
 	return { argv, env: {} };
 }
@@ -556,12 +601,19 @@ function buildGeminiArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
  * Used when agent_cli = 'copilot' — auth is read from ~/.copilot/settings.json
  * by the CLI itself; no API key env var is required.
  * cli_path in model_routes controls the binary location (no hardcoding here).
+ *
+ * P1392: For Copilot, persona is prepended to the prompt (via ## Persona header format).
  */
 function buildCopilotArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
+	// P1392: Prepend persona with ## Persona header format for copilot
+	const taskWithPersona = req.persona
+		? `## Persona\n\n${req.persona}\n\n${req.task}`
+		: req.task;
+
 	const argv = [
 		route.cliPath ?? "copilot",
 		"-p",
-		req.task,
+		taskWithPersona,
 		"--yolo",
 		"--model",
 		route.modelName,
@@ -569,7 +621,10 @@ function buildCopilotArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
 	return { argv, env: {} };
 }
 
-function buildAntigravityArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
+function buildAntigravityArgs(
+	req: SpawnRequest,
+	route: ModelRoute,
+): CommandSpec {
 	const argv = [
 		route.cliPath ?? "agy",
 		"-p",
@@ -584,7 +639,10 @@ function buildAntigravityArgs(req: SpawnRequest, route: ModelRoute): CommandSpec
 }
 
 /** Dispatch to the correct builder based on route.agentCli (DB is source of truth). */
-export function buildArgsBySpec(req: SpawnRequest, route: ModelRoute): CommandSpec {
+export function buildArgsBySpec(
+	req: SpawnRequest,
+	route: ModelRoute,
+): CommandSpec {
 	// agent_cli from DB determines which CLI to use
 	switch (route.agentCli) {
 		case "codex":
@@ -599,6 +657,12 @@ export function buildArgsBySpec(req: SpawnRequest, route: ModelRoute): CommandSp
 			return buildHermesArgs(req, route);
 		case "agy":
 			return buildAntigravityArgs(req, route);
+		case "openclaw":
+			// P1029: OpenClaw is a WS daemon, not a subprocess — it has no argv.
+			// spawnAgent intercepts this agent_cli before runProcess and drives the
+			// WebSocket session instead. The empty spec is a sentinel so this
+			// route never falls through to buildOpenAICompatArgs.
+			return { argv: [], env: {} };
 		default:
 			// llm or any other openai-compatible CLI
 			return buildOpenAICompatArgs(req, route);
@@ -624,7 +688,15 @@ export function assertResolvedRouteMetadata(
 			`[P235] Refusing to run "${provider}" route "${route.modelName}" with missing agent_cli.`,
 		);
 	}
-	const knownClis = ["claude", "codex", "hermes", "gemini", "copilot", "agy"];
+	const knownClis = [
+		"claude",
+		"codex",
+		"hermes",
+		"gemini",
+		"copilot",
+		"agy",
+		"openclaw", // P1029: WS-daemon provider, executed via WebSocketAdapter
+	];
 	if (!knownClis.includes(route.agentCli)) {
 		throw new Error(
 			`[P235] Refusing to run "${provider}" route "${route.modelName}" with unknown agent_cli "${route.agentCli}".`,
@@ -682,7 +754,9 @@ export class NoPolicyAllowedRoute extends Error {
 		readonly hint: string | null,
 		opts: { all_throttled?: boolean } = {},
 	) {
-		const throttledNote = opts.all_throttled ? " All routes are in cooldown — retry after throttle window elapses." : " Check roadmap.host_model_policy.";
+		const throttledNote = opts.all_throttled
+			? " All routes are in cooldown — retry after throttle window elapses."
+			: " Check roadmap.host_model_policy.";
 		super(
 			`[P742] No host_model_policy-allowed route for host="${host}" provider="${provider}" hint=${hint ? `"${hint}"` : "null"}.${throttledNote}`,
 		);
@@ -764,7 +838,7 @@ async function loadEnvAgent(
 	worktreeName: string,
 	worktreeRoot: string = WORKTREE_ROOT,
 ): Promise<Record<string, string>> {
-	const path = join(worktreeRoot, worktreeName, ".env.agent");
+	const path = join(resolveSpawnWorktreePath(worktreeName, worktreeRoot), ".env.agent");
 	let raw: string;
 	try {
 		raw = await readFile(path, "utf8");
@@ -837,7 +911,10 @@ export async function resolveActiveRouteProvider(): Promise<AgentProvider | null
  * Falls through to AGENT_PROVIDER env var, then the first enabled model_routes row.
  * .env.agent is no longer read here (AC5).
  */
-export async function detectProvider(worktreeName: string, _worktreeRoot: string = WORKTREE_ROOT): Promise<AgentProvider> {
+export async function detectProvider(
+	worktreeName: string,
+	_worktreeRoot: string = WORKTREE_ROOT,
+): Promise<AgentProvider> {
 	// AC5: query preferred_provider for the active agency matching this worktree identity
 	try {
 		const { rows } = await query<{ preferred_provider: string | null }>(
@@ -889,6 +966,7 @@ async function logRouteDecision({
 	agencyIdentity,
 	projectId,
 	roleProfileId,
+	requiredTier = null,
 }: {
 	provider: string;
 	chosenRouteId: number;
@@ -897,16 +975,22 @@ async function logRouteDecision({
 	agencyIdentity: string | null;
 	projectId: number | null;
 	roleProfileId: number | null;
+	/** P3312 AC-5: tier hint, used to derive provisional difficulty for the shadow matcher. */
+	requiredTier?: string | null;
 }): Promise<void> {
 	// Params: $1=provider, $2=winner id, $3=host, $4=projectId, $5=agencyIdentity, $6=roleProfileId
 	const { rows } = await query<{
 		id: number;
 		route_provider: string;
 		first_failing_layer: string;
-	}>(
-		buildEliminationDiagnosticSql(1, 2, 3, 4, 5, 6, "mr"),
-		[provider, chosenRouteId, AGENTHIVE_HOST, projectId, agencyIdentity, roleProfileId],
-	);
+	}>(buildEliminationDiagnosticSql(1, 2, 3, 4, 5, 6, "mr"), [
+		provider,
+		chosenRouteId,
+		AGENTHIVE_HOST,
+		projectId,
+		agencyIdentity,
+		roleProfileId,
+	]);
 
 	const eliminatedRoutes = rows
 		.filter((r) => r.first_failing_layer !== "passed")
@@ -916,11 +1000,55 @@ async function logRouteDecision({
 			reason: r.first_failing_layer,
 		}));
 
+	// P3312 AC-5/AC-8: compute the shadow-mode matcher payload. This is the single
+	// integration point consulted by BOTH the spawn resolver and offer-dispatch
+	// (offer-dispatch → spawnAgent → resolveModelRoute → logRouteDecision). When
+	// ADAPTIVE_MATCHER_ENABLED=false (default) the matcher is logged ONLY; the legacy
+	// choice (chosenRouteId) is what was acted on, so live routing is unchanged.
+	// computeShadowLog never returns a route, so it cannot alter behavior.
+	const shadow = await computeShadowLog({
+		provider,
+		chosenRouteId,
+		role,
+		agencyIdentity,
+		projectId,
+		requiredTier,
+		host: AGENTHIVE_HOST,
+	}).catch(() => ({
+		matcher_choice: null,
+		legacy_choice: null,
+		shadow_mode: true,
+		task_class: null,
+		difficulty_score: null,
+		reliability_score: null,
+	}));
+
+	// P3309: persist the composed axis signals (P3310 difficulty/task_class +
+	// P3311 reliability) alongside the shadow payload. required_tier is the int
+	// rank of the legacy tier hint (P1091 vocabulary); null when no hint given.
+	const requiredTierRank =
+		requiredTier != null ? getTierRank(requiredTier) : null;
+
 	await query(
 		`INSERT INTO roadmap.route_decision_log
-		   (proposal_id, role, agency_identity, chosen_route_id, eliminated_routes)
-		 VALUES ($1, $2, $3, $4, $5)`,
-		[proposalId, role, agencyIdentity, chosenRouteId, JSON.stringify(eliminatedRoutes)],
+		   (proposal_id, role, agency_identity, chosen_route_id, eliminated_routes,
+		    matcher_choice, legacy_choice, shadow_mode,
+		    task_class, difficulty_score, required_tier, reliability_score)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+		[
+			proposalId,
+			role,
+			agencyIdentity,
+			chosenRouteId,
+			JSON.stringify(eliminatedRoutes),
+			shadow.matcher_choice ? JSON.stringify(shadow.matcher_choice) : null,
+			shadow.legacy_choice ? JSON.stringify(shadow.legacy_choice) : null,
+			shadow.shadow_mode,
+			shadow.task_class,
+			shadow.difficulty_score,
+			requiredTierRank,
+			shadow.reliability_score,
+		],
 	);
 }
 
@@ -944,7 +1072,9 @@ async function logRouteDecision({
  *   2. If hint has no passing route: warn and fall back to provider default
  *   3. If no hint: pick cheapest enabled route passing all 5 layers
  */
-async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & { eliminatedRoutes: EliminatedRoute[] }> {
+async function resolveModelRoute(
+	opts: ResolveRouteOpts,
+): Promise<ModelRoute & { eliminatedRoutes: EliminatedRoute[] }> {
 	const {
 		provider,
 		projectId = null,
@@ -995,7 +1125,9 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 	let preferredProviderFilter = "";
 	if (agencyIdentity) {
 		try {
-			const { rows: agencyRows } = await query<{ preferred_provider: string | null }>(
+			const { rows: agencyRows } = await query<{
+				preferred_provider: string | null;
+			}>(
 				`SELECT preferred_provider FROM roadmap_workforce.agent_registry
 				 WHERE agent_identity = $1 AND status = 'active'`,
 				[agencyIdentity],
@@ -1016,14 +1148,19 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 	}
 
 	// P771/P773/P1435: shared params for all route queries: $3=host, $4=projectId, $5=agencyIdentity, $6=roleProfileId
-	const policyParams = [AGENTHIVE_HOST, projectId, agencyIdentity, roleProfileId] as const;
+	const policyParams = [
+		AGENTHIVE_HOST,
+		projectId,
+		agencyIdentity,
+		roleProfileId,
+	] as const;
 	const policyFilters = `
           AND ${hostPolicyFilterSql(3, "mr")}
           AND ${projectPolicyFilterSql(4, "mr")}
           AND ${agencyPolicyFilterSql(5, "mr")}
           AND ${rolePolicyFilterSql(6, "mr")}
           AND ${budgetFilterSql(4, "mr")}
-          AND ${cooldownFilterSql("mr")}
+          AND ${cooldownFilterSql("mr", 5)}
           AND ${authDownFilterSql("mr")}${tierFilter}${preferredProviderFilter}`;
 
 	const fetchRoute = (modelName: string) => {
@@ -1093,8 +1230,20 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 		if (rows.length > 0) {
 			const route = toModelRoute(rows[0]);
 			assertResolvedRouteMetadata(provider, route);
-			void logRouteDecision({ provider, chosenRouteId: rows[0].id, proposalId, role, agencyIdentity, projectId, roleProfileId }).catch((err) => {
-				console.warn("[P772] route_decision_log write failed (non-blocking):", err instanceof Error ? err.message : String(err));
+			void logRouteDecision({
+				provider,
+				chosenRouteId: rows[0].id,
+				proposalId,
+				role,
+				agencyIdentity,
+				projectId,
+				roleProfileId,
+				requiredTier,
+			}).catch((err) => {
+				console.warn(
+					"[P772] route_decision_log write failed (non-blocking):",
+					err instanceof Error ? err.message : String(err),
+				);
 			});
 			return { ...route, eliminatedRoutes: [] };
 		}
@@ -1113,9 +1262,14 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
           AND ${agencyPolicyFilterSql(4, "mr")}
           AND ${rolePolicyFilterSql(5, "mr")}
           AND ${budgetFilterSql(3, "mr")}
-          AND ${cooldownFilterSql("mr")}${tierFilter}${preferredProviderFilter}`;
+          AND ${cooldownFilterSql("mr", 4)}${tierFilter}${preferredProviderFilter}`;
 	// P771: policy params without a leading modelName param (for default-selection queries)
-	const defaultPolicyParams = [AGENTHIVE_HOST, projectId, agencyIdentity, roleProfileId] as const;
+	const defaultPolicyParams = [
+		AGENTHIVE_HOST,
+		projectId,
+		agencyIdentity,
+		roleProfileId,
+	] as const;
 
 	// Default: use DB is_default flag first, then cheapest enabled as fallback.
 	// P742+P771: all 5 policy layers applied so a policy-excluded default is never returned.
@@ -1156,8 +1310,20 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 	if (rows.length > 0) {
 		const route = toModelRoute(rows[0]);
 		assertResolvedRouteMetadata(provider, route);
-		void logRouteDecision({ provider, chosenRouteId: rows[0].id, proposalId, role, agencyIdentity, projectId, roleProfileId }).catch((err) => {
-			console.warn("[P772] route_decision_log write failed (non-blocking):", err instanceof Error ? err.message : String(err));
+		void logRouteDecision({
+			provider,
+			chosenRouteId: rows[0].id,
+			proposalId,
+			role,
+			agencyIdentity,
+			projectId,
+			roleProfileId,
+			requiredTier,
+		}).catch((err) => {
+			console.warn(
+				"[P772] route_decision_log write failed (non-blocking):",
+				err instanceof Error ? err.message : String(err),
+			);
 		});
 		return { ...route, eliminatedRoutes: [] };
 	}
@@ -1199,8 +1365,20 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 		if (defaultRows.length > 0) {
 			const route = toModelRoute(defaultRows[0]);
 			assertResolvedRouteMetadata(provider, route);
-			void logRouteDecision({ provider, chosenRouteId: defaultRows[0].id, proposalId, role, agencyIdentity, projectId, roleProfileId }).catch((err) => {
-				console.warn("[P772] route_decision_log write failed (non-blocking):", err instanceof Error ? err.message : String(err));
+			void logRouteDecision({
+				provider,
+				chosenRouteId: defaultRows[0].id,
+				proposalId,
+				role,
+				agencyIdentity,
+				projectId,
+				roleProfileId,
+				requiredTier,
+			}).catch((err) => {
+				console.warn(
+					"[P772] route_decision_log write failed (non-blocking):",
+					err instanceof Error ? err.message : String(err),
+				);
 			});
 			return { ...route, eliminatedRoutes: [] };
 		}
@@ -1233,10 +1411,12 @@ async function resolveModelRoute(opts: ResolveRouteOpts): Promise<ModelRoute & {
 		if (allThrottled) {
 			console.warn(
 				`[P773] All eligible routes for provider "${provider}" are in cooldown. ` +
-				`They will become eligible again after cooldown_until elapses.`,
+					`They will become eligible again after cooldown_until elapses.`,
 			);
 		}
-		throw new NoPolicyAllowedRoute(AGENTHIVE_HOST, provider, hint ?? null, { all_throttled: allThrottled });
+		throw new NoPolicyAllowedRoute(AGENTHIVE_HOST, provider, hint ?? null, {
+			all_throttled: allThrottled,
+		});
 	}
 
 	throw new Error(
@@ -1284,9 +1464,10 @@ async function buildProposalContextPackage(input: {
 			agent_identity: input.agentIdentity,
 		});
 		const maxChars = Math.max(1000, input.maxTokens * 4);
-		const text = pkg.context_text.length > maxChars
-			? `${pkg.context_text.slice(0, maxChars)}\n...`
-			: pkg.context_text;
+		const text =
+			pkg.context_text.length > maxChars
+				? `${pkg.context_text.slice(0, maxChars)}\n...`
+				: pkg.context_text;
 		return text;
 	} catch {
 		// Fallback to lightweight inline assembly if context_builder fails.
@@ -1392,12 +1573,11 @@ export function renderClosingHint(input: {
  * 5. If all enabled routes exhausted, set provider-level cooldown
  * 6. Return 'provider_exhausted' outcome when max attempts reached
  */
-export async function spawnWithRetry(
-	req: SpawnRequest,
-): Promise<SpawnResult> {
+export async function spawnWithRetry(req: SpawnRequest): Promise<SpawnResult> {
 	let maxAttempts = 3;
 	try {
-		maxAttempts = (await config.getOptional(FlagKeys.SPAWN_PROVIDER_MAX_ATTEMPTS)) ?? 3;
+		maxAttempts =
+			(await config.getOptional(FlagKeys.SPAWN_PROVIDER_MAX_ATTEMPTS)) ?? 3;
 	} catch {
 		// Standalone liaison processes may not initialize the global runtime
 		// config resolver; keep the documented retry default instead of
@@ -1405,7 +1585,8 @@ export async function spawnWithRetry(
 	}
 	let attemptCount = 0;
 	let lastResult: SpawnResult | null = null;
-	const provider = req.provider || (await detectProvider(req.worktree, req.worktreeRoot));
+	const provider =
+		req.provider || (await detectProvider(req.worktree, req.worktreeRoot));
 
 	while (attemptCount < maxAttempts) {
 		attemptCount++;
@@ -1417,7 +1598,11 @@ export async function spawnWithRetry(
 		}
 
 		// Classify the exit to detect quota errors
-		const exitClass = classifyExit(lastResult.stdout, lastResult.stderr, lastResult.exitCode);
+		const exitClass = classifyExit(
+			lastResult.stdout,
+			lastResult.stderr,
+			lastResult.exitCode,
+		);
 
 		// If not a rate-limit error, return immediately
 		if (exitClass.outcome !== "rate_limited") {
@@ -1435,8 +1620,8 @@ export async function spawnWithRetry(
 		// gemini's "reset after 15h56m11s", anthropic's retry-after seconds, etc.
 		const modelName = req.model || exitClass.quotaErrorModel || "unknown";
 		const FALLBACK_COOLDOWN_MINUTES = 60; // 1h per P1359 design when no parsed TTL
-		const MIN_COOLDOWN_MINUTES = 1;        // floor (clock-skew safety)
-		const MAX_COOLDOWN_MINUTES = 24 * 60;  // 24h ceiling
+		const MIN_COOLDOWN_MINUTES = 1; // floor (clock-skew safety)
+		const MAX_COOLDOWN_MINUTES = 24 * 60; // 24h ceiling
 		let cooldownMinutes: number;
 		if (exitClass.resetAt instanceof Date) {
 			const deltaMs = exitClass.resetAt.getTime() - Date.now();
@@ -1451,19 +1636,85 @@ export async function spawnWithRetry(
 		} else {
 			cooldownMinutes = FALLBACK_COOLDOWN_MINUTES;
 		}
-		const cooldownReason = lastResult.stderr?.slice(0, 500) || lastResult.stdout?.slice(0, 500) || "quota_exhausted";
+		const cooldownReason =
+			lastResult.stderr?.slice(0, 500) ||
+			lastResult.stdout?.slice(0, 500) ||
+			"quota_exhausted";
 
-		try {
-			if (exitClass.quotaErrorProvider === "claude") {
-				// P1682: claude CLI subscription limit is account-wide — cool the whole
-				// `claude` CLI route family (routes sharing one OAuth account), not just
-				// the single (provider,model) that happened to be picked this spawn.
-				await setCliFamilyCooldown("claude", cooldownMinutes, cooldownReason);
-			} else {
-				await setModelCooldown(provider, modelName, cooldownMinutes, cooldownReason);
+		// P1682 AC-4 & AC-9: Decision fork — hold vs cooldown based on reset duration
+		// Read thresholds from env (AC-6); defaults chosen for rapid re-probe vs over-wait
+		const HOLD_WINDOW_MAX_SEC = Number(
+			process.env.AGENTHIVE_HOLD_WINDOW_MAX_SEC ?? 1800,
+		); // default 30min
+		const CLAUDE_CLI_DEFAULT_COOLDOWN_SEC = Number(
+			process.env.AGENTHIVE_CLAUDE_CLI_DEFAULT_COOLDOWN_SEC ?? 3600,
+		); // default 1h
+		const LONG_LIMIT_COOLDOWN_SEC = Number(
+			process.env.AGENTHIVE_LONG_LIMIT_COOLDOWN_SEC ?? 86400,
+		); // default 24h
+
+		// Measure the time until reset
+		const deltaMs =
+			(exitClass.resetAt?.getTime() ??
+				Date.now() + CLAUDE_CLI_DEFAULT_COOLDOWN_SEC * 1000) - Date.now();
+		const deltaSec = Math.ceil(deltaMs / 1000);
+
+		// AC-9: If reset is unparseable or beyond HOLD_WINDOW, use provider-level cooldown
+		if (deltaSec > HOLD_WINDOW_MAX_SEC || !exitClass.resetAt) {
+			// Long reset or unparseable: set provider-level cooldown (not hold)
+			const longCooldownMinutes = Math.min(
+				MAX_COOLDOWN_MINUTES,
+				Math.ceil(LONG_LIMIT_COOLDOWN_SEC / 60),
+			);
+			try {
+				if (exitClass.quotaErrorProvider === "claude") {
+					await setCliFamilyCooldown(
+						"claude",
+						longCooldownMinutes,
+						`${cooldownReason} [long_reset_exceeded_hold_window]`,
+					);
+				} else {
+					await setModelCooldown(
+						provider,
+						modelName,
+						longCooldownMinutes,
+						`${cooldownReason} [long_reset_exceeded_hold_window]`,
+					);
+				}
+			} catch (err) {
+				console.error(
+					`[P1682] Failed to set long-reset cooldown for ${provider}/${modelName}:`,
+					err,
+				);
 			}
-		} catch (err) {
-			console.error(`[P1359] Failed to set model cooldown for ${provider}/${modelName}:`, err);
+			// Return failure; do NOT call recordProviderHardLimit or fn_return_work_offer
+			return lastResult;
+		}
+
+		// AC-4 & AC-5: Short reset (<= HOLD_WINDOW) — place in hold state if we have a reset time
+		if (exitClass.quotaErrorProvider === "claude" && exitClass.resetAt) {
+			try {
+				// For claude CLI: also set route cooldown so new spawns don't immediately fail again
+				await setCliFamilyCooldown("claude", cooldownMinutes, cooldownReason);
+			} catch (err) {
+				console.error(`[P1682] Failed to set model cooldown for claude:`, err);
+			}
+			// Note: recordProviderHardLimit() is called in offer-dispatch-handler.ts
+			// after the spawn is claimed (not here). We just set the route cooldown.
+		} else {
+			try {
+				await setModelCooldown(
+					provider,
+					modelName,
+					cooldownMinutes,
+					cooldownReason,
+				);
+			} catch (err) {
+				console.error(
+					`[P1359] Failed to set model cooldown for ${provider}/${modelName}:`,
+					err,
+				);
+			}
 		}
 
 		// Re-resolve route applying Layer 6 cooldown filter
@@ -1501,7 +1752,11 @@ export async function spawnWithRetry(
 		}
 
 		// Update request with new route for next attempt
-		req = { ...req, provider: nextRoute.routeProvider, model: nextRoute.modelName };
+		req = {
+			...req,
+			provider: nextRoute.routeProvider,
+			model: nextRoute.modelName,
+		};
 
 		// If we've exhausted max attempts, check for provider escalation
 		if (attemptCount >= maxAttempts) {
@@ -1518,7 +1773,10 @@ export async function spawnWithRetry(
 					await setProviderCooldown(provider, "rate_limit", cooldownReason);
 				}
 			} catch (err) {
-				console.error(`[P1359] Failed to escalate to provider cooldown at max attempts:`, err);
+				console.error(
+					`[P1359] Failed to escalate to provider cooldown at max attempts:`,
+					err,
+				);
 			}
 			// Return the last failure; orchestrator will handle provider_exhausted state
 			return lastResult;
@@ -1528,14 +1786,16 @@ export async function spawnWithRetry(
 	}
 
 	// Should not reach here, but return last result as fallback
-	return lastResult || {
-		agentRunId: "unknown",
-		worktree: req.worktree,
-		exitCode: 1,
-		stdout: "",
-		stderr: "Spawn loop exhausted without valid result",
-		durationMs: 0,
-	};
+	return (
+		lastResult || {
+			agentRunId: "unknown",
+			worktree: req.worktree,
+			exitCode: 1,
+			stdout: "",
+			stderr: "Spawn loop exhausted without valid result",
+			durationMs: 0,
+		}
+	);
 }
 
 /**
@@ -1564,6 +1824,11 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		}
 	}
 
+	// P1730 AC-4: apply spawn-start stagger to mitigate MCP-init thundering herd.
+	// Spreads concurrent spawns across a configurable window (default ~1.5s per spawn)
+	// plus random jitter (default ~500ms) to break synchronized init hangs.
+	await applySpawnStagger();
+
 	// P1004: pre-spawn quota check — defer if provider quota is critically low.
 	// Reads the latest agent_usage_snapshot for the target provider. Missing
 	// snapshot = no data yet, so we allow the spawn (fail open rather than block
@@ -1585,9 +1850,9 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 				if (pct < QUOTA_HEADROOM_PCT) {
 					throw new Error(
 						`[P1004] Spawn deferred: ${req.provider} quota at ${Math.round(pct * 100)}% ` +
-						`(${quotaSnap.quota_remaining}/${quotaSnap.quota_limit} remaining, ` +
-						`headroom threshold ${Math.round(QUOTA_HEADROOM_PCT * 100)}%). ` +
-						`Resets at ${quotaSnap.quota_reset_at?.toISOString() ?? "unknown"}.`,
+							`(${quotaSnap.quota_remaining}/${quotaSnap.quota_limit} remaining, ` +
+							`headroom threshold ${Math.round(QUOTA_HEADROOM_PCT * 100)}%). ` +
+							`Resets at ${quotaSnap.quota_reset_at?.toISOString() ?? "unknown"}.`,
 					);
 				}
 			}
@@ -1602,16 +1867,17 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	const provider =
 		providerOverride ?? (await detectProvider(worktree, worktreeRoot));
 	// P235/M026/P771/P772/P226: resolve full route applying all policy layers; logs decision
-	const { eliminatedRoutes: _eliminatedRoutes, ...route } = await resolveModelRoute({
-		provider,
-		projectId: req.projectId ?? null,
-		agencyIdentity: req.agencyIdentity ?? null,
-		roleProfileId: req.roleProfileId ?? null,
-		modelHint,
-		proposalId: req.proposalId ?? null,
-		role: req.stage,
-		requiredTier: req.requiredTier ?? null,
-	});
+	const { eliminatedRoutes: _eliminatedRoutes, ...route } =
+		await resolveModelRoute({
+			provider,
+			projectId: req.projectId ?? null,
+			agencyIdentity: req.agencyIdentity ?? null,
+			roleProfileId: req.roleProfileId ?? null,
+			modelHint,
+			proposalId: req.proposalId ?? null,
+			role: req.stage,
+			requiredTier: req.requiredTier ?? null,
+		});
 	// P797: validate that the resolved model has at least one enabled route before spawning
 	const routeCheck = await validateModelForDispatch(
 		route.modelName,
@@ -1761,19 +2027,27 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 		},
 	});
 
-	// P1967 AC-3: Check OAuth token expiry if present in processEnv
+	// P1967 AC-3: Check OAuth token expiry if present in processEnv (best-effort)
 	if (processEnv.CLAUDE_CODE_OAUTH_TOKEN && route.agentProvider === "claude") {
-		// Token provisioning date from runtime flag (set by operator at token setup)
-		const provisionedAt = await runtimeConfig.get(
-			FlagKeys.CLAUDE_OAUTH_TOKEN_PROVISIONED_AT_MS,
-		) as number | undefined;
-		if (provisionedAt) {
-			const { checkOAuthTokenExpiry } = await import(
-				"../../core/runtime/oauth-token-monitor.ts"
-			);
-			checkOAuthTokenExpiry(provisionedAt, 30, {
-				warn: (msg: string) => console.warn(`[AgentSpawner] ${msg}`),
-			});
+		try {
+			const provisionedAtKey = (FlagKeys as Record<string, unknown>)[
+				"CLAUDE_OAUTH_TOKEN_PROVISIONED_AT_MS"
+			];
+			if (provisionedAtKey) {
+				const provisionedAt = (await config.getOptional(
+					provisionedAtKey as never,
+				)) as number | undefined;
+				if (provisionedAt) {
+					const { checkOAuthTokenExpiry } = await import(
+						"../../core/runtime/oauth-token-monitor.ts"
+					);
+					checkOAuthTokenExpiry(provisionedAt, 30, {
+						warn: (msg: string) => console.warn(`[AgentSpawner] ${msg}`),
+					});
+				}
+			}
+		} catch {
+			// non-fatal: token expiry check is advisory only
 		}
 	}
 
@@ -1834,12 +2108,15 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	// P852: agent_runs.agent_identity is the structured label without the
 	// worktree suffix, so it joins cleanly to agent_registry rows.
 	// P1436: also record provider-truth columns for spend/routing audit.
+	// P3311 AC-6: stamp task_class at INSERT from the stage role.
+	const taskClass = classifyTaskClass(stage);
 	const { rows } = await query(
 		`INSERT INTO roadmap_workforce.agent_runs
        (proposal_id, display_id, agent_identity, stage, model_used, status, activity, started_at,
-        claimed_provider, resolved_provider, agent_cli, route_id, agency_identity, provider_mismatch)
+        claimed_provider, resolved_provider, agent_cli, route_id, agency_identity, provider_mismatch,
+        task_class)
      VALUES ($1, $2, $3, $4, $5, 'running', $6, now(),
-        $7, $8, $9, $10, $11, $12)
+        $7, $8, $9, $10, $11, $12, $13)
      RETURNING id`,
 		[
 			proposalId ?? null,
@@ -1854,15 +2131,20 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 			route.routeId ?? null,
 			req.agencyIdentity ?? null,
 			providerMismatch,
+			taskClass,
 		],
 	);
 	const agentRunId = String(rows[0].id);
 
 	// P404: provision scratch directory for this agent run
 	let scratchUuid: string | null = null;
-	const worktreePath = join(worktreeRoot, worktree);
+	const worktreePath = resolveSpawnWorktreePath(worktree, worktreeRoot);
 	try {
-		const scratch = await provisionScratch({ agentRunId, agentIdentity });
+		const scratch = await provisionScratch(
+			randomUUID(),
+			agentRunId,
+			agentIdentity,
+		);
 		scratchUuid = scratch.scratchUuid;
 		processEnv.AGENT_SCRATCH_DIR = scratch.scratchPath;
 		// AC-1: stamp scratch_path on the cubic that owns this worktree (non-fatal)
@@ -1877,27 +2159,74 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	const startMs = Date.now();
 	const cwd = worktreePath;
 
-	const { stdout, stderr, exitCode } = await runProcess(
-		argv,
-		cwd,
-		processEnv,
-		timeoutMs,
-		stdin,
-		{
-			agentRunId,
-			worktree,
-		},
-	).finally(() => {
+	// P1445 AC-1: refuse to spawn a worker in the shared repo root. Every
+	// dispatch-spawned agent MUST run in its own git worktree; spawning in the
+	// shared checkout is the root cause of the cross-agent file-swap / wrong-
+	// branch-merge incidents. This is the mechanical enforcement of CONVENTIONS
+	// §7a — a single guard call the spawn path cannot bypass.
+	assertNotRepoRoot(cwd, getProjectRoot());
+
+	// P1029: OpenClaw routes execute over a WebSocket session instead of a
+	// subprocess. Only the "obtain stdout/stderr/exitCode" step differs — every
+	// downstream concern (token ledger, classifyExit, agent_runs, observability
+	// span) is shared, so existing CLI providers keep a byte-identical path. The
+	// scratch reap stays in finally() exactly as before (runs on success OR throw).
+	let stdout: string;
+	let stderr: string;
+	let exitCode: number | null;
+	try {
+		if (route.agentCli === "openclaw") {
+			const { runOpenClawSession } = await import(
+				"../../infra/agency/agent-adapter.ts"
+			);
+			const gatewayUrl =
+				route.baseUrl ||
+				(route.baseUrlEnv ? processEnv[route.baseUrlEnv] : undefined) ||
+				processEnv.OPENCLAW_GATEWAY_URL ||
+				process.env.OPENCLAW_GATEWAY_URL ||
+				"";
+			if (!gatewayUrl) {
+				({ stdout, stderr, exitCode } = {
+					stdout: "",
+					stderr:
+						"[agent-adapter] no OpenClaw gateway URL (route.base_url / base_url_env / OPENCLAW_GATEWAY_URL all empty)",
+					exitCode: null,
+				});
+			} else {
+				({ stdout, stderr, exitCode } = await runOpenClawSession({
+					gatewayUrl,
+					sessionId: agentRunId,
+					task: spawnReq.task,
+					model: route.modelName,
+					env: processEnv,
+					timeoutMs,
+				}));
+			}
+		} else {
+			({ stdout, stderr, exitCode } = await runProcess(
+				argv,
+				cwd,
+				processEnv,
+				timeoutMs,
+				stdin,
+				{ agentRunId, worktree },
+			));
+		}
+	} finally {
 		// Best-effort immediate reap; the 15-min cron sweep covers SIGKILL/crash cases.
 		reapScratch(scratchUuid).catch((err: unknown) => {
 			console.error(
 				`[AgentSpawner] immediate reap failed for ${scratchUuid}: ${err instanceof Error ? err.message : err}`,
 			);
 		});
-	});
+	}
 	const durationMs = Date.now() - startMs;
 
-	const outputSummary = stdout.slice(-1000);
+	// P1392 AC-5: Append persona name to output_summary for telemetry
+	let outputSummary = stdout.slice(-1000);
+	if (req.personaName) {
+		outputSummary = `persona=${req.personaName} ${outputSummary}`;
+	}
 	const errorDetail = stderr.slice(-4000);
 
 	// TODO P1365-AC2: Extract rate-limit headers from response and record signal
@@ -1945,12 +2274,20 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	});
 	if (route.routeId) {
 		const selectionReason = modelHint
-			? route.modelName === modelHint ? "hint_match" : "hint_fallback"
+			? route.modelName === modelHint
+				? "hint_match"
+				: "hint_fallback"
 			: "default_route";
 		await obsWriter.writeModelRoutingOutcome({
 			traceId,
 			selectedRouteId: route.routeId,
-			candidateRoutes: [{ routeId: String(route.routeId), modelName: route.modelName, selectionReason }],
+			candidateRoutes: [
+				{
+					routeId: String(route.routeId),
+					modelName: route.modelName,
+					selectionReason,
+				},
+			],
 			selectionReason,
 		});
 	}
@@ -2068,16 +2405,22 @@ export function detectProviderQuotaSignal(
 	// Codex CLI (ChatGPT-backed gpt-5.5): "You've hit your usage limit" + "try again at H:MM AM/PM"
 	// Distinct from the OpenAI API rate_limit_exceeded format below.
 	// TTL: parse "try again at H:MM AM/PM" as local time; fallback 1h.
-	if (/you'?ve\s+hit\s+your\s+usage\s+limit|chatgpt\.com\/codex\/settings\/usage/i.test(hay)) {
+	if (
+		/you'?ve\s+hit\s+your\s+usage\s+limit|chatgpt\.com\/codex\/settings\/usage/i.test(
+			hay,
+		)
+	) {
 		let resetAt = new Date(Date.now() + 60 * 60 * 1000);
 		const m = hay.match(/try\s+again\s+at\s+(\d{1,2}):(\d{2})\s*(am|pm)/i);
 		if (m) {
 			const h12 = parseInt(m[1], 10);
 			const mins = parseInt(m[2], 10);
-			const h24 = (h12 === 12 ? 0 : h12) + (m[3].toLowerCase() === "pm" ? 12 : 0);
+			const h24 =
+				(h12 === 12 ? 0 : h12) + (m[3].toLowerCase() === "pm" ? 12 : 0);
 			const candidate = new Date();
 			candidate.setHours(h24, mins, 0, 0);
-			if (candidate.getTime() < Date.now()) candidate.setDate(candidate.getDate() + 1);
+			if (candidate.getTime() < Date.now())
+				candidate.setDate(candidate.getDate() + 1);
 			resetAt = candidate;
 		}
 		return { provider: "codex", model: "gpt-5.5", resetAt };
@@ -2085,7 +2428,10 @@ export function detectProviderQuotaSignal(
 
 	// OpenAI: "rate_limit_exceeded" or 429 + "quota"
 	// TTL: "Retry-After: X" header or "X-RateLimit-Reset" timestamp
-	if ((/rate_limit_exceeded|429.*quota/i.test(hay)) || (/429/.test(hay) && /quota/i.test(hay))) {
+	if (
+		/rate_limit_exceeded|429.*quota/i.test(hay) ||
+		(/429/.test(hay) && /quota/i.test(hay))
+	) {
 		let resetAt = new Date(Date.now() + 60 * 60 * 1000); // default 1h
 		// Try to extract Retry-After (seconds) or X-RateLimit-Reset (Unix timestamp)
 		const retryMatch = hay.match(/Retry-After[:\s]+(\d+)/i);
@@ -2117,7 +2463,9 @@ export function detectProviderQuotaSignal(
 	// TTL: often contains explicit reset datetime; fallback 7 days
 	if (/weekly\s+rate\s+limit/i.test(hay)) {
 		let resetAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // default 7 days
-		const match = hay.match(/(?:reset|resets)\s+(?:at\s+)?(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[^)\n]*)/i);
+		const match = hay.match(
+			/(?:reset|resets)\s+(?:at\s+)?(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[^)\n]*)/i,
+		);
 		if (match) {
 			const dt = new Date(match[1]);
 			if (!isNaN(dt.getTime())) {
@@ -2252,6 +2600,12 @@ function runProcess(
 		});
 		child.stderr?.on("data", (d: Buffer) => {
 			stderr += d.toString();
+			// Any stderr means Claude has started and MCP init is done (or in progress).
+			// Disarm MCP init timeout so long-running tasks aren't killed before first stdout.
+			if (cleanupMcpTimeout) {
+				cleanupMcpTimeout();
+				cleanupMcpTimeout = null;
+			}
 		});
 
 		if (stdin !== undefined) {
@@ -2301,9 +2655,17 @@ function runProcess(
 		child.on("error", (err) => {
 			exited = true;
 			cleanup();
+			const diagnostics = [
+				`cmd_exists=${existsSync(cmd)}`,
+				`cwd=${cwd}`,
+				`cwd_exists=${existsSync(cwd)}`,
+				`home=${env.HOME ?? ""}`,
+				`codex_home=${env.CODEX_HOME ?? ""}`,
+				`path=${env.PATH ?? ""}`,
+			].join(" ");
 			resolve({
 				stdout,
-				stderr: `${stderr}\n[agent-spawner] spawn error: ${err.message}`,
+				stderr: `${stderr}\n[agent-spawner] spawn error: ${err.message}\n[agent-spawner] spawn diagnostics: ${diagnostics}`,
 				exitCode: null,
 			});
 		});
@@ -2401,7 +2763,9 @@ export async function escalateOrNotify(
 	return null;
 }
 
-export function softSortProviderHealthCandidates<T extends { route_provider: string }>(
+export function softSortProviderHealthCandidates<
+	T extends { route_provider: string },
+>(
 	rows: T[],
 	healthFn: (provider: string) => { status: string; checkedAt: number } | null,
 ): T[] {

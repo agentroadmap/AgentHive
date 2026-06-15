@@ -63,6 +63,32 @@ function formatTimestamp(value: string | Date): string {
 	return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
 }
 
+/**
+ * P1371: Validates that content is non-empty and non-whitespace-only.
+ * Mirrors P1364 pattern for addDiscussion. Returns isError result if invalid,
+ * null if valid. Prevents silent empty-body INSERTs that confuse audits (P1364).
+ */
+function validateNoteContent(
+	content: string | undefined,
+): CallToolResult | null {
+	if (!content || content.trim().length === 0) {
+		return {
+			isError: true,
+			content: [
+				{
+					type: "text",
+					text:
+						"create_note: missing or empty content. " +
+						'Pass content="..." (canonical). ' +
+						"Empty notes silently land in the table and look like fabrications later (P1364). " +
+						"Nothing was inserted.",
+				},
+			],
+		};
+	}
+	return null;
+}
+
 export class NoteHandlers {
 	private async resolveProposalRowId(
 		proposalId: string,
@@ -84,6 +110,14 @@ export class NoteHandlers {
 		note_type?: string;
 		author?: string;
 	}): Promise<CallToolResult> {
+		// P1371 AC-4: Validation check added to NoteHandlers.createNote that rejects
+		// empty or whitespace-only content AFTER parameter resolution but BEFORE any
+		// INSERT. Implementation mirrors P1364 commit 6eb23831.
+		const validationError = validateNoteContent(args.content);
+		if (validationError) {
+			return validationError;
+		}
+
 		try {
 			const proposalRowId = await this.resolveProposalRowId(args.proposal_id);
 			if (!proposalRowId) {
@@ -98,18 +132,37 @@ export class NoteHandlers {
 			const noteType = (args.note_type as NoteType | undefined) ?? "general";
 			const contextPrefix =
 				NOTE_TYPE_TO_CONTEXT[noteType] ?? NOTE_TYPE_TO_CONTEXT.general;
-			const { rows } = await query<{ id: number }>(
+			const { rows } = await query<{ id: number; body_len: string }>(
 				`INSERT INTO roadmap_proposal.proposal_discussions (proposal_id, author_identity, body, context_prefix)
 				 VALUES ($1, $2, $3, $4)
-				 RETURNING id`,
+				 RETURNING id, LENGTH(body) AS body_len`,
 				[proposalRowId, author, args.content, contextPrefix],
 			);
+
+			// P1371 AC-5: No INSERT INTO roadmap_proposal.proposal_discussions occurs when
+			// content is empty or whitespace-only. Also guards against triggers/rules
+			// stripping the body (P3001 pattern).
+			const bodyLen = Number(rows[0]?.body_len ?? 0);
+			if (bodyLen === 0) {
+				return {
+					isError: true,
+					content: [
+						{
+							type: "text",
+							text:
+								`create_note FAILED to persist body: row #${rows[0]?.id} was created but ` +
+								`LENGTH(body)=0 (input was ${args.content.length} chars). ` +
+								"Do not treat this note as recorded.",
+						},
+					],
+				};
+			}
 
 			return {
 				content: [
 					{
 						type: "text",
-						text: `✅ Discussion #${rows[0]?.id ?? "?"} created on ${args.proposal_id} (${noteType}) by ${author}`,
+						text: `✅ Discussion #${rows[0]?.id ?? "?"} created on ${args.proposal_id} (${noteType}) by ${author} (${bodyLen} chars)`,
 					},
 				],
 			};

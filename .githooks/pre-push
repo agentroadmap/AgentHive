@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# P1445 AC-4: branch single-writer enforcement.
+# An agent may push ONLY the branch whose proposal it holds an active lease on;
+# `main` is merge-request-only. The decision logic lives in
+# scripts/pre-push-lease-check.mjs (unit-tested); this wrapper just forwards
+# git's stdin (one "<localref> <localsha> <remoteref> <remotesha>" line per ref).
+#
+# Install: git config core.hooksPath .githooks  (or: npm run hooks:install)
+# Operator override: AGENTHIVE_PREPUSH_BYPASS=1 git push ...
+
+set -euo pipefail
+
+# Resolve repo root so the hook works from any worktree.
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+CHECK="$ROOT/scripts/pre-push-lease-check.mjs"
+
+if [ ! -f "$CHECK" ]; then
+  # Hook present but checker missing (older checkout) — do not block pushes.
+  exit 0
+fi
+
+# Forward git's pre-push stdin to the Node checker verbatim.
+exec node "$CHECK" "$@"

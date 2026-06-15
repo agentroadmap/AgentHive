@@ -25,8 +25,15 @@
  *   config.audit(); // Get access audit log
  */
 
-import { Client } from "pg";
 import type { Pool, PoolClient } from "pg";
+import { Client } from "pg";
+import {
+	agentContextStorage,
+	type VerifiedPrincipal,
+} from "../identity/agent-context.ts";
+
+/** The principal kinds carried in agentContextStorage. */
+type VerifiedPrincipalKind = VerifiedPrincipal["principal_kind"];
 
 export type ConfigClass =
 	| "secret"
@@ -71,11 +78,7 @@ export interface ScopeContext {
 export class RuntimeConfigMissing extends Error {
 	public keyName: string;
 	public keyClass: ConfigClass;
-	constructor(
-		keyName: string,
-		keyClass: ConfigClass,
-		details: string,
-	) {
+	constructor(keyName: string, keyClass: ConfigClass, details: string) {
 		super(
 			`[RuntimeConfig] Required ${keyClass} key not found: ${keyName}\n${details}`,
 		);
@@ -126,6 +129,51 @@ export class ProjectIdMissing extends Error {
 		this.keyName = keyName;
 		this.name = "ProjectIdMissing";
 		Object.setPrototypeOf(this, ProjectIdMissing.prototype);
+	}
+}
+
+/**
+ * P828: authority a principal holds to MUTATE config.
+ *   operator        → may write all mutable classes (flag, registry, structural)
+ *   system          → may write flag class only (agency principals)
+ *   agent_read_only → may write nothing
+ */
+export type MutationAuthority = "operator" | "system" | "agent_read_only";
+
+/** P828: programmatic reasons a config mutation was refused. */
+export type MutationForbiddenReason =
+	| "NO_IDENTITY_CONTEXT"
+	| "AGENT_READ_ONLY"
+	| "IMMUTABLE_CLASS"
+	| "SYSTEM_REGISTRY_DENIED"
+	| "SYSTEM_STRUCTURAL_DENIED"
+	| "RELOAD_UNAUTHORIZED"
+	| "PRINCIPAL_LOOKUP_FAILED";
+
+/**
+ * RuntimeConfigMutationForbidden: thrown by set()/reload() when the verified
+ * principal in agentContextStorage lacks authority for the requested mutation.
+ * `reason` is an enum for programmatic handling; `authority` is the resolved
+ * MutationAuthority (null when no identity context was present at all).
+ */
+export class RuntimeConfigMutationForbidden extends Error {
+	public keyName: string;
+	public reason: MutationForbiddenReason;
+	public authority: MutationAuthority | null;
+	constructor(
+		keyName: string,
+		reason: MutationForbiddenReason,
+		authority: MutationAuthority | null,
+	) {
+		super(
+			`[RuntimeConfig] mutation of "${keyName}" forbidden: ${reason}` +
+				(authority ? ` (authority=${authority})` : " (no identity context)"),
+		);
+		this.keyName = keyName;
+		this.reason = reason;
+		this.authority = authority;
+		this.name = "RuntimeConfigMutationForbidden";
+		Object.setPrototypeOf(this, RuntimeConfigMutationForbidden.prototype);
 	}
 }
 
@@ -292,6 +340,72 @@ class ConfigResolver {
 	}
 
 	/**
+	 * P827 AC-11: derive the discrete connection config for the dedicated
+	 * direct-LISTEN pool from the control pool's own options, overriding ONLY the
+	 * port (PGPORT_DIRECT bypasses PgBouncer transaction mode).
+	 *
+	 * CRITICAL: when the control pool was built from a `connectionString` (the
+	 * P518 / AGENTHIVE_CONTROL_DSN cutover path), `pg` IGNORES every discrete
+	 * field — `{ connectionString, port }` keeps the connectionString's port and
+	 * database. Spreading `pool.options` and setting `port` was therefore a
+	 * silent no-op: the LISTEN client stayed on PgBouncer (:6432) AND on whatever
+	 * DB the DSN named — never the direct port. We parse the connectionString into
+	 * discrete host/port/user/password/database so the direct port actually wins
+	 * and the LISTEN client lands on the hiveCentral control DB (the DSN's DB),
+	 * not process.env.PGDATABASE (=agenthive), where the trigger never fires.
+	 *
+	 * Returns a discrete config object (never carrying `connectionString`), so the
+	 * `port` override is always honored by `pg`.
+	 */
+	static buildDirectListenPoolConfig(
+		poolOptions: Record<string, any>,
+		directPort: number,
+	): Record<string, any> {
+		const opts = poolOptions ?? {};
+		const connStr: string | undefined =
+			typeof opts.connectionString === "string"
+				? opts.connectionString
+				: undefined;
+
+		if (connStr) {
+			// Parse the DSN into discrete params; override port with the direct port.
+			// Carry forward non-connection options (search_path, timeouts) but DROP
+			// connectionString so `pg` honors the discrete fields.
+			const {
+				connectionString: _drop,
+				port: _dropPort,
+				host: _dropHost,
+				user: _dropUser,
+				password: _dropPw,
+				database: _dropDb,
+				...rest
+			} = opts;
+			try {
+				const u = new URL(connStr);
+				const cfg: Record<string, any> = {
+					...rest,
+					host: decodeURIComponent(u.hostname),
+					port: directPort,
+					max: 1,
+				};
+				if (u.username) cfg.user = decodeURIComponent(u.username);
+				if (u.password) cfg.password = decodeURIComponent(u.password);
+				// pathname is "/dbname"; strip the leading slash.
+				const db = u.pathname.replace(/^\//, "");
+				if (db) cfg.database = decodeURIComponent(db);
+				return cfg;
+			} catch {
+				// Unparseable DSN — fall back to discrete spread (best-effort).
+				return { ...rest, port: directPort, max: 1 };
+			}
+		}
+
+		// Discrete-params control pool: spread and override the port. The DB/host
+		// already point at hiveCentral via the discrete options.
+		return { ...opts, port: directPort, max: 1 };
+	}
+
+	/**
 	 * Set up a NOTIFY listener for runtime_flag_changed events.
 	 * Uses PGPORT_DIRECT for PgBouncer bypass if available.
 	 * Never throws — LISTEN is best-effort; TTL cache covers the hot-reload gap.
@@ -303,15 +417,22 @@ class ConfigResolver {
 			const directPortEnv = process.env.PGPORT_DIRECT;
 			if (directPortEnv) {
 				const directPort = Number(directPortEnv);
-				if (Number.isFinite(directPort) && directPort > 0 && directPort <= 65535) {
-					// Create a dedicated direct-Postgres pool (bypasses PgBouncer transaction mode)
+				if (
+					Number.isFinite(directPort) &&
+					directPort > 0 &&
+					directPort <= 65535
+				) {
+					// Create a dedicated direct-Postgres pool (bypasses PgBouncer transaction mode).
+					// P827 AC-11: build discrete config so the direct port + control DB
+					// (hiveCentral) are honored even when the control pool uses a DSN.
 					const { Pool } = await import("pg");
 					const poolOptions = (this.pool as any).options ?? {};
-					this.directListenPool = new Pool({
-						...poolOptions,
-						port: directPort,
-						max: 1,
-					});
+					this.directListenPool = new Pool(
+						ConfigResolver.buildDirectListenPoolConfig(
+							poolOptions,
+							directPort,
+						),
+					);
 					client = await this.directListenPool.connect();
 				} else {
 					client = await this.pool.connect();
@@ -320,13 +441,19 @@ class ConfigResolver {
 				client = await this.pool.connect();
 			}
 
-			await client.query("LISTEN runtime_config_changed");
+			// P827 AC-4: LISTEN only on runtime_flag_changed. The former
+			// `runtime_config_changed` LISTEN was a DEAD channel — no trigger
+			// emits it — so it never fired and is removed. runtime_endpoint_changed
+			// is intentionally NOT listened here (endpoints.ts owns it).
 			await client.query("LISTEN runtime_flag_changed");
 
 			client.on("notification", (msg) => {
+				// P827 AC-5: targeted eviction lives in handleFlagNotification
+				// (only the matching (flag_name, scope) entry; full flush only on
+				// a malformed payload). The previous unconditional
+				// cache.clear()/dbCache.clear() here DEFEATED that targeting —
+				// every notify wiped the whole cache — so it is removed.
 				this.handleFlagNotification(msg.payload);
-				this.cache.clear();
-				this.dbCache.clear();
 			});
 
 			client.on("error", () => {
@@ -336,7 +463,9 @@ class ConfigResolver {
 			this.notifySubscription = client;
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
-			console.warn(`[ConfigResolver] LISTEN unavailable: hot-reload disabled. ${msg}`);
+			console.warn(
+				`[ConfigResolver] LISTEN unavailable: hot-reload disabled. ${msg}`,
+			);
 		}
 	}
 
@@ -351,7 +480,10 @@ class ConfigResolver {
 			return;
 		}
 		try {
-			const parsed = JSON.parse(payload) as { flag_name?: string; scope?: string };
+			const parsed = JSON.parse(payload) as {
+				flag_name?: string;
+				scope?: string;
+			};
 			if (
 				typeof parsed.flag_name === "string" &&
 				typeof parsed.scope === "string"
@@ -511,13 +643,23 @@ class ConfigResolver {
 		}
 
 		// Step 5: Control DB registry (registry keys)
-		if (value === undefined && key.class === "registry" && key.dbTable && this.pool) {
-			const registryDbValue = await this.getDbValue(key.dbTable, key.dbColumn || key.name, key.name);
+		if (
+			value === undefined &&
+			key.class === "registry" &&
+			key.dbTable &&
+			this.pool
+		) {
+			const registryDbValue = await this.getDbValue(
+				key.dbTable,
+				key.dbColumn || key.name,
+				key.name,
+			);
 			if (registryDbValue !== undefined) {
 				try {
-					const raw = typeof registryDbValue === "string"
-						? registryDbValue
-						: JSON.stringify(registryDbValue);
+					const raw =
+						typeof registryDbValue === "string"
+							? registryDbValue
+							: JSON.stringify(registryDbValue);
 					value = key.parse(raw);
 					source = "db";
 				} catch (err) {
@@ -531,13 +673,23 @@ class ConfigResolver {
 		}
 
 		// Step 6: Feature flags (DB, cached, live-reloadable)
-		if (value === undefined && key.class === "flag" && key.dbTable && this.pool) {
-			const flagDbValue = await this.getDbValue(key.dbTable, key.dbColumn || key.name, key.name);
+		if (
+			value === undefined &&
+			key.class === "flag" &&
+			key.dbTable &&
+			this.pool
+		) {
+			const flagDbValue = await this.getDbValue(
+				key.dbTable,
+				key.dbColumn || key.name,
+				key.name,
+			);
 			if (flagDbValue !== undefined) {
 				try {
-					const raw = typeof flagDbValue === "string"
-						? flagDbValue
-						: JSON.stringify(flagDbValue);
+					const raw =
+						typeof flagDbValue === "string"
+							? flagDbValue
+							: JSON.stringify(flagDbValue);
 					value = key.parse(raw);
 					source = "db";
 				} catch (err) {
@@ -645,7 +797,334 @@ class ConfigResolver {
 	 * Reload from DB on pg_notify event.
 	 */
 	async reload(): Promise<void> {
+		// P828 AC-17: reload() is an operator-only mutation of in-process state.
+		const ctx = agentContextStorage.getStore();
+		if (!ctx?.verified) {
+			throw new RuntimeConfigMutationForbidden(
+				"<reload>",
+				"NO_IDENTITY_CONTEXT",
+				null,
+			);
+		}
+		const authority = ConfigResolver.resolveAuthority(
+			ctx.verified.principal_kind,
+		);
+		if (authority !== "operator") {
+			throw new RuntimeConfigMutationForbidden(
+				"<reload>",
+				"RELOAD_UNAUTHORIZED",
+				authority,
+			);
+		}
 		this.clear();
+	}
+
+	/**
+	 * P828 AC-4/AC-27: single source of truth mapping a verified principal_kind
+	 * to its MutationAuthority. Static so no other call site re-derives it.
+	 *   operator → operator | agency → system | agent → agent_read_only
+	 */
+	static resolveAuthority(kind: VerifiedPrincipalKind): MutationAuthority {
+		switch (kind) {
+			case "operator":
+				return "operator";
+			case "agency":
+				return "system";
+			default:
+				return "agent_read_only";
+		}
+	}
+
+	/**
+	 * P828: mutate a config value, gated by the verified principal's authority.
+	 *
+	 * Identity is read from agentContextStorage (no explicit param — matches the
+	 * P843 carrier / A2A trust gate pattern). Fail-fast authorization order runs
+	 * BEFORE any DB query, so a denied caller never touches the DB and writes no
+	 * audit row:
+	 *   1. no identity context        → NO_IDENTITY_CONTEXT
+	 *   2. authority = agent_read_only → AGENT_READ_ONLY
+	 *   3. class secret | tenant_dsn   → IMMUTABLE_CLASS
+	 *   4. class structural, non-op    → SYSTEM_STRUCTURAL_DENIED
+	 *   5. class registry, authority=system → SYSTEM_REGISTRY_DENIED
+	 * (Note: the design's execution steps make `structural` operator-writable;
+	 *  AC-6's listing of structural as immutable-for-all conflicts with step 5 +
+	 *  AC-41, so the operator-writable interpretation is used.)
+	 *
+	 * On authorization success the runtime_flag upsert + config_mutation_log
+	 * append + pg_notify + synchronous cache eviction are performed. NOTE: the
+	 * DB-write half targets hiveCentral (core.config_mutation_log +
+	 * control_identity.principal), so it is exercised by integration tests, not
+	 * the always-on unit suite.
+	 */
+	async set<T>(key: ConfigKey<T>, value: T): Promise<void> {
+		const ctx = agentContextStorage.getStore();
+		// 1. fail-closed on missing identity — UNLESS the emergency operator
+		//    override env is present (AC-49). The override is operator-level only:
+		//    it grants operator authority whose DID is taken verbatim from
+		//    AGENTHIVE_EMERGENCY_OPERATOR_DID so cold-boot mutation works without a
+		//    full liaison. It can NEVER downgrade to system/agent — always operator.
+		//    The DID must still resolve to an active control_identity.principal row
+		//    (the audit principal_id FK is NOT NULL); an unknown/suspended DID is
+		//    rejected with PRINCIPAL_LOOKUP_FAILED.
+		const emergencyDid = process.env.AGENTHIVE_EMERGENCY_OPERATOR_DID?.trim();
+		if (!ctx?.verified) {
+			if (emergencyDid) {
+				console.warn(
+					`[ConfigResolver] EMERGENCY operator override active for set("${key.name}") ` +
+						`via AGENTHIVE_EMERGENCY_OPERATOR_DID — no verified principal in context.`,
+				);
+				if (key.class === "secret" || key.class === "tenant_dsn") {
+					throw new RuntimeConfigMutationForbidden(
+						key.name,
+						"IMMUTABLE_CLASS",
+						"operator",
+					);
+				}
+				if (!this.pool) {
+					throw new RuntimeConfigMissing(
+						key.name,
+						key.class,
+						"[RuntimeConfig] set() requires a control-plane pool (hiveCentral) to persist + audit the mutation.",
+					);
+				}
+				await this.persistMutation(key, value, {
+					authority: "operator",
+					emergencyDid,
+				});
+				return;
+			}
+			throw new RuntimeConfigMutationForbidden(
+				key.name,
+				"NO_IDENTITY_CONTEXT",
+				null,
+			);
+		}
+		const authority = ConfigResolver.resolveAuthority(
+			ctx.verified.principal_kind,
+		);
+		// 2. agents may never write.
+		if (authority === "agent_read_only") {
+			throw new RuntimeConfigMutationForbidden(
+				key.name,
+				"AGENT_READ_ONLY",
+				authority,
+			);
+		}
+		// 3. secret + tenant_dsn are immutable for everyone.
+		if (key.class === "secret" || key.class === "tenant_dsn") {
+			throw new RuntimeConfigMutationForbidden(
+				key.name,
+				"IMMUTABLE_CLASS",
+				authority,
+			);
+		}
+		// 4. structural is operator-only.
+		if (key.class === "structural" && authority !== "operator") {
+			throw new RuntimeConfigMutationForbidden(
+				key.name,
+				"SYSTEM_STRUCTURAL_DENIED",
+				authority,
+			);
+		}
+		// 5. registry is operator-only (agencies/system may write flag class only).
+		if (key.class === "registry" && authority === "system") {
+			throw new RuntimeConfigMutationForbidden(
+				key.name,
+				"SYSTEM_REGISTRY_DENIED",
+				authority,
+			);
+		}
+
+		// Authorized. Persist + audit (hiveCentral). Kept behind the pool guard so
+		// the unit suite (which exercises the gates above with no pool) never runs
+		// it; integration tests provide a live control pool.
+		if (!this.pool) {
+			throw new RuntimeConfigMissing(
+				key.name,
+				key.class,
+				"[RuntimeConfig] set() requires a control-plane pool (hiveCentral) to persist + audit the mutation.",
+			);
+		}
+		await this.persistMutation(key, value, {
+			authority,
+			principalId: ctx.verified.principal_id,
+		});
+	}
+
+	/**
+	 * P828: DB half of set() — principal resolution + runtime_flag upsert +
+	 * config_mutation_log append + pg_notify + synchronous local cache eviction.
+	 * Separated so the authorization gates in set() stay pure and unit-testable.
+	 *
+	 * Two principal sources (mutually exclusive):
+	 *  - principalId : the verified principal from agentContextStorage (normal path).
+	 *                  Resolved against control_identity.principal by id.
+	 *  - emergencyDid: the AGENTHIVE_EMERGENCY_OPERATOR_DID env (AC-49 cold-boot).
+	 *                  Resolved against control_identity.principal by did.
+	 *
+	 * The resolved principal row supplies caller_did + principal_id (the audit FK,
+	 * NOT NULL) and principal_type. Resolution enforces:
+	 *  - AC-11/43: no matching active row → PRINCIPAL_LOOKUP_FAILED (no audit row).
+	 *  - AC-44   : lifecycle_status must be 'active' (filtered in the query).
+	 *  - AC-29   : principal_type='human' is treated as agent_read_only — denied,
+	 *              never silently granted operator authority.
+	 *
+	 * AC-14/35: if key.parse(value) rejects the value, ONE mutation_log row is
+	 * written with validation_result='failed' + validation_error, runtime_flag is
+	 * left unchanged, and the parse error is re-thrown to the caller.
+	 */
+	private async persistMutation<T>(
+		key: ConfigKey<T>,
+		value: T,
+		opts: {
+			authority: MutationAuthority;
+			principalId?: string;
+			emergencyDid?: string;
+		},
+	): Promise<void> {
+		const pool = this.pool as Pool;
+		const { authority } = opts;
+
+		// Principal resolution (AC-11/29/43/44).
+		let lookup: {
+			rows: { id: string; did: string; principal_type: string }[];
+		};
+		if (opts.emergencyDid !== undefined) {
+			lookup = await pool.query<{
+				id: string;
+				did: string;
+				principal_type: string;
+			}>(
+				`SELECT id, did, principal_type FROM control_identity.principal
+				  WHERE did = $1 AND lifecycle_status = 'active' LIMIT 1`,
+				[opts.emergencyDid],
+			);
+		} else {
+			lookup = await pool.query<{
+				id: string;
+				did: string;
+				principal_type: string;
+			}>(
+				`SELECT id, did, principal_type FROM control_identity.principal
+				  WHERE id = $1 AND lifecycle_status = 'active' LIMIT 1`,
+				[opts.principalId],
+			);
+		}
+		if (lookup.rows.length === 0) {
+			throw new RuntimeConfigMutationForbidden(
+				key.name,
+				"PRINCIPAL_LOOKUP_FAILED",
+				authority,
+			);
+		}
+		const row = lookup.rows[0];
+		// AC-29: legacy 'human' principals are denied (must register as 'operator').
+		if (row.principal_type === "human") {
+			console.warn(
+				`[ConfigResolver] principal ${row.did} has principal_type='human'; ` +
+					`config mutation denied (AC-29) — register as an operator principal.`,
+			);
+			throw new RuntimeConfigMutationForbidden(
+				key.name,
+				"AGENT_READ_ONLY",
+				"agent_read_only",
+			);
+		}
+		const callerDid = row.did;
+		const principalDbId = row.id;
+		const scope = "global";
+		const oldValue = await this.getOptional(
+			key as ConfigKey<T | undefined>,
+		).catch(() => undefined);
+		const oldJson =
+			oldValue === undefined ? null : JSON.stringify(oldValue);
+
+		// AC-14/35: validate the value BEFORE the runtime_flag write. A parse
+		// failure is audited (validation_result='failed') and re-thrown; the
+		// runtime_flag row is never touched.
+		try {
+			key.parse(JSON.stringify(value));
+		} catch (parseErr) {
+			const errMsg =
+				parseErr instanceof Error ? parseErr.message : String(parseErr);
+			await pool
+				.query(
+					`INSERT INTO core.config_mutation_log
+					   (key_name, key_class, scope, old_value, new_value, caller_did,
+					    principal_id, mutation_authority, validation_result, validation_error)
+					 VALUES ($1, $2, $3, $4::jsonb, NULL, $5, $6, $7, 'failed', $8)`,
+					[
+						key.name,
+						key.class,
+						scope,
+						oldJson,
+						callerDid,
+						principalDbId,
+						authority,
+						errMsg,
+					],
+				)
+				.catch(() => {});
+			throw parseErr;
+		}
+
+		const newJson = JSON.stringify(value);
+
+		// Single transaction: runtime_flag upsert + mutation_log append (AC-45).
+		// owner_did/modified_by_did are NOT NULL on core.runtime_flag — both are
+		// set to the resolved caller DID (the mutator owns the flag write).
+		const client = await pool.connect();
+		try {
+			await client.query("BEGIN");
+			await client.query(
+				`INSERT INTO ${RUNTIME_FLAG_TABLE}
+				   (flag_name, scope, value_jsonb, owner_did, modified_by_did)
+				 VALUES ($1, $2, $3::jsonb, $4, $4)
+				 ON CONFLICT (flag_name, scope)
+				 DO UPDATE SET value_jsonb = EXCLUDED.value_jsonb,
+				               modified_by_did = EXCLUDED.modified_by_did`,
+				[key.name, scope, newJson, callerDid],
+			);
+			await client.query(
+				`INSERT INTO core.config_mutation_log
+				   (key_name, key_class, scope, old_value, new_value, caller_did,
+				    principal_id, mutation_authority, validation_result)
+				 VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, $8, 'success')`,
+				[
+					key.name,
+					key.class,
+					scope,
+					oldJson,
+					newJson,
+					callerDid,
+					principalDbId,
+					authority,
+				],
+			);
+			await client.query("COMMIT");
+		} catch (err) {
+			await client.query("ROLLBACK").catch(() => {});
+			throw err;
+		} finally {
+			client.release();
+		}
+
+		// AC-15: notify carries identifiers only, never values.
+		await pool
+			.query(`SELECT pg_notify('runtime_flag_changed', $1)`, [
+				JSON.stringify({
+					flag_name: key.name,
+					scope,
+					op: "UPDATE",
+					mutated_by_did: callerDid,
+				}),
+			])
+			.catch(() => {});
+
+		// AC-16: synchronous local eviction so the same process re-reads the value.
+		this.cache.delete(key.name);
+		this.dbCache.delete(`runtime_flag:${key.name}:${scope}`);
 	}
 
 	/**
@@ -692,7 +1171,10 @@ class ConfigResolver {
 	 * Query a runtime flag value by flag_name + scope from core.runtime_flag.
 	 * Caches per (flag_name, scope) key; cache is cleared on runtime_flag_changed notify.
 	 */
-	private async getActiveFlagValue(flagName: string, scope = "global"): Promise<any> {
+	private async getActiveFlagValue(
+		flagName: string,
+		scope = "global",
+	): Promise<any> {
 		if (!this.pool) return undefined;
 		const cacheKey = `runtime_flag:${flagName}:${scope}`;
 		if (this.dbCache.has(cacheKey)) return this.dbCache.get(cacheKey);
@@ -714,7 +1196,11 @@ class ConfigResolver {
 	 * Routes core.runtime_flag lookups through getScopedFlagValue() (scoped + TTL cache).
 	 * All other tables use the single-row LIMIT 1 fallback (no TTL, no scope).
 	 */
-	private async getDbValue(table: string, column: string, flagName?: string): Promise<any> {
+	private async getDbValue(
+		table: string,
+		column: string,
+		flagName?: string,
+	): Promise<any> {
 		if (!this.pool) return undefined;
 
 		if (table === RUNTIME_FLAG_TABLE && flagName) {
@@ -790,6 +1276,40 @@ export async function initConfig(opts: {
 }
 
 /**
+ * P827 AC-11: bootstrap the global resolver against the hiveCentral control
+ * pool. This is the single wiring point every long-lived service should call at
+ * startup so that DB-backed scoped flag resolution + runtime_flag_changed
+ * hot-reload are actually live (today `runtimeConfig.get()` throws "Resolver not
+ * initialized" everywhere, so every flag silently falls back to env/default).
+ *
+ * Uses getControlPool() from the P497/P518 pool registry, which builds the pool
+ * from AGENTHIVE_CONTROL_DSN (→ hiveCentral). The resolver's LISTEN client is
+ * derived from that pool's options via buildDirectListenPoolConfig(), so it
+ * also lands on hiveCentral — never process.env.PGDATABASE (=agenthive).
+ *
+ * Idempotent: if a resolver is already initialized this is a no-op unless
+ * `force` is set. Pass `scopeContext` to bind project/host/agency scope.
+ */
+export async function initConfigFromControlPool(opts?: {
+	yamlConfig?: Record<string, any>;
+	envFilePath?: string;
+	scopeContext?: ScopeContext;
+	force?: boolean;
+}): Promise<ConfigResolver> {
+	if (globalResolver && !opts?.force) {
+		return globalResolver;
+	}
+	const { getControlPool } = await import("../../postgres/pool-registry.js");
+	const pool = getControlPool();
+	return initConfig({
+		pool,
+		yamlConfig: opts?.yamlConfig,
+		envFilePath: opts?.envFilePath,
+		scopeContext: opts?.scopeContext,
+	});
+}
+
+/**
  * Get the global resolver instance.
  */
 function getResolver(): ConfigResolver {
@@ -807,6 +1327,15 @@ function getResolver(): ConfigResolver {
  */
 export async function get<T>(key: ConfigKey<T>): Promise<T> {
 	return getResolver().get(key);
+}
+
+/**
+ * P828: mutate a config value (operator/system authority, audited). Identity is
+ * read from agentContextStorage. Throws RuntimeConfigMutationForbidden when the
+ * caller lacks authority. See ConfigResolver.set().
+ */
+export async function set<T>(key: ConfigKey<T>, value: T): Promise<void> {
+	return getResolver().set(key, value);
 }
 
 /**

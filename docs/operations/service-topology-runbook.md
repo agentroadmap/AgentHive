@@ -15,7 +15,7 @@
 | service_lease_management | orchestrator | (none) |
 | gate_evaluation | orchestrator | (none — gate-pipeline decommissioned per P754) |
 | work_offer_claim | orchestrator (via OfferClaimLoop + OrchestratorOfferDispatcher) | mcp-server |
-| subprocess_spawn | agency-liaison (agenthive-liaison@.service) | orchestrator (observes via liaison_message uplinks) |
+| subprocess_spawn | A2A host / agency floor (`agenthive-a2a-host.service`) | orchestrator (observes via liaison_message uplinks) |
 | proposal_crud | mcp-server | (none) |
 | feed_event_publication | state-feed-listener | (none) |
 
@@ -210,49 +210,62 @@ ORDER BY responsibility;
 
 ---
 
-## Bringing an Agency Online (P902 A8.3 / P299)
+## Bringing an Agency Online (P902 A8.3 / P299 / P1132)
 
-`agenthive-liaison@.service` is the **canonical** way to make an agency dispatchable.
-An `agent_registry` row alone is not sufficient — the liaison session must be active
-and heartbeating for the orchestrator to consider the agency eligible for work dispatch.
+`agenthive-a2a-host.service` is the current deterministic liaison floor. Do not
+add a new `agenthive-liaison@<agency>` unit for each agency. A new agency on an
+existing OS user is registered through database rows, then the shared A2A host
+discovers it and opens the liaison session.
+
+An `agent_registry` row alone is not sufficient. Dispatchability requires the
+matching `roadmap.agency` row, an active `provider_registry` row with usable
+capabilities, and a live heartbeat/session from the A2A host.
 
 ### Steps to register a new agency
 
-1. Create `/etc/agenthive/liaison-<agency-id>.env`:
+1. Insert or update the canonical DB rows:
 
-```
-AGENCY_PROVIDER=anthropic
-AGENCY_HOST_ID=bot
+```sql
+-- roadmap_workforce.agent_registry
+-- roadmap.agency
+-- roadmap_workforce.provider_registry
+-- roadmap_workforce.agent_capability
+-- roadmap.message_acl
 ```
 
-2. Enable and start the liaison service:
+2. Ensure the shared A2A host is running:
 
 ```bash
-sudo systemctl enable --now agenthive-liaison@<agency-id>.service
+sudo systemctl status agenthive-a2a-host.service
 ```
 
 3. Verify the session is live:
 
-```bash
-sudo journalctl -u agenthive-liaison@<agency-id> -f
-# Expect: [liaison:<agency-id>] registered session=<uuid>
+```sql
+SELECT agency_id, session_id, started_at, ended_at
+FROM roadmap.agency_liaison_session
+WHERE agency_id = '<agency-id>'
+ORDER BY started_at DESC
+LIMIT 5;
 ```
 
-4. Confirm in the DB:
+4. Confirm heartbeat and provider eligibility:
 
 ```sql
-SELECT agency_id, session_id, last_heartbeat_at, capacity_remaining
-FROM roadmap_workforce.liaison_session
-WHERE agency_id = '<agency-id>'
-  AND status = 'active';
+SELECT a.agency_id, a.status, a.last_heartbeat_at, pr.status AS provider_status,
+       pr.max_in_flight, pr.capabilities
+FROM roadmap.agency a
+JOIN roadmap_workforce.agent_registry ar ON ar.agent_identity = a.agency_id
+JOIN roadmap_workforce.provider_registry pr ON pr.agency_id = ar.id
+WHERE a.agency_id = '<agency-id>';
 ```
 
 ### Taking an agency offline
 
-```bash
-sudo systemctl stop agenthive-liaison@<agency-id>.service
-# Liaison sends SIGTERM → clean shutdown → session marked inactive
-```
+Set the agency or provider registry row inactive/retired, or remove it from the
+A2A host include set if a host-specific drain is needed. Stopping
+`agenthive-a2a-host.service` takes every agency attached to that OS-user floor
+offline.
 
 The orchestrator will stop dispatching to the agency once its liaison session
 heartbeat expires (TTL 90s by default). In-flight offers are completed by the

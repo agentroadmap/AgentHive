@@ -1047,6 +1047,25 @@ export const FlagKeys = {
 		envOverride: false,
 	} satisfies ConfigKey<number>,
 
+	// P2709 AC-4: grace window after a gate hold/reject during which the
+	// state-monitor reeval must NOT auto-advance maturity (anti-flap).
+	PROPOSAL_STATE_MONITOR_GRACE_PERIOD_SEC: {
+		name: "PROPOSAL_STATE_MONITOR_GRACE_PERIOD_SEC",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 0) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 300,
+		description:
+			"State-monitor grace period (sec) after a gate hold/reject before maturity auto-advance is allowed (P2709)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
 	ORCHESTRATOR_HEARTBEAT_MS: {
 		name: "ORCHESTRATOR_HEARTBEAT_MS",
 		class: "flag" as const,
@@ -1074,8 +1093,39 @@ export const FlagKeys = {
 			}
 		},
 		required: false,
-		defaultValue: true,
-		description: "Kill switch: false disables offer-claim loop",
+		// P1432 AC-1 (matchmaker invariant): default OFF — the orchestrator must
+		// not self-claim by default. A missing/reset flag falls back to
+		// matchmaker-only; set true to explicitly re-enable the loop (emergency lever).
+		defaultValue: false,
+		description: "Kill switch: false (default) disables the orchestrator offer-claim loop",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<boolean>,
+
+	// V3-C6 (P1438) AC-14: legacy heartbeat-derived "offer_dispatch downlink" push.
+	// After posting an open-pool work offer the orchestrator used to ALSO push a
+	// targeted offer_dispatch to listDispatchableAgencies()[0] — selecting a target
+	// from v_agency_status.dispatchable, which is computed from agency.last_heartbeat_at.
+	// That is a mechanical presence floor: it routes dispatch by heartbeat, not by an
+	// actual claim. In C6 the open-pool offer + emergent-presence claim already decide
+	// dispatch, so this push is redundant AND a "no heartbeat-derived dispatchability
+	// path for open-pool offers" violation. Default OFF; flip true only to roll back to
+	// legacy push-dispatch (no code revert needed).
+	ORCHESTRATOR_LEGACY_PUSH_DISPATCH_ENABLED: {
+		name: "ORCHESTRATOR_LEGACY_PUSH_DISPATCH_ENABLED",
+		class: "flag" as const,
+		parse: (v: string) => {
+			try {
+				return JSON.parse(v) === true;
+			} catch {
+				return v.toLowerCase() === "true" || v === "1";
+			}
+		},
+		required: false,
+		defaultValue: false,
+		description:
+			"V3-C6 AC-14: when true, re-enables the legacy heartbeat-derived offer_dispatch downlink push (default false = pure open-pool dispatch)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
@@ -1193,6 +1243,29 @@ export const FlagKeys = {
 		dbColumn: "value_jsonb",
 		envOverride: false,
 	} satisfies ConfigKey<number>,
+
+	// ─── P3312: Adaptive matcher (unified matchWorkToRoute) ─────────────────
+	// Default OFF; shadow mode writes matcher vs legacy choice to route_decision_log
+	// without changing behavior. Flip true when P3310+P3311 are COMPLETE to activate.
+
+	ADAPTIVE_MATCHER_ENABLED: {
+		name: "ADAPTIVE_MATCHER_ENABLED",
+		class: "flag" as const,
+		parse: (v: string) => {
+			try {
+				return JSON.parse(v) === true;
+			} catch {
+				return v.toLowerCase() === "true" || v === "1";
+			}
+		},
+		required: false,
+		defaultValue: false,
+		description:
+			"P3312: when false (default), matchWorkToRoute runs in shadow mode only — logs matcher_choice vs legacy_choice without changing dispatch behavior. Flip true once P3310+P3311 are COMPLETE.",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<boolean>,
 
 	/**
 	 * TUI cockpit layout — 'grid' (default, 2x2) or 'stacked' (single column).

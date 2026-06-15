@@ -5,12 +5,8 @@
  * AC-5/6/7: Verify job runner structured output formats
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import type { QueryFn } from "../../src/core/orchestration/resolvers/agency-resolver.ts";
-import {
-	resolveAgency,
-	_setQueryForTest,
-} from "../../src/core/orchestration/resolvers/agency-resolver.ts";
+import { describe, expect, it } from "bun:test";
+import { buildTierFilterClause } from "../../src/core/orchestration/resolvers/tier-aware-resolver.ts";
 import {
 	executeTier0Job,
 	handleRateLimit,
@@ -20,53 +16,25 @@ import {
 describe("P1005: Task Tier Routing", () => {
 	// ─── AC-8: Tier-0 Isolation (SQL verification) ────────────────────────────────
 
-	describe("AC-8: Tier-0 isolation — SQL verification", () => {
-		let queryCalls: Array<{ sql: string; params: unknown[] }> = [];
+	describe("AC-8: tier isolation — SQL verification", () => {
+		it("should include a free-tier rank filter when free tier is requested", () => {
+			const clause = buildTierFilterClause("free");
 
-		beforeEach(() => {
-			queryCalls = [];
+			expect(clause).toContain("roadmap.fn_tier_rank(mr.tier)");
+			expect(clause).toContain("roadmap.fn_tier_rank('free')");
 		});
 
-		it("should include tier=0 filter in SQL when taskTier=0 is requested", async () => {
-			_setQueryForTest(async (sql: string, params: unknown[] = []) => {
-				queryCalls.push({ sql, params });
-				return { rows: [] } as any;
-			});
+		it("should include a lower-or-better tier rank filter when lower tier is requested", () => {
+			const clause = buildTierFilterClause("lower");
 
-			await resolveAgency("1", undefined, 0 /* Tier-0 */);
-
-			const lastCall = queryCalls.at(-1);
-			expect(lastCall?.sql).toBeDefined();
-			// The SQL should filter for tier=0 specifically
-			expect(lastCall!.sql).toMatch(/:int.*=\s*0/);
+			expect(clause).toContain(">=");
+			expect(clause).toContain("roadmap.fn_tier_rank('lower')");
 		});
 
-		it("should include tier>=1 filter in SQL when taskTier=1 is requested", async () => {
-			_setQueryForTest(async (sql: string, params: unknown[] = []) => {
-				queryCalls.push({ sql, params });
-				return { rows: [] } as any;
-			});
+		it("should NOT include a tier filter when minTier is undefined", () => {
+			const clause = buildTierFilterClause(null);
 
-			await resolveAgency("1", undefined, 1 /* Tier-1 */);
-
-			const lastCall = queryCalls.at(-1);
-			expect(lastCall?.sql).toBeDefined();
-			// The SQL should filter for tier >= 1
-			expect(lastCall!.sql).toMatch(/>=\s*1/);
-		});
-
-		it("should NOT include tier filter in SQL when taskTier is undefined", async () => {
-			_setQueryForTest(async (sql: string, params: unknown[] = []) => {
-				queryCalls.push({ sql, params });
-				return { rows: [] } as any;
-			});
-
-			await resolveAgency("1" /* no taskTier parameter */);
-
-			const lastCall = queryCalls.at(-1);
-			expect(lastCall?.sql).toBeDefined();
-			// Should not have the tier-specific filter when taskTier is not provided
-			expect(lastCall!.sql).not.toMatch(/AND.*tier.*=\s*0/);
+			expect(clause).toBe("");
 		});
 	});
 

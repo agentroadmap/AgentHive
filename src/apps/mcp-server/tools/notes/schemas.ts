@@ -10,7 +10,7 @@ export const noteCreateSchema: JsonSchema = {
 		},
 		content: {
 			type: "string",
-			description: "The note content (markdown supported)",
+			description: "The note content (markdown supported). Must be non-empty; empty or whitespace-only content is rejected (P1371).",
 			maxLength: 10000,
 		},
 		note_type: {

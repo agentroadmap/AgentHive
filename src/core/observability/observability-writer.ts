@@ -157,4 +157,43 @@ export class ObservabilityWriter {
 			console.error("[ObservabilityWriter] writeDecisionExplainability failed:", err);
 		}
 	}
+
+	/**
+	 * P3000: Emit a quota observability metric to quota_metric_event.
+	 *
+	 * Metric names (enforced by DB CHECK):
+	 *   quota:denied_dispatch          — offer refused due to budget exhaustion
+	 *   quota:reserved_headroom_granted — starvation recovery slot granted
+	 *   quota:starvation_recovery       — agent cleared starvation threshold
+	 *   quota:window_reset              — quota window rolled over and balance refreshed
+	 *
+	 * All methods are fire-and-forget; errors are logged but never propagated.
+	 */
+	async writeQuotaMetric(params: {
+		metricName:
+			| "quota:denied_dispatch"
+			| "quota:reserved_headroom_granted"
+			| "quota:starvation_recovery"
+			| "quota:window_reset";
+		agentIdentity?: string | null;
+		/** Numeric magnitude; defaults to 1 (event counter). */
+		value?: number;
+		attributes?: Record<string, unknown>;
+	}): Promise<void> {
+		try {
+			await this.query(
+				`INSERT INTO roadmap_workforce.quota_metric_event
+				   (metric_name, agent_identity, value, attributes)
+				 VALUES ($1, $2, $3, $4)`,
+				[
+					params.metricName,
+					params.agentIdentity ?? null,
+					params.value ?? 1,
+					JSON.stringify(params.attributes ?? {}),
+				],
+			);
+		} catch (err) {
+			console.error("[ObservabilityWriter] writeQuotaMetric failed:", err);
+		}
+	}
 }

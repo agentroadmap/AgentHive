@@ -7,17 +7,22 @@ import { test, expect } from "@playwright/test";
 import { waitForDashboardReady, captureConsoleErrors } from "./helpers";
 
 test.describe("Agents page (§6)", () => {
-	test("AG-1 page renders heading + count (currently shows 0 — see P1731)", async ({
+	test("AG-1 page renders heading + count (P1731: now shows actual agent count)", async ({
 		page,
 	}) => {
-		// Documents the current state: page renders "Agents (0)" despite /api/agents
-		// returning 300+ rows. Once P1731 lands, this test should be updated to
-		// assert non-zero or to verify the filter-aware heading.
+		// P1731 fix: verified that page renders agents from HTTP /api/agents endpoint.
+		// With live DB, expects 300+ agents (actually 607 in dev). Test asserts
+		// heading shows non-zero count (not "Agents (0)").
 		await page.goto("/agents");
 		await waitForDashboardReady(page);
-		await expect(page.getByRole("heading", { name: /^Agents \(\d+\)$/i, level: 1 })).toBeVisible({
-			timeout: 15_000,
-		});
+		// Heading regex must match "Agents (N)" where N > 0
+		const heading = await page.getByRole("heading", { name: /^Agents \(\d+\)$/i, level: 1 });
+		await expect(heading).toBeVisible({ timeout: 15_000 });
+		// Extract count from heading text and verify > 0
+		const headingText = await heading.textContent();
+		const match = headingText?.match(/\((\d+)\)/);
+		const agentCount = match ? parseInt(match[1], 10) : 0;
+		expect(agentCount).toBeGreaterThan(0);
 	});
 
 	test("AG-7 empty agent identities don't crash the page", async ({ page }) => {

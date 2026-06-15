@@ -62,19 +62,25 @@
 
 import { hostname } from "node:os";
 import { Client } from "pg";
-import { bootLiaison, type LiaisonBootHandle } from "../src/infra/agency/liaison-boot.ts";
 import {
-	runLiaisonAgent,
 	type LiaisonAgentHandle,
+	runLiaisonAgent,
 } from "../src/infra/agency/liaison-agent.ts";
-import { startLiaisonHub } from "../src/infra/agency/liaison-hub.ts";
+import {
+	bootLiaison,
+	type LiaisonBootHandle,
+} from "../src/infra/agency/liaison-boot.ts";
 import {
 	closePool,
 	getPool,
 	query,
 	setPoolLifecycleMode,
 } from "../src/infra/postgres/pool.ts";
-import { loadRuntimeEnvFile, initConfig } from "../src/shared/runtime/config.ts";
+import {
+	initConfig,
+	loadRuntimeEnvFile,
+} from "../src/shared/runtime/config.ts";
+import { armHardExit } from "../src/shared/runtime/graceful-exit.ts";
 
 // Protect the shared pool from stray pool.end() in shared CLI code.
 setPoolLifecycleMode("long-running");
@@ -103,7 +109,6 @@ interface AttachedListener {
 	provider: string;
 	bootHandle: LiaisonBootHandle;
 	agentHandle: LiaisonAgentHandle | null;
-	liaisonHub: { stop: () => void } | null;
 }
 
 interface RuntimeFlags {
@@ -143,28 +148,39 @@ async function loadRuntimeFlags(): Promise<RuntimeFlags> {
 		}
 		const n = typeof v === "number" ? v : Number(v);
 		if (!Number.isFinite(n) || n <= 0) {
-			throw new Error(`[a2a-host] Runtime flag '${k}' has invalid value: ${JSON.stringify(v)}`);
+			throw new Error(
+				`[a2a-host] Runtime flag '${k}' has invalid value: ${JSON.stringify(v)}`,
+			);
 		}
 		return n;
 	};
 	return {
-		listenRefreshMs:    need("A2A_HOST_LISTEN_REFRESH_MS"),
-		shutdownTimeoutMs:  need("A2A_HOST_SHUTDOWN_TIMEOUT_MS"),
-		presenceRefreshMs:  need("A2A_HOST_PRESENCE_REFRESH_MS"),
+		listenRefreshMs: need("A2A_HOST_LISTEN_REFRESH_MS"),
+		shutdownTimeoutMs: need("A2A_HOST_SHUTDOWN_TIMEOUT_MS"),
+		presenceRefreshMs: need("A2A_HOST_PRESENCE_REFRESH_MS"),
 	};
 }
 
 /** Subscribe to runtime_config_changed for live flag reload (no restart). */
 async function subscribeFlagsReload(): Promise<void> {
 	try {
-		const databaseUrl = process.env.DATABASE_URL ? new URL(process.env.DATABASE_URL) : null;
+		const databaseUrl = process.env.DATABASE_URL
+			? new URL(process.env.DATABASE_URL)
+			: null;
 		const client = new Client({
 			host: process.env.PGHOST ?? databaseUrl?.hostname ?? "127.0.0.1",
-			port: Number(process.env.PGPORT_DIRECT ?? databaseUrl?.port ?? process.env.PGPORT ?? 5432),
+			port: Number(
+				process.env.PGPORT_DIRECT ??
+					databaseUrl?.port ??
+					process.env.PGPORT ??
+					5432,
+			),
 			user: process.env.PGUSER ?? databaseUrl?.username,
 			password: process.env.PGPASSWORD ?? databaseUrl?.password,
 			database:
-				process.env.PGDATABASE ?? databaseUrl?.pathname.replace(/^\/+/, "") ?? "agenthive",
+				process.env.PGDATABASE ??
+				databaseUrl?.pathname.replace(/^\/+/, "") ??
+				"agenthive",
 			application_name: `agenthive-a2a-host-flags-${host}`,
 		});
 		// P1138: explicit error handler. Without it, when this dedicated Client's
@@ -195,7 +211,9 @@ async function subscribeFlagsReload(): Promise<void> {
 					const next = await loadRuntimeFlags();
 					const changed = JSON.stringify(next) !== JSON.stringify(flags);
 					if (!changed) return;
-					console.log(`[a2a-host] runtime flags reloaded: ${JSON.stringify(next)}`);
+					console.log(
+						`[a2a-host] runtime flags reloaded: ${JSON.stringify(next)}`,
+					);
 					const oldPresence = flags.presenceRefreshMs;
 					flags = next;
 					if (oldPresence !== next.presenceRefreshMs) {
@@ -208,7 +226,10 @@ async function subscribeFlagsReload(): Promise<void> {
 		});
 		flagsReloadClient = client;
 	} catch (err) {
-		console.warn(`[a2a-host] failed to subscribe runtime_config_changed (continuing without live reload):`, err);
+		console.warn(
+			`[a2a-host] failed to subscribe runtime_config_changed (continuing without live reload):`,
+			err,
+		);
 	}
 }
 
@@ -221,10 +242,15 @@ async function handleCapabilityVocabularyChanged(): Promise<void> {
 			    AND expires_at > now()`,
 		);
 		if (result.rowCount && result.rowCount > 0) {
-			console.log(`[a2a-host] cleared ${result.rowCount} pauses due to capability vocabulary change`);
+			console.log(
+				`[a2a-host] cleared ${result.rowCount} pauses due to capability vocabulary change`,
+			);
 		}
 	} catch (err) {
-		console.warn(`[a2a-host] error clearing pauses on capability_vocabulary_changed:`, err);
+		console.warn(
+			`[a2a-host] error clearing pauses on capability_vocabulary_changed:`,
+			err,
+		);
 	}
 }
 
@@ -241,38 +267,54 @@ async function loadActiveAgencies(): Promise<AgencyRow[]> {
 	// auth in andy's home). Comma-separated agent_identity lists.
 	const includeRaw = process.env.AGENTHIVE_AGENCY_FILTER ?? "";
 	const excludeRaw = process.env.AGENTHIVE_AGENCY_EXCLUDE ?? "";
-	const includeList = includeRaw.split(",").map(s => s.trim()).filter(Boolean);
-	const excludeList = excludeRaw.split(",").map(s => s.trim()).filter(Boolean);
+	const includeList = includeRaw
+		.split(",")
+		.map((s) => s.trim())
+		.filter(Boolean);
+	const excludeList = excludeRaw
+		.split(",")
+		.map((s) => s.trim())
+		.filter(Boolean);
 
 	const params: unknown[] = [host];
 	let filterSql = "";
 	if (includeList.length > 0) {
 		params.push(includeList);
-		filterSql += ` AND agent_identity = ANY($${params.length}::text[])`;
+		filterSql += ` AND ar.agent_identity = ANY($${params.length}::text[])`;
 	}
 	if (excludeList.length > 0) {
 		params.push(excludeList);
-		filterSql += ` AND agent_identity <> ALL($${params.length}::text[])`;
+		filterSql += ` AND ar.agent_identity <> ALL($${params.length}::text[])`;
 	}
 
 	const { rows } = await query<AgencyRow>(
-		`SELECT agent_identity, preferred_provider
-		   FROM roadmap_workforce.agent_registry
-		  WHERE (host_affinity = $1 OR host_affinity IS NULL OR host_affinity = '')
-		    AND agent_type    IN ('agency', 'llm')
-		    AND status        IN ('active','dormant')
-		    AND coalesce(preferred_provider, '') <> ''
+		`SELECT DISTINCT ar.agent_identity, ar.preferred_provider
+		   FROM roadmap_workforce.agent_registry ar
+		   JOIN roadmap.agency a ON a.agency_id = ar.agent_identity
+		   JOIN roadmap_workforce.provider_registry pr ON pr.agency_id = ar.id
+		  WHERE (ar.host_affinity = $1 OR ar.host_affinity IS NULL OR ar.host_affinity = '')
+		    AND ar.agent_type    IN ('agency', 'llm')
+		    AND ar.status        IN ('active','dormant')
+		    AND a.status         IN ('active','dormant')
+		    AND pr.status        NOT IN ('offline','retired')
+		    AND pr.is_active     = true
+		    AND coalesce(ar.preferred_provider, '') <> ''
 		    ${filterSql}
-		  ORDER BY agent_identity`,
+		  ORDER BY ar.agent_identity`,
 		params,
 	);
 	if (includeList.length > 0 || excludeList.length > 0) {
-		console.log(`[a2a-host] agency-filter active: include=[${includeList.join(",")}] exclude=[${excludeList.join(",")}] → ${rows.length} agencies`);
+		console.log(
+			`[a2a-host] agency-filter active: include=[${includeList.join(",")}] exclude=[${excludeList.join(",")}] → ${rows.length} agencies`,
+		);
 	}
 	return rows;
 }
 
-async function fnPulse(identity: string, state: "online" | "offline" | "away" | "busy"): Promise<void> {
+async function fnPulse(
+	identity: string,
+	state: "online" | "offline" | "away" | "busy",
+): Promise<void> {
 	try {
 		await query(`SELECT roadmap.fn_pulse($1, $2)`, [identity, state]);
 	} catch (err) {
@@ -295,7 +337,9 @@ async function attachListener(row: AgencyRow): Promise<void> {
 			display_name: identity,
 		});
 	} catch (err) {
-		console.error(`[a2a-host] bootLiaison failed for ${identity}: ${(err as Error).message}`);
+		console.error(
+			`[a2a-host] bootLiaison failed for ${identity}: ${(err as Error).message}`,
+		);
 		return;
 	}
 
@@ -314,38 +358,29 @@ async function attachListener(row: AgencyRow): Promise<void> {
 			},
 		});
 	} catch (err) {
-		console.warn(`[a2a-host] runLiaisonAgent failed for ${identity} (non-fatal): ${(err as Error).message}`);
+		console.warn(
+			`[a2a-host] runLiaisonAgent failed for ${identity} (non-fatal): ${(err as Error).message}`,
+		);
 	}
 
-	// Start the LiaisonHub so this agency consumes liaison_message offer_dispatch
-	// rows from the orchestrator. Without this, OfferDispatcher writes pile up
-	// unacked (311 backlog observed 2026-05-19); claim_expires_at fires; reaper
-	// requeues; dispatch loop never produces a spawn. startLiaisonHub returns
-	// immediately; the listener runs in a void run() background promise.
-	let liaisonHub: { stop: () => void } | null = null;
-	try {
-		liaisonHub = startLiaisonHub(identity);
-	} catch (err) {
-		console.warn(`[a2a-host] startLiaisonHub failed for ${identity} (non-fatal): ${(err as Error).message}`);
-	}
-
-	attached.set(identity, { identity, provider, bootHandle, agentHandle, liaisonHub });
+	attached.set(identity, {
+		identity,
+		provider,
+		bootHandle,
+		agentHandle,
+	});
 	await fnPulse(identity, "online");
 	console.log(`[a2a-host] ${identity} online`);
 }
 
-async function detachListener(identity: string, state: "offline" | "away" = "offline"): Promise<void> {
+async function detachListener(
+	identity: string,
+	state: "offline" | "away" = "offline",
+): Promise<void> {
 	const m = attached.get(identity);
 	if (!m) return;
 	attached.delete(identity);
 	await fnPulse(identity, state);
-	if (m.liaisonHub) {
-		try {
-			m.liaisonHub.stop();
-		} catch (err) {
-			console.warn(`[a2a-host] ${identity} liaisonHub.stop error:`, err);
-		}
-	}
 	if (m.agentHandle) {
 		try {
 			await m.agentHandle.stop();
@@ -422,15 +457,23 @@ async function shutdownAll(): Promise<void> {
 	if (presenceRefreshTimer) clearInterval(presenceRefreshTimer);
 	if (registryRefreshTimer) clearInterval(registryRefreshTimer);
 	if (flagsReloadClient) {
-		try { await flagsReloadClient.end(); } catch { /* ignore */ }
+		try {
+			await flagsReloadClient.end();
+		} catch {
+			/* ignore */
+		}
 		flagsReloadClient = null;
 	}
 	const identities = Array.from(attached.keys());
-	console.log(`[a2a-host] shutdown — stopping ${identities.length} agencies (cap=${flags.shutdownTimeoutMs}ms)`);
+	console.log(
+		`[a2a-host] shutdown — stopping ${identities.length} agencies (cap=${flags.shutdownTimeoutMs}ms)`,
+	);
 	const stopPromises = identities.map((id) => detachListener(id, "offline"));
 	await Promise.race([
 		Promise.allSettled(stopPromises),
-		new Promise<void>((resolve) => setTimeout(resolve, flags.shutdownTimeoutMs)),
+		new Promise<void>((resolve) =>
+			setTimeout(resolve, flags.shutdownTimeoutMs),
+		),
 	]);
 	setPoolLifecycleMode("one-shot");
 	try {
@@ -453,7 +496,9 @@ async function main(): Promise<void> {
 
 	host = (process.env.AGENTHIVE_HOST ?? "").trim() || hostname();
 	if (!host) {
-		throw new Error("[a2a-host] AGENTHIVE_HOST is empty and os.hostname() returned empty — cannot proceed");
+		throw new Error(
+			"[a2a-host] AGENTHIVE_HOST is empty and os.hostname() returned empty — cannot proceed",
+		);
 	}
 
 	console.log(`[a2a-host] starting on host=${host}`);
@@ -478,7 +523,9 @@ async function main(): Promise<void> {
 
 	const agencies = await loadActiveAgencies();
 	if (agencies.length === 0) {
-		console.warn(`[a2a-host] no active agencies found for host=${host}; idling`);
+		console.warn(
+			`[a2a-host] no active agencies found for host=${host}; idling`,
+		);
 	}
 
 	// Dedupe agencies by identity before booting to prevent race conditions
@@ -495,7 +542,9 @@ async function main(): Promise<void> {
 
 	// Boot all agencies in parallel.
 	await Promise.allSettled(uniqueAgencies.map((row) => attachListener(row)));
-	console.log(`[a2a-host] boot complete — ${attached.size} of ${agencies.length} agencies online`);
+	console.log(
+		`[a2a-host] boot complete — ${attached.size} of ${agencies.length} agencies online`,
+	);
 
 	startPresenceRefreshTimer();
 
@@ -514,6 +563,9 @@ async function main(): Promise<void> {
 		process.once("SIGINT", () => onSignal("SIGINT"));
 	});
 
+	// P3198: backstop in case shutdownAll() itself hangs (e.g. a LISTEN client that
+	// never settles). The explicit process.exit(0) below handles the clean case.
+	armHardExit("a2a-host");
 	await shutdownAll();
 }
 

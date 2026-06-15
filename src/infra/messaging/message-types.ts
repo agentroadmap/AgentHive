@@ -8,7 +8,7 @@
  * to the actual pg_constraint definition on every test run.
  */
 
-/** All 14 canonical message types for A2A and liaison messaging. */
+/** All 19 canonical message types for A2A and liaison messaging. */
 export const MESSAGE_TYPES = [
   'text',           // plain conversational message
   'task',           // task assignment with optional action payload
@@ -24,6 +24,11 @@ export const MESSAGE_TYPES = [
   'task_status',    // task status update
   'task_complete',  // task completion notification
   'task_error',     // task error report
+  'user_message',   // P1105: USER first-class identity
+  'throttle_decision', // P1376: soft-throttle decision feed
+  'capacity_query', // P1438 C6 AC-17: on-demand capacity probe
+  'handoff_request',// P1438 C6 AC-17: targeted/specialized work handoff
+  'capability_gap', // P1438 C6 AC-17: no agency can serve a capability
 ] as const;
 
 /** Derived type from MESSAGE_TYPES tuple. */

@@ -3061,10 +3061,26 @@ export class RoadmapServer {
 
 	private async handleListAgents(req?: Request): Promise<Response> {
 		try {
-			// AC-2: when an X-Project-Id header is present, scope the agent
-			// listing to that project's registry so the dashboard reflects
-			// the operator's selected project. Falls back to core.listAgents()
-			// (which serves the default project) when no scope is provided.
+			// P1731 AC-1: DIAGNOSTIC — HTTP GET /api/agents endpoint
+			// This endpoint sources agents from roadmap_workforce.agent_registry
+			// and filters by project_id when X-Project-Id header is present.
+			//
+			// FILTER LOGIC:
+			// - If req present + resolveProjectScope succeeds → WHERE project_id = scope.project_id
+			// - If req absent or no header → core.listAgents() fallback (default project)
+			//
+			// DIVERGENCE ANALYSIS:
+			// WebSocket bridge (websocket-server.ts:99) queries the same table
+			// WITHOUT any project_id filter, returning all agents.
+			//
+			// CURRENT STATE (all agents in project_id=1):
+			// - HTTP: SELECT ... WHERE project_id=1 → 607 agents
+			// - WS:   SELECT ... (no filter) → 607 agents
+			// - Both are equivalent until project_id diverges
+			//
+			// INTENT: Control-plane project_id is a tenant pointer (P477 AC-2).
+			// Filtering is correct for multi-tenant scenarios. Both sources should
+			// remain in sync and respect the operator's selected project.
 			if (req) {
 				const scope = await this.resolveProjectScope(req);
 				const { rows } = await query<{

@@ -20,11 +20,11 @@ export const MESSAGE_TYPES = [
 	"task_status",
 	"task_complete",
 	"task_error",
-	"user_message",
-	"throttle_decision",
-	"capacity_query",
-	"handoff_request",
-	"capability_gap",
+	"user_message", // P1105: USER first-class identity
+	"throttle_decision", // P1376: soft-throttle decision feed
+	"capacity_query", // P1438 C6 AC-17: on-demand capacity probe
+	"handoff_request", // P1438 C6 AC-17: targeted/specialized work handoff
+	"capability_gap", // P1438 C6 AC-17: no agency can serve a capability
 ] as const;
 
 export type MessageType = (typeof MESSAGE_TYPES)[number];

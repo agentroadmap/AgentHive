@@ -25,6 +25,8 @@ export function registerProposalTools(
 	const handlers = new PgProposalHandlers(server, projectRoot);
 
 	server.addTool({
+		// P1114 AC-6: read action — lowest non-degraded tier.
+		clearance: { min_tier: "restricted", scope: "read" },
 		name: "prop_list",
 		description:
 			"List AgentHive proposals from Postgres. " +
@@ -222,7 +224,7 @@ export function registerProposalTools(
 				type: {
 					type: "string",
 					description:
-						"FORBIDDEN: type changes are not permitted via this MCP surface. Use roadmap.fn_reconcile_proposal_type or migration P436.",
+						"FORBIDDEN: type changes are not permitted via this MCP surface. Fix workflow drift via SQL: UPDATE roadmap.workflows SET template_id=14 WHERE proposal_id=<id>.",
 				},
 			},
 			required: ["id"],
@@ -230,6 +232,8 @@ export function registerProposalTools(
 		handler: (args: any) => handlers.updateProposal(args),
 	});
 	server.addTool({
+		// P1114 AC-6: privileged proposal state transition / gate action — HIGH tier.
+		clearance: { min_tier: "trusted", scope: "gate_action" },
 		name: "prop_transition",
 		description:
 			"Transition a proposal to a new workflow stage. Gate transitions require decision notes AND a recent gate_decision_log row (within 10min). " +

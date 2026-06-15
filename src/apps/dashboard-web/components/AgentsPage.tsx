@@ -36,7 +36,11 @@ const formatTimeAgo = (dateStr: string) => {
 
 const AgentsPage: React.FC<AgentsPageProps> = ({ agents: propAgents }) => {
 	const [agents, setAgents] = useState<Agent[]>(propAgents || []);
-	const [loading, setLoading] = useState(!propAgents);
+	// P1731 root cause: App always passes a defined (initially EMPTY) sharedAgents
+	// array, so `!propAgents` was always false and the page rendered the
+	// "No agents registered" empty state while the HTTP fallback was still in
+	// flight. Treat an empty initial prop as "still loading".
+	const [loading, setLoading] = useState(!propAgents || propAgents.length === 0);
 	const [error, setError] = useState<string | null>(null);
 	const [sortBy, setSortBy] = useState<
 		"name" | "status" | "lastSeen" | "trustScore"
@@ -57,6 +61,8 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ agents: propAgents }) => {
 	}, []);
 
 	useEffect(() => {
+		// Prefer WebSocket-pushed agents; fall back to HTTP when the WS
+		// snapshot hasn't arrived yet (empty array on first renders).
 		if (propAgents && propAgents.length > 0) {
 			setAgents(propAgents);
 			setLoading(false);

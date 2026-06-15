@@ -19,6 +19,12 @@ import * as runtimeConfig from "../../shared/runtime/config.ts";
 import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 import { ObservabilityWriter } from "../observability/observability-writer.ts";
 import { ROLE_TO_REQUIRED_CAPABILITIES } from "../orchestration/offer-dispatch.ts";
+import {
+	assessDifficulty,
+	isTaskClass,
+	type CapabilityTier,
+	type TaskClass,
+} from "../orchestration/difficulty-assessor.ts";
 import { autoCharterIfNeeded } from "./auto-charter.ts";
 
 const obs = new ObservabilityWriter("agency:offer-pipeline");
@@ -57,6 +63,15 @@ const GATE_CONVERGENCE_MAX_BLOCKING = Number(
 const GATE_CONVERGENCE_MAX_RUNS_PER_ROLE = Number(
 	process.env.AGENTHIVE_GATE_CONVERGENCE_MAX_RUNS_PER_ROLE ?? "8",
 );
+
+/**
+ * P3311: proactive premature-maturity guard (see PrematureGateError). Enabled
+ * by default; set AGENTHIVE_PREMATURE_GATE_GUARD_ENABLED=false to disable (e.g.
+ * if a workflow legitimately matures proposals before any AC is marked passing).
+ */
+const PREMATURE_GATE_GUARD_ENABLED =
+	(process.env.AGENTHIVE_PREMATURE_GATE_GUARD_ENABLED ?? "true").toLowerCase() !==
+	"false";
 
 /**
  * Global cap on alive offers (open or claimed-but-not-completed) across the
@@ -163,6 +178,22 @@ export class ProposalPausedError extends Error {
 // Offer-gen guard: COMPLETE is a terminal state — never post work offers for
 // a completed proposal (operator directive 2026-06-09). scanQueues/legacy-dispatch
 // treat this as skip-and-continue, same shape as ProposalPausedError.
+//
+// P2496: single source of truth for terminal proposal statuses. Reused by the
+// AC-1 guard below, by legacy-dispatch.handleStateChange (AC-5), and by the
+// liaison A2A task bridge (AC-4) so the "no offers for terminal proposals"
+// invariant is enforced at every offer-creation site, not duplicated.
+export const TERMINAL_PROPOSAL_STATUSES: ReadonlySet<string> = new Set([
+	"COMPLETE",
+]);
+
+/** True when `status` is a terminal proposal state (case-insensitive). */
+export function isTerminalProposalStatus(
+	status: string | null | undefined,
+): boolean {
+	return !!status && TERMINAL_PROPOSAL_STATUSES.has(status.toUpperCase());
+}
+
 export class TerminalProposalError extends Error {
 	constructor(
 		readonly proposalId: number,
@@ -197,6 +228,39 @@ export class ConvergenceGuardError extends Error {
 			`postWorkOffer: convergence guard tripped for proposal ${proposalId} (${reasons.join(", ")}). gate_scanner_paused=true.`,
 		);
 		this.name = "ConvergenceGuardError";
+	}
+}
+
+// P3311: proactive premature-maturity guard. A proposal sitting in DEVELOP
+// with maturity='mature' but ZERO passing acceptance criteria (while it DOES
+// have ACs) was never actually built — it was matured by mistake (a closer
+// marking it done without delivering, or a gate batch advancing it). The D3
+// gate then fires its decider role (skeptic-beta) every scan; the gate
+// correctly HOLDs ("no code exists") but a hold doesn't demote maturity, so it
+// re-gates forever until a *reactive* breaker (DispatchLoopError /
+// ConvergenceGuardError) trips after burning 6+ wasted runs and pauses the
+// proposal — which then needs a manual operator unpause.
+//
+// This guard fires BEFORE the reactive breakers: it refuses the gate offer and
+// demotes maturity back to 'new', which routes the proposal to a DEVELOPER on
+// the next scan (DEVELOP/new dispatches dev roles, DEVELOP/mature dispatches
+// gate roles). Self-healing, no operator toil, no wasted gate runs.
+//
+// Deliberately NOT pausing: pause halts and waits for a human; demote re-routes
+// to productive work. Deliberately keyed on passing-AC count (DB-truth) not git
+// commits (not DB-visible from here) — a proposal with passing ACs but a stuck
+// gate (e.g. P1438: gate worker confabulates its verdict) is a DIFFERENT bug
+// (artifact-persistence gap) and is left alone by this guard.
+export class PrematureGateError extends Error {
+	constructor(
+		readonly proposalId: number,
+		readonly role: string,
+		readonly totalAcs: number,
+	) {
+		super(
+			`postWorkOffer: P${proposalId} role=${role} refused — DEVELOP/mature with 0/${totalAcs} passing acceptance criteria (premature maturity). Demoted maturity to 'new' to route to a developer.`,
+		);
+		this.name = "PrematureGateError";
 	}
 }
 
@@ -241,6 +305,19 @@ export interface WorkOfferInput {
 	gateFromStage?: string | null;
 	gateToStage?: string | null;
 	gateRoleSource?: string | null;
+	/**
+	 * P3310 AC-3: explicit operator/proposal overrides. When set to a legal
+	 * value, the difficulty assessor honors these over its heuristic so a
+	 * proposal can pin a tier or task_class. Left undefined for the normal
+	 * heuristic path.
+	 */
+	tierOverride?: CapabilityTier | null;
+	taskClassOverride?: TaskClass | null;
+	/** P1366: Optional worker identity to record at offer creation time.
+	 * Typically left NULL (pending claim); set when the dispatching caller
+	 * already knows which agent will handle the work (e.g. direct A2A dispatch).
+	 */
+	workerIdentity?: string | null;
 }
 
 export interface WorkOfferResult {
@@ -251,6 +328,9 @@ export interface WorkOfferResult {
 	attemptCount: number;
 	/** P908-D: UUID threaded through the offer pipeline for observability trace correlation. */
 	traceId: string;
+	/** P3314: true when posting was skipped because a live offer already exists
+	 *  for this (proposal_id, role). dispatchId points at the existing offer. */
+	deduped?: boolean;
 }
 
 function computeIdempotencyKey(parts: {
@@ -497,6 +577,14 @@ async function postWorkOfferImpl(
 		gate_paused_by: string | null;
 		gate_paused_at: string | null;
 	}>(
+		// NOTE: proposal-pinned difficulty overrides (task_class/tier_override) are
+		// NOT read here — they were SELECTed by P3310 (b63542cc) but the columns
+		// were never migrated onto roadmap_proposal.proposal and the values were
+		// never wired into the assessor (overrides flow via input.tierOverride /
+		// input.taskClassOverride instead). The dead SELECT crashed every dispatch
+		// with 42703 "column task_class does not exist" once the orchestrator
+		// restarted onto this code. Removed. Re-add WITH a migration + ctx→input
+		// wiring if proposal-level pinning is actually built.
 		`SELECT project_id, status, maturity,
 		        gate_scanner_paused, gate_paused_by,
 		        gate_paused_at::text AS gate_paused_at
@@ -512,9 +600,8 @@ async function postWorkOfferImpl(
 	}
 
 	// Terminal-status guard (operator directive): COMPLETE is terminal — refuse before INSERT.
-	const TERMINAL_PROPOSAL_STATUSES = new Set(["COMPLETE"]);
-	if (ctx.status && TERMINAL_PROPOSAL_STATUSES.has(ctx.status.toUpperCase())) {
-		throw new TerminalProposalError(input.proposalId, ctx.status);
+	if (isTerminalProposalStatus(ctx.status)) {
+		throw new TerminalProposalError(input.proposalId, ctx.status as string);
 	}
 
 	if (ctx.gate_scanner_paused) {
@@ -535,6 +622,60 @@ async function postWorkOfferImpl(
 			ctx.gate_paused_by,
 			ctx.gate_paused_at ? new Date(ctx.gate_paused_at) : null,
 		);
+	}
+
+	// P3311: proactive premature-maturity guard. Fires BEFORE the reactive
+	// breakers below so a no-implementation proposal never burns gate runs.
+	// Condition: DEVELOP + mature + has ACs but ZERO passing. Demote to 'new'
+	// (routes to a developer next scan) and refuse this gate offer.
+	if (
+		PREMATURE_GATE_GUARD_ENABLED &&
+		ctx.status?.toUpperCase() === "DEVELOP" &&
+		ctx.maturity?.toLowerCase() === "mature"
+	) {
+		const { rows: acRows } = await queryFn<{ total: number; passing: number }>(
+			`SELECT count(*)::int AS total,
+			        count(*) FILTER (WHERE status = 'pass')::int AS passing
+			   FROM roadmap_proposal.proposal_acceptance_criteria
+			  WHERE proposal_id = $1`,
+			[input.proposalId],
+		);
+		const totalAcs = acRows[0]?.total ?? 0;
+		const passingAcs = acRows[0]?.passing ?? 0;
+		// Only act when there ARE ACs but none pass. Zero-AC proposals are a
+		// separate concern (a gate review should flag the missing ACs) and
+		// demoting them wouldn't help, so leave them to the gate.
+		if (totalAcs > 0 && passingAcs === 0) {
+			// Demote maturity → new so the next scan dispatches a developer
+			// instead of the D3 gate. Idempotent (only flips a currently-mature
+			// row); also clears any stale pause so the demoted proposal can flow.
+			await queryFn(
+				`UPDATE roadmap_proposal.proposal
+				    SET maturity = 'new',
+				        gate_scanner_paused = false,
+				        gate_paused_by = NULL,
+				        gate_paused_at = NULL
+				  WHERE id = $1 AND maturity = 'mature' AND status = 'DEVELOP'`,
+				[input.proposalId],
+			);
+			await queryFn(
+				`INSERT INTO roadmap.notification_queue
+				   (proposal_id, severity, kind, title, body, metadata)
+				 VALUES ($1, 'INFO', 'premature_maturity_demoted', $2, $3, $4::jsonb)`,
+				[
+					input.proposalId,
+					`Premature maturity demoted for proposal ${input.proposalId}`,
+					`postWorkOffer refused a gate offer for role "${input.role}": proposal is DEVELOP/mature with 0/${totalAcs} passing acceptance criteria (no implementation evidence). Maturity demoted to 'new' to route to a developer. This pre-empts the D3 gate loop.`,
+					JSON.stringify({
+						proposal_id: input.proposalId,
+						role: input.role,
+						total_acs: totalAcs,
+						passing_acs: passingAcs,
+					}),
+				],
+			);
+			throw new PrematureGateError(input.proposalId, input.role, totalAcs);
+		}
 	}
 
 	// P1729: cumulative convergence guard. Check if blocking review count or
@@ -630,15 +771,20 @@ async function postWorkOfferImpl(
 		throw new DispatchLoopError(input.proposalId, input.role, recentRuns);
 	}
 
-	// P1289 AC-3 + P1290 AC-1: Pre-flight dispatchability check. Throw
-	// CapabilityMismatchError (and INSERT nothing) if no active agency advertises
-	// the required capabilities. Mirrors the full resolveAgency predicate at
-	// agency-resolver.ts:130 — provider_registry.capabilities->'jobs' AND
-	// v_agency_status.dispatchable (which a2a-host's fn_pulse keeps fresh via
-	// roadmap.agency.presence_state). Checking provider_registry.status alone
-	// was stricter than the matcher and rejected offers the matcher would have
-	// claimed when only the new generic a2a-host (P1132) is running and no
-	// per-agency service updates provider_registry.status.
+	// P1289 AC-3 + P1290 AC-1: Pre-flight CAPABILITY check. Throw
+	// CapabilityMismatchError (and INSERT nothing) only if NO registered agency is
+	// CAPABLE of the required role — a durable capability gap, not a transient
+	// availability state.
+	//
+	// P1438 AC-16 (C6 emergent availability): posting must NOT depend on
+	// roadmap.agency.dispatchable / provider heartbeat / bridge liveness. The old
+	// preflight also required `v_agency_status.dispatchable = true`, which is
+	// heartbeat-derived — so a parked cold-wake liaison (the mandated V3 model)
+	// would make the offer never post. Now we post the open-pool offer whenever a
+	// capable agency EXISTS; availability is revealed later by a successful claim
+	// (an asleep liaison simply doesn't claim, and the offer waits in the pool /
+	// is reaped per policy). fn_claim_work_offer remains the atomic availability
+	// truth and carries no presence prerequisite.
 	// checkCaps falls back to ROLE_TO_REQUIRED_CAPABILITIES if the caller didn't
 	// supply requiredCapabilities, so the preflight always has a value to check
 	// against rather than silently skipping.
@@ -650,12 +796,10 @@ async function postWorkOfferImpl(
 			`SELECT count(*)::int AS count
 			   FROM roadmap_workforce.provider_registry pr
 			   JOIN roadmap_workforce.agent_registry ar ON ar.id = pr.agency_id
-			   LEFT JOIN roadmap.v_agency_status vas ON vas.agency_id = ar.agent_identity
 			  WHERE pr.status NOT IN ('offline', 'retired')
 			    AND ar.status = 'active'
 			    AND ar.agent_type <> 'coordinator'
 			    AND ar.agent_identity NOT LIKE 'test/%'
-			    AND (vas.agency_id IS NULL OR vas.dispatchable = true)
 			    AND (pr.capabilities->'jobs') ?| $1::text[]`,
 			[checkCaps],
 		);
@@ -668,6 +812,35 @@ async function postWorkOfferImpl(
 		}
 	}
 
+	// P3314: offer-dedup guard. The orchestrator re-posts the same (proposal, role)
+	// every scan cycle (~15 min). Because the idempotency_key includes
+	// dispatch_version, each re-post is a NEW row (the ON CONFLICT below only
+	// matches an identical key), so the open pool fills with duplicate offers —
+	// fatal under ORCHESTRATOR_MAX_INFLIGHT_OFFERS=1 (V3 phase-1). In the open-pool
+	// model exactly one live offer per (proposal, role) is needed: whoever claims
+	// it wins. Skip the INSERT (and the wake NOTIFY) when a live, non-expired offer
+	// already exists; the existing offer stays in the pool for the AI liaison.
+	const { rows: liveDup } = await queryFn<{ id: number }>(
+		`SELECT id FROM roadmap_workforce.squad_dispatch
+		  WHERE proposal_id = $1 AND dispatch_role = $2
+		    AND offer_status IN ('open', 'claimed', 'active')
+		    AND (claim_expires_at IS NULL OR claim_expires_at > now())
+		  ORDER BY id
+		  LIMIT 1`,
+		[input.proposalId, input.role],
+	);
+	if (liveDup[0]?.id) {
+		// A live offer for this (proposal, role) already exists — skip the INSERT and
+		// the wake NOTIFY; the existing offer stays in the pool for the AI liaison.
+		return {
+			dispatchId: liveDup[0].id,
+			replay: false,
+			attemptCount: 0,
+			traceId,
+			deduped: true,
+		};
+	}
+
 	const idempotencyKey = computeIdempotencyKey({
 		projectId: ctx.project_id,
 		proposalId: input.proposalId,
@@ -677,6 +850,48 @@ async function postWorkOfferImpl(
 		version: dispatchVersion,
 	});
 
+	// P3310 AC-1: run the deterministic difficulty assessor at mint time and
+	// persist difficulty_score + required_capability_tier + task_class on the
+	// squad_dispatch row. Signals: AC count (blast radius proxy) and prior
+	// failed/expired dispatches for this (proposal, role) tuple (rework_count).
+	// Best-effort: a signal-fetch failure must never block dispatch — fall back
+	// to zeroed signals so the assessor still emits a (low) tier.
+	let assessAcCount = 0;
+	let assessReworkCount = 0;
+	try {
+		const { rows: sig } = await queryFn<{ ac_count: number; rework_count: number }>(
+			`SELECT
+			    (SELECT count(*)::int
+			       FROM roadmap_proposal.proposal_acceptance_criteria
+			      WHERE proposal_id = $1) AS ac_count,
+			    (SELECT count(*)::int
+			       FROM roadmap_workforce.squad_dispatch
+			      WHERE proposal_id = $1
+			        AND dispatch_role = $2
+			        AND dispatch_status IN ('failed', 'cancelled', 'completed')) AS rework_count`,
+			[input.proposalId, input.role],
+		);
+		assessAcCount = sig[0]?.ac_count ?? 0;
+		assessReworkCount = sig[0]?.rework_count ?? 0;
+	} catch {
+		// swallow — assessment signals are advisory, not load-bearing for dispatch
+	}
+
+	const assessment = assessDifficulty({
+		role: input.role,
+		task: input.task,
+		acCount: assessAcCount,
+		reworkCount: assessReworkCount,
+		tierOverride: input.tierOverride ?? null,
+		taskClassOverride: isTaskClass(input.taskClassOverride)
+			? input.taskClassOverride
+			: null,
+	});
+	// Mirror into metadata for observability / trace correlation.
+	metadata.difficulty_score = assessment.difficultyScore;
+	metadata.required_capability_tier = assessment.requiredCapabilityTier;
+	metadata.task_class = assessment.taskClass;
+
 	const { rows } = await queryFn<{
 		id: number;
 		attempt_count: number;
@@ -684,14 +899,19 @@ async function postWorkOfferImpl(
 	}>(
 		`INSERT INTO roadmap_workforce.squad_dispatch
 		   (proposal_id, project_id, squad_name, dispatch_role, dispatch_status,
-		    offer_status, agent_identity, required_capabilities, metadata,
-		    workflow_state, idempotency_key, dispatch_version, attempt_count)
-		 VALUES ($1, $2, $3, $4, 'open', 'open', NULL, $5::jsonb, $6::jsonb,
-		         $7, $8, $9, 1)
+		    offer_status, agent_identity, worker_identity, required_capabilities, metadata,
+		    workflow_state, idempotency_key, dispatch_version, attempt_count,
+		    difficulty_score, required_capability_tier, task_class)
+		 VALUES ($1, $2, $3, $4, 'open', 'open', NULL, $5, $6::jsonb, $7::jsonb,
+		         $8, $9, $10, 1,
+		         $11::double precision, $12, $13)
 		 ON CONFLICT (idempotency_key)
 		   WHERE dispatch_status IN ('open', 'assigned', 'active')
 		 DO UPDATE SET
 		   attempt_count = squad_dispatch.attempt_count + 1,
+		   difficulty_score = EXCLUDED.difficulty_score,
+		   required_capability_tier = EXCLUDED.required_capability_tier,
+		   task_class = COALESCE(EXCLUDED.task_class, squad_dispatch.task_class),
 		   metadata = squad_dispatch.metadata
 		            || jsonb_build_object(
 		                 'last_replay_at', to_jsonb(now()),
@@ -705,11 +925,15 @@ async function postWorkOfferImpl(
 			ctx.project_id ?? null,
 			input.squadName,
 			input.role,
+			input.workerIdentity ?? null,
 			caps,
 			JSON.stringify(metadata),
 			ctx.status ?? null,
 			idempotencyKey,
 			dispatchVersion,
+			assessment.difficultyScore,
+			assessment.requiredCapabilityTier,
+			assessment.taskClass,
 		],
 	);
 

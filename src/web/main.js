@@ -177459,7 +177459,7 @@ var formatTimeAgo2 = (dateStr) => {
 };
 var AgentsPage = ({ agents: propAgents }) => {
   const [agents, setAgents] = import_react8.useState(propAgents || []);
-  const [loading, setLoading] = import_react8.useState(!propAgents);
+  const [loading, setLoading] = import_react8.useState(!propAgents || propAgents.length === 0);
   const [error, setError] = import_react8.useState(null);
   const [sortBy, setSortBy] = import_react8.useState("name");
   const [selectedIdentity, setSelectedIdentity] = import_react8.useState(null);
@@ -235920,7 +235920,8 @@ function toSharedAgent(agent) {
     capabilities: [],
     trustScore: 0,
     lastSeen: agent.lastSeenAt,
-    status: agent.isActive ? "active" : "offline"
+    status: agent.isActive ? "active" : "offline",
+    costClass: undefined
   };
 }
 function toSharedChannel(channel2) {

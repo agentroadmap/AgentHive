@@ -18,6 +18,7 @@ import {
 	verifyBoundBearer,
 } from "../../core/identity/principal-identity.ts";
 import {
+	defaultTrustTierForKind,
 	type McpAuthEnvelope,
 	PrincipalVerifier,
 	type VerifiedPrincipal,
@@ -38,6 +39,7 @@ import {
 } from "../../shared/identity/agent-context.ts";
 import { getPackageName } from "../../shared/utils/app-info.ts";
 import { getVersion } from "../../shared/utils/version.ts";
+import { handleMcpError } from "./errors/mcp-errors.ts";
 import { registerInitRequiredResource } from "./resources/init-required/index.ts";
 import { registerWorkflowResources } from "./resources/workflow/index.ts";
 import { registerAgentTools } from "./tools/agents/index.ts";
@@ -47,25 +49,28 @@ import { registerDependencyTools } from "./tools/dependencies/index.ts";
 import { registerDocumentTools } from "./tools/documents/index.ts";
 import { registerKnowledgeTools } from "./tools/knowledge/index.ts";
 import { registerMessageTools } from "./tools/messages/index.ts";
+import {
+	extractBearerFromHeader,
+	logBearerRejection,
+	verifyUserBearer,
+} from "./tools/messages/user-bearer-auth.ts";
 import { registerMilestoneTools } from "./tools/milestones/index.ts";
 import { registerNoteTools } from "./tools/notes/index.ts";
 import { registerProjectTools } from "./tools/projects/index.ts";
 import { registerProposalTools as registerFilesystemProposalTools } from "./tools/proposals/index.ts";
 import { registerProtocolTools } from "./tools/protocol/index.ts";
-import { registerTeamTools, registerTeamGovernanceTools } from "./tools/teams/index.ts";
+import { registerScanTools } from "./tools/scan/index.ts";
+import {
+	registerTeamGovernanceTools,
+	registerTeamTools,
+} from "./tools/teams/index.ts";
 import { registerTestingTools } from "./tools/testing/index.ts";
 import { registerWorkflowTools } from "./tools/workflow/index.ts";
 import { registerWorktreeMergeTools } from "./tools/worktree-merge/index.ts";
-import { registerScanTools } from "./tools/scan/index.ts";
-import { handleMcpError } from "./errors/mcp-errors.ts";
-import {
-	verifyUserBearer,
-	logBearerRejection,
-	extractBearerFromHeader,
-} from "./tools/messages/user-bearer-auth.ts";
 import type {
 	CallToolResult,
 	GetPromptResult,
+	isClearanceAllowed,
 	ListPromptsResult,
 	ListResourcesResult,
 	ListResourceTemplatesResult,
@@ -74,6 +79,8 @@ import type {
 	McpResourceHandler,
 	McpToolHandler,
 	ReadResourceResult,
+	ToolClearance,
+	TrustTier,
 } from "./types.ts";
 
 /**
@@ -102,18 +109,45 @@ const CONSOLIDATED_TOOL_NAMES = new Set([
 
 // P843: Auth enforcement mode flag (default log-only)
 const P843_AUTH_ENFORCE_MCP = process.env.P843_AUTH_ENFORCE_MCP === "true";
+// P1114: when true, per-tool trust_tier clearance violations return 403. Default
+// false (log-only) during rollout — see CONVENTIONS clearance section.
+const P1114_ENFORCE_CLEARANCE = process.env.P1114_ENFORCE_CLEARANCE === "true";
 
 // P843: Write auth decision to audit log (non-blocking, fire-and-forget)
+/**
+ * P1114 clearance context attached to an auth decision (all optional; populated
+ * by the clearance middleware, NULL for plain P843 auth decisions).
+ */
+interface ClearanceContext {
+	scope?: string;
+	tier_required?: string;
+	tier_actual?: string;
+	reason?: string;
+}
+
 async function writeAuthDecisionLog(
 	principalId: string | null,
 	toolName: string,
-	result: "allowed" | "denied" | "unauthenticated",
+	decision: "allowed" | "denied" | "unauthenticated",
+	clearance?: ClearanceContext,
 ): Promise<void> {
 	try {
+		// P1114: column is `decision` (the prior INSERT named a nonexistent
+		// `result` column, so every auth decision write silently failed). Now
+		// also records the clearance-check context when present.
 		await query(
-			`INSERT INTO control_identity.auth_decision_log (principal_id, tool_name, result)
-			 VALUES ($1, $2, $3)`,
-			[principalId, toolName, result],
+			`INSERT INTO control_identity.auth_decision_log
+			   (principal_id, tool_name, decision, scope, tier_required, tier_actual, reason)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+			[
+				principalId,
+				toolName,
+				decision,
+				clearance?.scope ?? null,
+				clearance?.tier_required ?? null,
+				clearance?.tier_actual ?? null,
+				clearance?.reason ?? null,
+			],
 		);
 	} catch {
 		// Non-fatal: auth decision logging never blocks tool execution
@@ -354,7 +388,13 @@ export class McpServer extends Core {
 				await query(
 					`INSERT INTO roadmap.trace_span (operation_type, service_did, attributes, status, started_at, ended_at)
 					 VALUES ($1, $2, $3, $4, now() - interval '1 ms' * $5, now())`,
-					['mcp_tool_call', 'mcp-server', JSON.stringify({ tool_name: name, duration_ms }), 'error', duration_ms],
+					[
+						"mcp_tool_call",
+						"mcp-server",
+						JSON.stringify({ tool_name: name, duration_ms }),
+						"error",
+						duration_ms,
+					],
 				);
 			} catch (_err) {
 				// Trace span write failures are non-fatal
@@ -398,7 +438,17 @@ export class McpServer extends Core {
 						await query(
 							`INSERT INTO roadmap.trace_span (operation_type, service_did, attributes, status, started_at, ended_at)
 							 VALUES ($1, $2, $3, $4, now() - interval '1 ms' * $5, now())`,
-							['mcp_tool_call', 'mcp-server', JSON.stringify({ tool_name: name, duration_ms, reason: 'auth_denied' }), 'error', duration_ms],
+							[
+								"mcp_tool_call",
+								"mcp-server",
+								JSON.stringify({
+									tool_name: name,
+									duration_ms,
+									reason: "auth_denied",
+								}),
+								"error",
+								duration_ms,
+							],
 						);
 					} catch (_err) {
 						// Trace span write failures are non-fatal
@@ -415,12 +465,67 @@ export class McpServer extends Core {
 					await query(
 						`INSERT INTO roadmap.trace_span (operation_type, service_did, attributes, status, started_at, ended_at)
 						 VALUES ($1, $2, $3, $4, now() - interval '1 ms' * $5, now())`,
-						['mcp_tool_call', 'mcp-server', JSON.stringify({ tool_name: name, duration_ms, reason: 'no_auth_envelope' }), 'error', duration_ms],
+						[
+							"mcp_tool_call",
+							"mcp-server",
+							JSON.stringify({
+								tool_name: name,
+								duration_ms,
+								reason: "no_auth_envelope",
+							}),
+							"error",
+							duration_ms,
+						],
 					);
 				} catch (_err) {
 					// Trace span write failures are non-fatal
 				}
 				throw new Error("[P843] No auth envelope");
+			}
+		}
+
+		// P1114: per-tool trust_tier clearance check — runs after identity
+		// resolution, before handler dispatch. Log-only by default; returns a
+		// clearance error only when P1114_ENFORCE_CLEARANCE=true. In log-only mode
+		// only tools that DECLARE a clearance are evaluated (avoids flooding the
+		// audit log for the not-yet-annotated tools); when enforcing, an
+		// undeclared tool fails closed to {authority, admin}.
+		{
+			const required: ToolClearance | null =
+				tool.clearance ??
+				(P1114_ENFORCE_CLEARANCE
+					? { min_tier: "authority", scope: "admin" }
+					: null);
+			if (required) {
+				const callerTier = (verifiedPrincipal?.trust_tier ??
+					(verifiedPrincipal
+						? defaultTrustTierForKind(verifiedPrincipal.principal_kind)
+						: "external_proxy")) as TrustTier;
+				const allowed = isClearanceAllowed(callerTier, required.min_tier);
+				if (!allowed) {
+					await writeAuthDecisionLog(
+						verifiedPrincipal?.principal_id ?? null,
+						name,
+						"denied",
+						{
+							scope: required.scope,
+							tier_required: required.min_tier,
+							tier_actual: callerTier,
+							reason: "tier_too_low",
+						},
+					);
+					if (P1114_ENFORCE_CLEARANCE) {
+						return {
+							isError: true,
+							content: [
+								{
+									type: "text",
+									text: `⛔ [P1114] clearance denied: ${name} requires trust_tier '${required.min_tier}' (scope ${required.scope}); caller is '${callerTier}'.`,
+								},
+							],
+						};
+					}
+				}
 			}
 		}
 
@@ -464,7 +569,18 @@ export class McpServer extends Core {
 					await query(
 						`INSERT INTO roadmap.trace_span (operation_type, service_did, attributes, status, started_at, ended_at)
 						 VALUES ($1, $2, $3, $4, now() - interval '1 ms' * $5, now())`,
-						['mcp_tool_call', 'mcp-server', JSON.stringify({ tool_name: name, duration_ms, reason: 'grant_denied', requested_op: requestedOp }), 'error', duration_ms],
+						[
+							"mcp_tool_call",
+							"mcp-server",
+							JSON.stringify({
+								tool_name: name,
+								duration_ms,
+								reason: "grant_denied",
+								requested_op: requestedOp,
+							}),
+							"error",
+							duration_ms,
+						],
 					);
 				} catch (_err) {
 					// Trace span write failures are non-fatal
@@ -504,7 +620,10 @@ export class McpServer extends Core {
 				   (trace_id, operation, service_did, attributes, status, ended_at)
 				 VALUES (gen_random_uuid(), 'mcp_tool_call', 'operator:mcp-server', $1, $2, now())`,
 				[
-					JSON.stringify({ tool_name: name, duration_ms: Math.round(durationMs * 10) / 10 }),
+					JSON.stringify({
+						tool_name: name,
+						duration_ms: Math.round(durationMs * 10) / 10,
+					}),
 					handlerError || result.isError ? "error" : "ok",
 				],
 			);
@@ -550,7 +669,13 @@ export class McpServer extends Core {
 			await query(
 				`INSERT INTO roadmap.trace_span (operation_type, service_did, attributes, status, started_at, ended_at)
 				 VALUES ($1, $2, $3, $4, now() - interval '1 ms' * $5, now())`,
-				['mcp_tool_call', 'mcp-server', JSON.stringify({ tool_name: name, duration_ms }), 'ok', duration_ms],
+				[
+					"mcp_tool_call",
+					"mcp-server",
+					JSON.stringify({ tool_name: name, duration_ms }),
+					"ok",
+					duration_ms,
+				],
 			);
 		} catch (_err) {
 			// Trace span write failures are non-fatal
@@ -907,7 +1032,10 @@ export async function createMcpServer(
 				console.error("[MCP] Boot scratch orphan reap complete");
 			}
 		} catch (error) {
-			console.error("[MCP] Boot scratch orphan reap failed (non-fatal):", error);
+			console.error(
+				"[MCP] Boot scratch orphan reap failed (non-fatal):",
+				error,
+			);
 		}
 
 		// V2 agentHive2 connectivity check (P826) — non-fatal, opt-in via env
@@ -917,6 +1045,29 @@ export async function createMcpServer(
 			);
 			void verifyAgentHive2Connection(
 				process.env.AGENTHIVE_V2_PROJECT_SCHEMA ?? "agentHive",
+			);
+		}
+
+		// P1072 AC-14/26: select the active vault provider from the hiveCentral
+		// control plane (control_credential.vault_provider) once the control pool
+		// is reachable, but before any tool calls getVault(). This runs on EVERY
+		// boot (not gated on the V2 opt-in env) because the control plane / vault
+		// provider lives in hiveCentral, which is always present — the V2 flag
+		// only governs the optional agentHive2 tenant DB. initVaultFromDb() is
+		// idempotent (AC-18) and honours the AGENTHIVE_VAULT_KIND env override
+		// (AC-19), so this is safe to call unconditionally. Non-fatal: logs
+		// "[vault] Adapter initialized from DB: ..." on success, or keeps the
+		// env/file fallback adapter and logs a warning on any failure (AC-24).
+		try {
+			const { initVaultFromDb } = await import("../../shared/vault/index.ts");
+			await initVaultFromDb();
+		} catch (error) {
+			// Defensive: initVaultFromDb() already swallows DB errors internally
+			// and returns the fallback adapter, so reaching here is unexpected —
+			// but never let vault init crash MCP boot.
+			console.error(
+				"[vault] DB init failed (env fallback active):",
+				(error as Error).message,
 			);
 		}
 
@@ -936,20 +1087,43 @@ export async function createMcpServer(
 		type SubscribeArgs = Parameters<typeof msg.subscribe>[0];
 		type ListSubscriptionsArgs = Parameters<typeof msg.listSubscriptions>[0];
 		server.addTool({
+			// P1114 AC-6: messaging write (peer-to-peer) — MEDIUM tier.
+			clearance: { min_tier: "known", scope: "peer_write" },
 			name: "msg_send",
-			description: "Send message via Postgres message_ledger. P159: Optional _signature for Ed25519 identity verification (soft-fail mode by default).",
+			description:
+				"Send message via Postgres message_ledger. P159: Optional _signature for Ed25519 identity verification (soft-fail mode by default).",
 			inputSchema: {
 				type: "object",
 				properties: {
 					from_agent: { type: "string" },
+					from: { type: "string", description: "Alias for from_agent" },
 					to_agent: { type: "string" },
+					to: { type: "string", description: "Alias for to_agent" },
 					channel: { type: "string" },
-					message_content: { type: "string" },
+					message_content: { type: "string", description: "Message text. Aliases: content, message, text, body, note, notes, task, brief." },
+					content: { type: "string", description: "Alias for message_content" },
+					message: { type: "string", description: "Alias for message_content" },
+					text: { type: "string", description: "Alias for message_content" },
+					body: { type: "string", description: "Alias for message_content" },
+					note: { type: "string", description: "Alias for message_content" },
+					notes: { type: "string", description: "Alias for message_content" },
+					task: { type: "string", description: "Alias for message_content" },
+					brief: { type: "string", description: "Alias for message_content" },
 					message_type: { type: "string" },
 					proposal_id: { type: "string" },
-					_signature: { type: "string", description: "P159: Optional hex-encoded Ed25519 signature over message_content" },
+					correlation_id: { type: "string" },
+					metadata: {
+						type: "object",
+						description: "Structured metadata persisted to message_ledger.metadata.",
+						additionalProperties: true,
+					},
+					_signature: {
+						type: "string",
+						description:
+							"P159: Optional hex-encoded Ed25519 signature over message_content",
+					},
 				},
-				required: ["from_agent", "message_content"],
+				required: [],
 			},
 			handler: (a) => msg.sendMessage(a as SendMessageArgs),
 		});
@@ -1061,8 +1235,14 @@ export async function createMcpServer(
 			inputSchema: {
 				type: "object",
 				properties: {
-					identity: { type: "string", description: "Agent identity (canonical key)" },
-					agent_type: { type: "string", description: "e.g. 'agency', 'llm', 'tool'" },
+					identity: {
+						type: "string",
+						description: "Agent identity (canonical key)",
+					},
+					agent_type: {
+						type: "string",
+						description: "e.g. 'agency', 'llm', 'tool'",
+					},
 					role: { type: "string", description: "e.g. 'liaison', 'developer'" },
 					skills: {
 						type: "string",
@@ -1075,7 +1255,8 @@ export async function createMcpServer(
 					},
 					agent_cli: {
 						type: "string",
-						description: "CLI command this agent uses (e.g. 'claude', 'gemini')",
+						description:
+							"CLI command this agent uses (e.g. 'claude', 'gemini')",
 					},
 					host_affinity: {
 						type: "string",
@@ -1286,11 +1467,15 @@ export async function createMcpServer(
 							'JSON object, e.g. \'{"tool_use":true,"vision":true}\'',
 					},
 					rating: { type: "string" },
-					is_active: { type: "string", description: "'true' or 'false' to activate/deactivate" },
+					is_active: {
+						type: "string",
+						description: "'true' or 'false' to activate/deactivate",
+					},
 					tier: {
 						type: "string",
 						enum: ["frontier", "standard", "economy"],
-						description: "Model tier: frontier (GPT-4o, Claude Opus/Sonnet), standard (GPT-4o-mini, Claude Haiku), economy (Llama, open-source)",
+						description:
+							"Model tier: frontier (GPT-4o, Claude Opus/Sonnet), standard (GPT-4o-mini, Claude Haiku), economy (Llama, open-source)",
 					},
 				},
 				required: ["model_name"],
@@ -1429,15 +1614,22 @@ export async function createMcpServer(
 		type TeamMemListArgs = Parameters<typeof memory.teamMemList>[0];
 		server.addTool({
 			name: "team_mem_set",
-			description: "Set a team-scoped shared memory entry (squad decisions, durable knowledge)",
+			description:
+				"Set a team-scoped shared memory entry (squad decisions, durable knowledge)",
 			inputSchema: {
 				type: "object",
 				properties: {
 					team_name: { type: "string", description: "Team/squad identifier" },
 					key: { type: "string", description: "Memory key" },
 					value: { type: "string", description: "JSON-serializable value" },
-					created_by: { type: "string", description: "Agent identity writing this entry" },
-					expires_in_days: { type: "number", description: "TTL in days (omit for no expiry)" },
+					created_by: {
+						type: "string",
+						description: "Agent identity writing this entry",
+					},
+					expires_in_days: {
+						type: "number",
+						description: "TTL in days (omit for no expiry)",
+					},
 				},
 				required: ["team_name", "key", "value"],
 			},
@@ -1901,13 +2093,20 @@ export async function createMcpServer(
 				properties: {},
 				additionalProperties: false,
 			},
-			handler: async (): Promise<{ content: Array<{ type: "text"; text: string }> }> => {
+			handler: async (): Promise<{
+				content: Array<{ type: "text"; text: string }>;
+			}> => {
 				const { Client } = await import("pg");
 				const host = process.env.PGHOST ?? "127.0.0.1";
 				const port = Number(process.env.PGPORT ?? 6432);
 				const adminUser =
 					process.env.PGBOUNCER_ADMIN_USER ?? process.env.PGUSER ?? "pgbouncer";
-				const client = new Client({ host, port, user: adminUser, database: "pgbouncer" });
+				const client = new Client({
+					host,
+					port,
+					user: adminUser,
+					database: "pgbouncer",
+				});
 				try {
 					await client.connect();
 					const [poolsRes, statsRes] = await Promise.all([
@@ -2012,10 +2211,29 @@ export async function createMcpServer(
 		handler: (a) => workforce.workerRegisterHandler(a),
 	});
 
+	// P1698 AC-1/5: agency_cap_list — read current dispatch capacity
+	server.addTool({
+		name: "agency_cap_list",
+		description:
+			"List all agencies with current dispatch capacity: max_in_flight, in_flight_count, and status. " +
+			"Read-only snapshot from provider_registry and v_agency_in_flight.",
+		inputSchema: workforceSchemas.agencyCapListSchema,
+		handler: (a) => workforce.agencyCapListHandler(a),
+	});
+
+	// P1698 AC-2/6: agency_cap_set — set max_in_flight with audit trail
+	server.addTool({
+		name: "agency_cap_set",
+		description:
+			"Set max_in_flight capacity for an agency (P1698). Validates agency exists, " +
+			"max_in_flight >= 0 required (0 = paused, all claims blocked). Writes audit row to " +
+			"message_ledger with message_type='agency_cap_change'; fires NOTIFY core_changed.",
+		inputSchema: workforceSchemas.agencyCapSetSchema,
+		handler: (a) => workforce.agencyCapSetHandler(a),
+	});
+
 	// P917: Agency lifecycle tools — liaison registration, project join/leave, status
-	const liaisonHandlers = await import(
-		"./tools/agency/liaison-pg-handlers.ts"
-	);
+	const liaisonHandlers = await import("./tools/agency/liaison-pg-handlers.ts");
 	server.addTool({
 		name: "agency_bootstrap",
 		description:
@@ -2025,14 +2243,35 @@ export async function createMcpServer(
 		inputSchema: {
 			type: "object",
 			properties: {
-				agency_id: { type: "string", description: "Canonical agency identity (e.g. anthropic/hermes)" },
+				agency_id: {
+					type: "string",
+					description: "Canonical agency identity (e.g. anthropic/hermes)",
+				},
 				display_name: { type: "string", description: "Human-readable name" },
-				provider: { type: "string", description: "Provider prefix (e.g. anthropic, openai)" },
+				provider: {
+					type: "string",
+					description: "Provider prefix (e.g. anthropic, openai)",
+				},
 				host_id: { type: "string", description: "Host machine identifier" },
-				capabilities: { type: "array", items: { type: "string" }, description: "Capability tags" },
-				capacity_envelope: { type: "object", additionalProperties: true, description: "Capacity metadata (concurrency, slots, …)" },
-				public_key: { type: "string", description: "Optional public key for identity verification" },
-				metadata: { type: "object", additionalProperties: true, description: "Arbitrary metadata bag" },
+				capabilities: {
+					type: "array",
+					items: { type: "string" },
+					description: "Capability tags",
+				},
+				capacity_envelope: {
+					type: "object",
+					additionalProperties: true,
+					description: "Capacity metadata (concurrency, slots, …)",
+				},
+				public_key: {
+					type: "string",
+					description: "Optional public key for identity verification",
+				},
+				metadata: {
+					type: "object",
+					additionalProperties: true,
+					description: "Arbitrary metadata bag",
+				},
 			},
 			required: ["agency_id", "display_name", "provider", "host_id"],
 			additionalProperties: false,
@@ -2049,8 +2288,15 @@ export async function createMcpServer(
 			type: "object",
 			properties: {
 				agency_id: { type: "string", description: "Agency identity" },
-				project_slug: { type: "string", description: "Project name/slug to join" },
-				capabilities: { type: "array", items: { type: "string" }, description: "Override capabilities for this project" },
+				project_slug: {
+					type: "string",
+					description: "Project name/slug to join",
+				},
+				capabilities: {
+					type: "array",
+					items: { type: "string" },
+					description: "Override capabilities for this project",
+				},
 			},
 			required: ["agency_id", "project_slug"],
 			additionalProperties: false,
@@ -2066,7 +2312,10 @@ export async function createMcpServer(
 			type: "object",
 			properties: {
 				agency_id: { type: "string", description: "Agency identity" },
-				project_slug: { type: "string", description: "Project name/slug to leave" },
+				project_slug: {
+					type: "string",
+					description: "Project name/slug to leave",
+				},
 			},
 			required: ["agency_id", "project_slug"],
 			additionalProperties: false,
@@ -2082,13 +2331,86 @@ export async function createMcpServer(
 		inputSchema: {
 			type: "object",
 			properties: {
-				agency_id: { type: "string", description: "Optional agency identity; omit to list all dispatchable agencies" },
+				agency_id: {
+					type: "string",
+					description:
+						"Optional agency identity; omit to list all dispatchable agencies",
+				},
 			},
 			additionalProperties: false,
 		},
 		handler: (a) => liaisonHandlers.handleAgencyLiaisonStatus(a as any),
 	});
-	console.error("[MCP] Registered 4 P917 agency lifecycle tools (v0.37.1-george)");
+	console.error(
+		"[MCP] Registered 4 P917 agency lifecycle tools (v0.37.1-george)",
+	);
+
+	// P1109 Tier-2: presence + listener-subscription via MCP. These wrap the raw
+	// `SELECT roadmap.fn_pulse(...)` and roadmap.listener_subscription bookkeeping
+	// that agency processes used to issue directly.
+	const presenceHandlers = await import(
+		"./tools/agency/agent-presence-handlers.ts"
+	);
+	server.addTool({
+		name: "agent_pulse",
+		description:
+			"P1109 Tier-2: update an agency presence heartbeat via MCP instead of raw " +
+			"SELECT roadmap.fn_pulse(...). Atomically sets roadmap.agency.last_heartbeat_at = now() " +
+			"and presence_state. Returns { success, agency_id, presence_state, last_heartbeat_at }.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				agency_id: { type: "string", description: "Agency identity" },
+				state: {
+					type: "string",
+					enum: ["online", "busy", "away", "offline"],
+					description: "Presence state to record",
+				},
+			},
+			required: ["agency_id", "state"],
+			additionalProperties: false,
+		},
+		handler: (a) => presenceHandlers.agentPulseHandler(a as any),
+	});
+	server.addTool({
+		name: "agent_subscribe",
+		description:
+			"P1109 Tier-2: record (or refresh) a listener presence row in " +
+			"roadmap.listener_subscription via MCP. Audit/poll-mode entrypoint: records the " +
+			"server backend pid. In-process LISTEN owners record their own client's pid via " +
+			"recordListenerSubscription (see liaison-agent.ts). Returns { success, agent_identity, channel, established_pid }.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				agent_identity: { type: "string", description: "Agency/agent identity" },
+				channel: {
+					type: "string",
+					description: "Notification channel being listened on (e.g. msg_<identity>)",
+				},
+			},
+			required: ["agent_identity", "channel"],
+			additionalProperties: false,
+		},
+		handler: (a) => presenceHandlers.handleAgentSubscribe(a as any),
+	});
+	server.addTool({
+		name: "agent_unsubscribe",
+		description:
+			"P1109 Tier-2: remove a listener presence row from roadmap.listener_subscription " +
+			"via MCP on clean shutdown, so the reconcile functions don't report it stale. " +
+			"Returns { success, agent_identity, channel }.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				agent_identity: { type: "string", description: "Agency/agent identity" },
+				channel: { type: "string", description: "Notification channel" },
+			},
+			required: ["agent_identity", "channel"],
+			additionalProperties: false,
+		},
+		handler: (a) => presenceHandlers.handleAgentUnsubscribe(a as any),
+	});
+	console.error("[MCP] Registered 3 P1109 Tier-2 presence/subscription tools");
 
 	// P297: State machine management tools
 	server.addTool({
@@ -2431,7 +2753,9 @@ export async function createMcpServer(
 	});
 
 	// P1385: MCP agency work transport — long-poll subscribe, submit result, heartbeat
-	const workTransportHandlers = await import("./tools/agency/work-transport-handlers.ts");
+	const workTransportHandlers = await import(
+		"./tools/agency/work-transport-handlers.ts"
+	);
 
 	server.addTool({
 		name: "agency_subscribe",
@@ -2458,7 +2782,8 @@ export async function createMcpServer(
 				},
 				authorization: {
 					type: "string",
-					description: "Bearer token (format: 'Bearer <token>'); checked when MCP_AGENCY_AUTH=on",
+					description:
+						"Bearer token (format: 'Bearer <token>'); checked when MCP_AGENCY_AUTH=on",
 				},
 			},
 			required: ["agency_identity"],
@@ -2658,23 +2983,31 @@ export async function createMcpServer(
 		}),
 	});
 
-	console.error("[MCP] Registered 9 P466/P468/P475 spawn-briefing tools (liaison protocol)");
+	console.error(
+		"[MCP] Registered 9 P466/P468/P475 spawn-briefing tools (liaison protocol)",
+	);
 
 	// P081: SLA health check tool
 	const { SlaHandler } = await import("./tools/ops/sla-handler.ts");
 	const slaHandler = new SlaHandler();
 	server.addTool({
 		name: "sla_health_check",
-		description: "P081: Return current platform SLA state (Normal/Degraded/Down) with p99 latency, error rate, and active agent count. State transitions fire pg_notify sla_state_change.",
+		description:
+			"P081: Return current platform SLA state (Normal/Degraded/Down) with p99 latency, error rate, and active agent count. State transitions fire pg_notify sla_state_change.",
 		inputSchema: {
 			type: "object",
 			properties: {
-				detail: { type: "boolean", description: "Include raw metric values (default true)" },
+				detail: {
+					type: "boolean",
+					description: "Include raw metric values (default true)",
+				},
 			},
 		},
 		handler: async (args: Record<string, unknown>) => {
 			const result = await slaHandler.healthCheck(args);
-			return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+			return {
+				content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+			};
 		},
 	});
 
@@ -2731,7 +3064,8 @@ export async function createMcpServer(
 	);
 	server.addTool({
 		name: "cooldown_status",
-		description: "List active model-level and provider-level cooldowns. Params: provider (optional filter), only_active (default true).",
+		description:
+			"List active model-level and provider-level cooldowns. Params: provider (optional filter), only_active (default true).",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -2753,7 +3087,8 @@ export async function createMcpServer(
 	});
 	server.addTool({
 		name: "cooldown_clear",
-		description: "Clear model-level cooldown for a specific (provider, model) pair. Sets cooldown_until to NULL.",
+		description:
+			"Clear model-level cooldown for a specific (provider, model) pair. Sets cooldown_until to NULL.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -2776,7 +3111,8 @@ export async function createMcpServer(
 	});
 	server.addTool({
 		name: "provider_cooldown_clear",
-		description: "Clear provider-level cooldown. Sets cooldown_until to NULL on provider_health.",
+		description:
+			"Clear provider-level cooldown. Sets cooldown_until to NULL on provider_health.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -2788,9 +3124,11 @@ export async function createMcpServer(
 			required: ["provider"],
 		},
 		handler: (args) => {
-			return providerCooldownClear(args as Record<string, unknown>).then((r) => ({
-				content: [{ type: "text", text: JSON.stringify(r, null, 2) }],
-			}));
+			return providerCooldownClear(args as Record<string, unknown>).then(
+				(r) => ({
+					content: [{ type: "text", text: JSON.stringify(r, null, 2) }],
+				}),
+			);
 		},
 	});
 
@@ -2800,13 +3138,15 @@ export async function createMcpServer(
 	);
 	server.addTool({
 		name: "capacity_snapshot",
-		description: "Get current agency capacity signals (rate-limits, headroom %). Optional filters: provider, model.",
+		description:
+			"Get current agency capacity signals (rate-limits, headroom %). Optional filters: provider, model.",
 		inputSchema: {
 			type: "object",
 			properties: {
 				provider: {
 					type: "string",
-					description: "Optional filter by provider (anthropic, openai, google, github)",
+					description:
+						"Optional filter by provider (anthropic, openai, google, github)",
 				},
 				model: {
 					type: "string",
@@ -2823,7 +3163,8 @@ export async function createMcpServer(
 
 	server.addTool({
 		name: "capacity_clear",
-		description: "Clear agency capacity entry from agency_capacity table and reset in-memory tracker.",
+		description:
+			"Clear agency capacity entry from agency_capacity table and reset in-memory tracker.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -2849,6 +3190,128 @@ export async function createMcpServer(
 		},
 	});
 
+	// P1124: D4 merge-gate validator tool
+	const { d4Validate } = await import("./tools/ops/d4-validator-tool.ts");
+	server.addTool({
+		name: "d4_validate",
+		description:
+			"P1124: Manual D4 merge-gate validation. Runs AC verification commands for a proposal and records gate_decision_log. Returns validation verdict + per-AC results.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				proposal_id: {
+					type: "number",
+					description: "Proposal ID to validate (required)",
+				},
+				correlation_id: {
+					type: "string",
+					description: "Optional trace correlation UUID",
+				},
+				force_re_run: {
+					type: "boolean",
+					description: "If true, re-run even if recently validated",
+				},
+			},
+			required: ["proposal_id"],
+		},
+		handler: (args) => {
+			return d4Validate(args as Record<string, unknown>).then((r) => ({
+				content: [{ type: "text", text: JSON.stringify(r, null, 2) }],
+			}));
+		},
+	});
+
+	// P828: Config mutation + audit surface — config_get / config_mutation /
+	// list_config_mutations. Sit on top of ConfigResolver.set() (audited) and
+	// core.config_mutation_log. Routed via mcp_ops in consolidated.ts.
+	const { configGet, configMutation, listConfigMutations } = await import(
+		"./tools/ops/config-mutation-ops.ts"
+	);
+	server.addTool({
+		name: "config_get",
+		description:
+			"P828 AC-22: read a runtime config key's current resolved value + scope/class metadata. " +
+			"No mutation. Args: { key_name }.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				key_name: {
+					type: "string",
+					description:
+						"Config key name (e.g. USE_OFFER_DISPATCH, PROJECT_TOKEN_BUDGET).",
+				},
+			},
+			required: ["key_name"],
+		},
+		handler: (args) => {
+			return configGet(args as Record<string, unknown> as never).then((r) => ({
+				content: [{ type: "text", text: JSON.stringify(r, null, 2) }],
+			}));
+		},
+	});
+	server.addTool({
+		name: "config_mutation",
+		description:
+			"P828 AC-23: mutate a runtime config key via the audited ConfigResolver.set() path. " +
+			"Requires a verified caller identity (read from agentContextStorage) or the " +
+			"AGENTHIVE_EMERGENCY_OPERATOR_DID override. Writes core.config_mutation_log + " +
+			"runtime_flag, fires pg_notify, evicts the local cache. Args: { key_name, value }.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				key_name: {
+					type: "string",
+					description: "Config key name to mutate (flag/registry/structural).",
+				},
+				value: {
+					description: "New value (type per the key's parser).",
+				},
+			},
+			required: ["key_name", "value"],
+		},
+		handler: (args) => {
+			return configMutation(args as Record<string, unknown> as never).then(
+				(r) => ({
+					content: [{ type: "text", text: JSON.stringify(r, null, 2) }],
+				}),
+			);
+		},
+	});
+	server.addTool({
+		name: "list_config_mutations",
+		description:
+			"P828 AC-25: paginated, newest-first read of core.config_mutation_log filtered by " +
+			"(key_name, scope). Args: { key_name?, scope?, limit?, offset? }.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				key_name: {
+					type: "string",
+					description: "Optional exact key_name filter.",
+				},
+				scope: {
+					type: "string",
+					description: "Optional exact scope filter (e.g. 'global').",
+				},
+				limit: {
+					type: "number",
+					description: "Max rows (default 50, clamped to [1, 500]).",
+				},
+				offset: {
+					type: "number",
+					description: "Row offset for pagination (default 0).",
+				},
+			},
+		},
+		handler: (args) => {
+			return listConfigMutations(args as Record<string, unknown> as never).then(
+				(r) => ({
+					content: [{ type: "text", text: JSON.stringify(r, null, 2) }],
+				}),
+			);
+		},
+	});
+
 	// P1129: Agency lifecycle tools — agency_start / agency_status
 	// (function API since 1a876799 — agency-ops.ts exports no class; a stale
 	// class-based registration block kept resurfacing through merges and
@@ -2868,7 +3331,8 @@ export async function createMcpServer(
 			properties: {
 				agency_id: {
 					type: "string",
-					description: "Agency identity (agent_identity in agent_registry, e.g. 'george')",
+					description:
+						"Agency identity (agent_identity in agent_registry, e.g. 'george')",
 				},
 			},
 			required: ["agency_id"],

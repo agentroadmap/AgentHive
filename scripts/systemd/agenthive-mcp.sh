@@ -25,7 +25,7 @@ if [ -z "${PG_SCHEMA:-}" ] && [ -n "${PGSCHEMA:-}" ]; then
 	export PG_SCHEMA="$PGSCHEMA"
 fi
 
-echo "[$(date)] Starting AgentHive MCP SSE server on port $MCP_PORT (Node $(node --version))..."
+echo "[$(date)] Starting AgentHive MCP SSE server on port $MCP_PORT (Bun)..."
 echo "[$(date)] Config: database.provider=Postgres, project_root=$PROJECT_ROOT"
 
-exec node --import jiti/register scripts/mcp-sse-server.js
+exec /usr/local/bin/bun scripts/mcp-sse-server.js

@@ -157,6 +157,9 @@ step_run "check:credential-env" \
 step_run "audit:dispatch-selects (P1411)" \
     node --import jiti/register scripts/ci/check-dispatch-proposal-selects.ts
 
+step_run "audit:mcp-param-fidelity (P1389)" \
+    node --import jiti/register scripts/ci/check-mcp-param-fidelity.ts
+
 echo ""
 
 # ── INTEGRATION ───────────────────────────────────────────────────────────────

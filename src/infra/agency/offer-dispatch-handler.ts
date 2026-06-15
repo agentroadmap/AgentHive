@@ -22,6 +22,7 @@
  */
 import { query } from "../postgres/pool.ts";
 import { spawnAgent } from "../../core/orchestration/agent-spawner.ts";
+import { resolveExecutorWorktreeFallback } from "../../core/orchestration/executor-worktree-fallback.ts";
 import type { SpawnResult } from "../../core/orchestration/agent-spawner.ts";
 import type { LiaisonMessage } from "./liaison-message-types.ts";
 import { resolvePersonaByRoleName } from "../../core/orchestration/gate-role-resolver.ts";
@@ -40,8 +41,16 @@ import { ObservabilityWriter } from "../../core/observability/observability-writ
 import {
 	evaluateSubscriptionPolicy,
 	declareThrottle,
+	recordProviderHardLimit,
 } from "./subscription-policy.ts";
 import { recordSpawnUsage } from "./record-spawn-usage.ts";
+import { recordReliabilityOutcome } from "./record-reliability-outcome.ts";
+import { classifyExit } from "../../core/orchestration/agent-spawner.ts";
+import { incrementSpawnFailure, THROTTLE_THRESHOLD } from "../../core/orchestration/resolvers/agency-resolver.ts";
+import { validateProposal } from "../../core/orchestration/d4-validator.ts";
+import { verifyDeliverables } from "../../core/orchestration/deliverable-verifier.ts";
+import { evaluateCostQuota } from "./cost-quota-admission.ts";
+import { incrementDebt, resetDebt } from "./fair-share-debt.ts";
 
 const obs = new ObservabilityWriter("agency:offer-dispatch-handler");
 
@@ -88,10 +97,24 @@ interface OfferDispatchEnvelope {
 	lease_ttl_seconds?: number;
 	/** P914: worktree directory basename selected by the orchestrator. */
 	worktree_hint?: string | null;
+	/** P2335: id of the cubic (project-scoped worktree) leased for this dispatch. */
+	cubic_id?: string | null;
+	/** P2335: absolute worktree path of the leased cubic; preferred over worktree_hint. */
+	cubic_worktree_path?: string | null;
+	/** P2335: project the cubic was acquired for. */
+	project_id?: number | null;
 	/** P908-D: trace correlation UUID threaded from postWorkOffer. */
 	trace_id?: string | null;
 	/** P1113: pre-resolved behavioral persona text (prepended to task). */
 	persona?: string;
+	/**
+	 * P1438 AC-9: persona NAME chosen by the liaison brain's matchmaker
+	 * (matchPersonaForCapability). Distinct from `persona` (the body text): this
+	 * is the stable/dynamic label surfaced in the control feed + persisted as
+	 * metadata.persona_used telemetry. When present it wins over the role-name
+	 * fallback for telemetry attribution.
+	 */
+	persona_name?: string;
 	/** P1113: full task string forwarded from squad_dispatch.metadata.task. */
 	task?: string;
 }
@@ -144,8 +167,58 @@ export function _activeSpawnCountForTest(agencyId?: string): number {
 	return sum;
 }
 
+/**
+ * P1360 AC-4/11: Classify spawn error messages to structured error classes.
+ * Maps error text patterns to classes used by incrementSpawnFailure for status_reason.
+ *
+ * @param err — The caught spawn error
+ * @returns One of 'auth' | 'spawn' | 'timeout' | 'unknown'
+ */
+function classifySpawnErrorClass(
+	err: Error,
+): "auth" | "spawn" | "timeout" | "unknown" {
+	const msg = err.message.toLowerCase();
+	if (
+		msg.includes("auth") ||
+		msg.includes("permission") ||
+		msg.includes("unauthorized") ||
+		msg.includes("forbidden")
+	) {
+		return "auth";
+	}
+	if (
+		msg.includes("timeout") ||
+		msg.includes("killed") ||
+		msg.includes("sigterm")
+	) {
+		return "timeout";
+	}
+	if (
+		msg.includes("spawn") ||
+		msg.includes("enoent") ||
+		msg.includes("eacces")
+	) {
+		return "spawn";
+	}
+	return "unknown";
+}
+
 const defaultExec: SqlExec = (sql, params) =>
 	query(sql, params as unknown[]);
+
+async function hasSquadDispatchProviderSignalColumn(
+	exec: SqlExec,
+): Promise<boolean> {
+	const result = await exec(
+		`SELECT 1
+		   FROM information_schema.columns
+		  WHERE table_schema = 'roadmap_workforce'
+		    AND table_name = 'squad_dispatch'
+		    AND column_name = 'provider_signal'
+		  LIMIT 1`,
+	);
+	return ((result as any)?.rows?.length ?? 0) > 0;
+}
 
 const defaultDeps: Required<
 	Pick<
@@ -156,14 +229,15 @@ const defaultDeps: Required<
 	spawn: spawnAgent,
 	exec: defaultExec,
 	logger: console,
-	// P914: include AGENTHIVE_DEFAULT_EXECUTOR_WORKTREE (the var actually
-	// set in /etc/agenthive/env, e.g. "codex-one") as a fallback so the
-	// spawn cwd resolves to a real directory under WORKTREE_ROOT instead
-	// of the literal "main" which never existed.
+	// P1445 AC-3: the orchestrator now allocates a worktree atomically and
+	// passes it as worktree_hint. The ad-hoc AGENTHIVE_DEFAULT_EXECUTOR_WORKTREE
+	// env fallback is gated behind resolveExecutorWorktreeFallback() (opt-in via
+	// AGENTHIVE_ALLOW_ENV_WORKTREE_FALLBACK=1) so two dispatches can no longer
+	// silently self-select the SAME shared checkout from the environment.
 	resolveWorktree: (_agencyId) =>
 		process.env.AGENCY_WORKTREE ??
 		process.env.AGENTHIVE_DEFAULT_WORKTREE ??
-		process.env.AGENTHIVE_DEFAULT_EXECUTOR_WORKTREE ??
+		resolveExecutorWorktreeFallback() ??
 		"codex-one",
 };
 
@@ -286,13 +360,65 @@ export async function handleOfferDispatch(
 		return;
 	}
 
-	// P914: prefer the orchestrator-selected worktree from the payload;
-	// fall back to the agency's local resolver only when the dispatcher
-	// didn't supply one (older clients, test fixtures).
+	// P3000: cost-quota admission control — checked at dispatch time to catch
+	// concurrent claims that slipped past the claim-time check. Returns the
+	// offer if over-budget so another agent (or the same agent after window reset)
+	// can claim it. Reserved-headroom dispatch emits a metric and proceeds.
+	const costQuotaResult = await evaluateCostQuota(agencyId, 0, exec);
+	if (!costQuotaResult.allowed) {
+		logger.warn(
+			`[OfferDispatchHandler] ${agencyId}: cost-quota refused offer=${payload.offer_id}: ${costQuotaResult.reason}`,
+		);
+		obs.writeQuotaMetric({
+			metricName: "quota:denied_dispatch",
+			agentIdentity: agencyId,
+			attributes: {
+				offer_id: payload.offer_id,
+				reason: costQuotaResult.reason,
+				resets_at: costQuotaResult.resets_at?.toISOString() ?? null,
+			},
+		});
+		void incrementDebt(agencyId, exec);
+		await exec(
+			`SELECT roadmap_workforce.fn_return_work_offer($1, $2, $3, $4)`,
+			[
+				payload.dispatch_id,
+				agencyId,
+				payload.claim_token,
+				`cost_quota_refused:${costQuotaResult.reason}`,
+			],
+		).catch((err) => {
+			logger.error(
+				`[OfferDispatchHandler] ${agencyId}: fn_return_work_offer failed on cost-quota-refuse:`,
+				err instanceof Error ? err.message : err,
+			);
+		});
+		return;
+	}
+	if (costQuotaResult.reserved_headroom_used) {
+		logger.warn(
+			`[OfferDispatchHandler] ${agencyId}: starvation recovery — reserved-headroom slot granted for offer=${payload.offer_id}`,
+		);
+		obs.writeQuotaMetric({
+			metricName: "quota:reserved_headroom_granted",
+			agentIdentity: agencyId,
+			attributes: { offer_id: payload.offer_id, reason: costQuotaResult.reason },
+		});
+	}
+
+	// P2335 AC-9: prefer the leased cubic's worktree path; then the legacy
+	// orchestrator-selected worktree_hint (P914); finally fall back to the
+	// agency's local resolver only when neither was supplied (older clients,
+	// test fixtures). cubic_worktree_path is an absolute path; worktree_hint
+	// is a basename — both are accepted downstream.
 	const worktree =
+		(payload.cubic_worktree_path && payload.cubic_worktree_path.trim().length > 0
+			? payload.cubic_worktree_path
+			: undefined) ??
 		(payload.worktree_hint && payload.worktree_hint.trim().length > 0
 			? payload.worktree_hint
-			: undefined) ?? resolveWorktree(agencyId);
+			: undefined) ??
+		resolveWorktree(agencyId);
 	const proposalId = payload.proposal_id ?? undefined;
 	const capabilities =
 		payload.required_capabilities && payload.required_capabilities.length > 0
@@ -371,6 +497,7 @@ async function runSpawn(args: {
 
 	const dispatchId = payload.dispatch_id as number;
 	const claimToken = payload.claim_token as string;
+	let personaName: string | null = null;
 
 	// P908-D: open offer_completed lifecycle span for the full spawn duration.
 	// Best-effort — errors are swallowed inside ObservabilityWriter.
@@ -420,12 +547,12 @@ async function runSpawn(args: {
 			null;
 		if (!agencyProvider) {
 			try {
-				const { rows } = await query<{ preferred_provider: string | null }>(
+				const result = (await exec(
 					`SELECT preferred_provider FROM roadmap_workforce.agent_registry
 					 WHERE agent_identity = $1 LIMIT 1`,
 					[agencyId],
-				);
-				agencyProvider = rows[0]?.preferred_provider ?? null;
+				)) as { rows: Array<{ preferred_provider: string | null }> } | undefined;
+				agencyProvider = result?.rows?.[0]?.preferred_provider ?? null;
 			} catch (err) {
 				logger.warn(
 					`[OfferDispatchHandler] ${agencyId}: preferred_provider lookup failed:`,
@@ -444,22 +571,54 @@ async function runSpawn(args: {
 			);
 		}
 
-		// P1113: resolve persona and build the enriched task string.
+		// P1113/P1392: resolve persona and build the enriched task string.
 		// Prefer orchestrator-pre-resolved persona from payload; fall back to DB lookup.
+		// P1392: For Claude, persona is passed separately to use --append-system-prompt.
+		// For other providers, it is prepended to the task.
 		const persona: string | null =
 			typeof payload.persona === "string" && payload.persona.length > 0
 				? payload.persona
-				: await resolvePersonaByRoleName(payload.role, query as never).catch(() => null);
+				: await resolvePersonaByRoleName(payload.role, exec as never).catch(() => null);
+
+		// P1438 AC-9: a brain-supplied persona_name (from the self-claim matchmaker)
+		// is the authoritative label for telemetry + control feed. Prefer it over
+		// the file-resolver / role-name fallback below.
+		if (typeof payload.persona_name === "string" && payload.persona_name.length > 0) {
+			personaName = payload.persona_name;
+		}
+
+		// P1392: Track persona name/source for telemetry
+		if (persona && !personaName) {
+			// Try to extract persona name from file-based resolver first
+			try {
+				const { resolveFilePersona } = await import(
+					"../../../core/orchestration/file-persona-resolver.ts"
+				);
+				const filePersona = await resolveFilePersona(payload.role);
+				if (filePersona && filePersona.body === persona) {
+					personaName = filePersona.personaName ?? payload.role;
+				}
+			} catch {
+				// Fall back to role name for telemetry
+				personaName = payload.role;
+			}
+			if (!personaName) {
+				personaName = payload.role;
+			}
+		}
 
 		const baseTask: string =
 			typeof payload.task === "string" && payload.task.length > 0
 				? payload.task
 				: `Execute offer ${payload.offer_id} (role: ${payload.role})`;
 
-		const enrichedTask = persona ? `${persona}\n\n${baseTask}` : baseTask;
+		// P1392: Claude builder will use --append-system-prompt; don't prepend for claude
+		const enrichedTask = agencyProvider === "claude" && persona
+			? baseTask // Claude will get persona via --append-system-prompt
+			: persona ? `${persona}\n\n${baseTask}` : baseTask;
 
 		// P2335: ensure cubic worktree exists before spawn
-		if ((payload as any).cubic_id && worktree && worktree.startsWith("/data/code/worktree/")) {
+		if (payload.cubic_id && worktree && worktree.startsWith("/data/code/worktree/")) {
 			try {
 				const { existsSync } = await import("node:fs");
 				if (!existsSync(worktree)) {
@@ -469,10 +628,80 @@ async function runSpawn(args: {
 					const branchName = worktree.split("/").pop() || `auto-${Date.now()}`;
 					// Assumes /data/code/AgentHive is the base repo
 					await execAsync(`git worktree add ${worktree} -b ${branchName}`, { cwd: `/data/code/AgentHive` });
-					logger.log(`[OfferDispatchHandler] provisioned project-scoped worktree ${worktree} for cubic=${(payload as any).cubic_id}`);
+					logger.log(`[OfferDispatchHandler] provisioned project-scoped worktree ${worktree} for cubic=${payload.cubic_id}`);
 				}
 			} catch (err: any) {
 				logger.warn(`[OfferDispatchHandler] failed to provision worktree ${worktree}: ${err?.message}`);
+			}
+		}
+
+		// P1124 D4 Validator: Check if this is a gate-reviewer dispatch for a MERGE-stage proposal.
+		// If so, run AC validation before spawning. advance=skip spawn (zero-token);
+		// hold/reject=skip spawn + record decision; inconclusive=fall through to spawn (human review).
+		if (proposalId && payload.role === "gate-reviewer") {
+			try {
+				// Look up proposal status to confirm it's MERGE stage
+				const propRows = await exec(
+					`SELECT status FROM roadmap_proposal.proposal WHERE id = $1`,
+					[proposalId],
+				);
+				const propStatus = (propRows as any)?.rows?.[0]?.status;
+
+				// Status values are stored UPPERCASE (e.g. 'MERGE').
+				if (propStatus === "MERGE") {
+					const validationResult = await validateProposal(proposalId, payload.trace_id ?? undefined);
+
+					logger.log(
+						`[OfferDispatchHandler] ${agencyId}: D4 validation for proposal ${proposalId}: decision=${validationResult.decision}`,
+					);
+
+					// If validator decided to advance, skip spawn entirely (zero-token) and mark completed
+					if (validationResult.decision === "advance") {
+						logger.log(
+							`[OfferDispatchHandler] ${agencyId}: D4 advance → skipping spawn for offer=${payload.offer_id}`,
+						);
+						clearInterval(renewalTimer);
+						await exec(
+							`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, $4)`,
+							[dispatchId, agencyId, claimToken, "delivered"],
+						).catch((err) => {
+							logger.error(
+								`[OfferDispatchHandler] ${agencyId}: fn_complete_work_offer failed on D4-advance:`,
+								err instanceof Error ? err.message : err,
+							);
+						});
+						return;
+					}
+
+					// If validator decided to hold or reject, skip spawn but record the decision
+					if (validationResult.decision === "hold" || validationResult.decision === "reject") {
+						logger.log(
+							`[OfferDispatchHandler] ${agencyId}: D4 ${validationResult.decision} → skipping spawn for offer=${payload.offer_id}`,
+						);
+						clearInterval(renewalTimer);
+						await exec(
+							`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, $4)`,
+							[dispatchId, agencyId, claimToken, "failed"],
+						).catch((err) => {
+							logger.error(
+								`[OfferDispatchHandler] ${agencyId}: fn_complete_work_offer failed on D4-hold/reject:`,
+								err instanceof Error ? err.message : err,
+							);
+						});
+						return;
+					}
+
+					// If inconclusive, fall through to normal spawn (human review via CLI)
+					logger.log(
+						`[OfferDispatchHandler] ${agencyId}: D4 inconclusive → proceeding to spawn for offer=${payload.offer_id}`,
+					);
+				}
+			} catch (err) {
+				logger.warn(
+					`[OfferDispatchHandler] ${agencyId}: D4 validation failed for proposal ${proposalId}, falling through to spawn:`,
+					err instanceof Error ? err.message : err,
+				);
+				// Fall through to normal spawn on validator error
 			}
 		}
 
@@ -490,9 +719,24 @@ async function runSpawn(args: {
 			// subprocess claims proposals as "adam", "alan", etc. rather than
 			// an auto-generated P852 structured identity string.
 			agentLabel: agencyId,
+			// P1392: For Claude, pass persona separately for --append-system-prompt injection.
+			// Other providers prepend it to the task above.
+			...(agencyProvider === "claude" && persona ? { persona, personaName } : {}),
 		});
 	} catch (err) {
 		spawnError = err instanceof Error ? err : new Error(String(err));
+
+		// P1360 Change 1 / AC-1/8: Wire spawn failure into agency throttle counters
+		// so resolveAgency's ORDER BY throttle_count ASC de-prioritizes repeat failures.
+		const errorClass = classifySpawnErrorClass(spawnError);
+		void incrementSpawnFailure(agencyId, THROTTLE_THRESHOLD, errorClass).catch(
+			(bumpErr) => {
+				logger.warn(
+					`[OfferDispatchHandler] ${agencyId}: failed to bump throttle counter for offer=${payload.offer_id}: ${bumpErr instanceof Error ? bumpErr.message : bumpErr}`,
+				);
+			},
+		);
+
 		// P914: surface the spawn failure cause so operators can diagnose
 		// without grepping; previously the only signal was "exit=n/a".
 		logger.error(
@@ -533,7 +777,37 @@ async function runSpawn(args: {
 			degenerateReason = "empty_output";
 		}
 	}
-	const succeeded = exitOk && degenerateReason === null;
+	let succeeded = exitOk && degenerateReason === null;
+
+	// P1438 AC-12/13 (C6 evidence-gated completion): exit-0 + non-degenerate output
+	// is NECESSARY but NOT SUFFICIENT to mark an offer 'delivered'. A worker can
+	// exit 0 with plausible output yet never write its role artifact (the
+	// hallucinated-completion / codex-AC-fabrication pattern). Before delivery,
+	// require canonical evidence for the offer's role: a proposal_reviews row for
+	// gate/review roles, a commit/agent_runs row for build roles, AC/discussion
+	// rows for enhance/architect roles (see deliverable-verifier ROLE_ARTIFACT_CHECKS
+	// + normalizeDispatchRole). Missing evidence → NOT delivered (recorded failed,
+	// does not advance the proposal); the reaper requeues per existing policy.
+	// Fail closed: a verification error also blocks the delivered claim.
+	let evidenceFailureReason: string | null = null;
+	if (succeeded && proposalId) {
+		try {
+			const verdict = await verifyDeliverables({
+				proposalId,
+				dispatchRole: payload.role,
+				workerIdentity: agencyId,
+				dispatchId,
+			});
+			if (!verdict.verified) {
+				succeeded = false;
+				evidenceFailureReason =
+					verdict.failureReason ?? `no deliverable artifact for role=${payload.role}`;
+			}
+		} catch (err) {
+			succeeded = false;
+			evidenceFailureReason = `evidence verification error: ${err instanceof Error ? err.message : String(err)}`;
+		}
+	}
 
 	// P1018: Record token usage and cost from the spawn result.
 	// This extracts provider-specific usage data, calculates cost, and
@@ -562,6 +836,25 @@ async function runSpawn(args: {
 				err instanceof Error ? err.message : err,
 			);
 		});
+
+		// P3313 AC-2: close the adaptive-matching feedback loop. Write this run's
+		// outcome back into the P3311 reliability ledger so the next match (P3312)
+		// sees an updated score. A degenerate/no-artifact "success" is recorded as
+		// rework; a clean failure as hard_failure. Non-fatal — never blocks dispatch.
+		void recordReliabilityOutcome({
+			agentRunId: result.agentRunId,
+			proposalId,
+			agencyIdentity: agencyId,
+			modelUsed: payload.route_hint ?? null,
+			routeId: null, // route scope is reconciled by the periodic batch refresh
+			status: succeeded ? "completed" : "failed",
+			degenerate: degenerateReason !== null || evidenceFailureReason !== null,
+		}).catch((err) => {
+			logger.warn(
+				`[OfferDispatchHandler] ${agencyId}: recordReliabilityOutcome failed for run ${result.agentRunId}:`,
+				err instanceof Error ? err.message : err,
+			);
+		});
 	}
 	const status: "delivered" | "failed" = succeeded ? "delivered" : "failed";
 	const provider = payload.route_hint ?? null;
@@ -569,6 +862,10 @@ async function runSpawn(args: {
 	if (degenerateReason) {
 		logger.warn(
 			`[OfferDispatchHandler] ${agencyId}: offer=${payload.offer_id} exited 0 but is DEGENERATE (${degenerateReason}) — recording FAILED, not delivered (route_hint=${payload.route_hint ?? "none"})`,
+		);
+	} else if (evidenceFailureReason) {
+		logger.warn(
+			`[OfferDispatchHandler] ${agencyId}: offer=${payload.offer_id} exited 0 but produced NO ROLE ARTIFACT (role=${payload.role}) — recording FAILED, not delivered. ${evidenceFailureReason}`,
 		);
 	}
 
@@ -596,15 +893,51 @@ async function runSpawn(args: {
 	}
 
 	// P908-B: persist provider_signal on the dispatch row for auditability.
-	if (providerSignal) {
+	// P1392 AC-5: Also persist persona_used in metadata for telemetry.
+	if (providerSignal || personaName) {
 		try {
-			await exec(
-				`UPDATE roadmap_workforce.squad_dispatch
-				    SET provider_signal = $1
-				  WHERE id = $2`,
-				[providerSignal, dispatchId],
+			const updateParts = [];
+			const updateValues = [];
+			const metadataEntries: string[] = [];
+			const providerSignalColumnExists = providerSignal
+				? await hasSquadDispatchProviderSignalColumn(exec)
+				: false;
+			if (providerSignal && providerSignalColumnExists) {
+				updateParts.push("provider_signal = $" + (updateValues.length + 1) + "::text");
+				updateValues.push(providerSignal);
+			}
+			if (providerSignal && !providerSignalColumnExists) {
+				metadataEntries.push(
+					"'provider_signal', $" + (updateValues.length + 1) + "::text",
+				);
+				updateValues.push(providerSignal);
+			}
+			if (personaName) {
+				metadataEntries.push(
+					"'persona_used', $" + (updateValues.length + 1) + "::text",
+				);
+				updateValues.push(personaName);
+			}
+			if (metadataEntries.length > 0) {
+				updateParts.push(
+					`metadata = metadata || jsonb_build_object(${metadataEntries.join(", ")})`,
+				);
+			}
+			updateValues.push(dispatchId);
+
+			if (updateParts.length > 0) {
+				await exec(
+					`UPDATE roadmap_workforce.squad_dispatch
+					    SET ${updateParts.join(", ")}
+					  WHERE id = $${updateValues.length}`,
+					updateValues,
+				);
+			}
+		} catch (err) {
+			logger.warn(
+				`[OfferDispatchHandler] ${agencyId}: failed to update telemetry for dispatch ${dispatchId}:`,
+				err instanceof Error ? err.message : err,
 			);
-		} catch {
 			/* best-effort */
 		}
 	}
@@ -632,19 +965,65 @@ async function runSpawn(args: {
 		});
 	}
 
-	try {
-		await exec(
-			`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, $4)`,
-			[dispatchId, agencyId, claimToken, status],
-		);
-		logger.log(
-			`[OfferDispatchHandler] ${agencyId}: offer=${payload.offer_id} ${status} (exit=${result?.exitCode ?? "n/a"})`,
-		);
-	} catch (completionErr) {
-		logger.error(
-			`[OfferDispatchHandler] ${agencyId}: fn_complete_work_offer failed for offer ${payload.offer_id} — lease will time out and reaper will requeue:`,
-			completionErr instanceof Error ? completionErr.message : completionErr,
-		);
+	// P1682 AC-4: Detect rate_limited exit and decide hold vs provider cooldown
+	// If the spawn failed with a quota signal, classify the exit and measure the reset duration
+	let holdPlaced = false;
+	if (!succeeded && result) {
+		const exitClass = classifyExit(result.stdout, result.stderr, result.exitCode);
+		if (exitClass.outcome === "rate_limited" && exitClass.resetAt && exitClass.quotaErrorProvider) {
+			const HOLD_WINDOW_MAX_SEC = Number(
+				process.env.AGENTHIVE_HOLD_WINDOW_MAX_SEC ?? 1800,
+			); // default 30min
+			const deltaMs = exitClass.resetAt.getTime() - Date.now();
+			const deltaSec = Math.ceil(deltaMs / 1000);
+
+			// AC-4 & AC-5: Short reset (<= HOLD_WINDOW_MAX_SEC) — place in hold state
+			// AC-8: Held dispatch is NOT marked failed, NOT increments failure_count
+			if (deltaSec <= HOLD_WINDOW_MAX_SEC) {
+				try {
+					await recordProviderHardLimit(agencyId, dispatchId, exitClass.resetAt, exec);
+					holdPlaced = true;
+					logger.log(
+						`[OfferDispatchHandler] ${agencyId}: P1682 AC-4 hold placed — paused_at_provider_limit=true, resume_eligible_at=${exitClass.resetAt.toISOString()}, deltaSec=${deltaSec}`,
+					);
+					// AC-8: Skip fn_complete_work_offer for held dispatches — lease remains
+					// active and will be cleared by wake sweep when resume_eligible_at expires
+				} catch (err) {
+					logger.error(
+						`[OfferDispatchHandler] ${agencyId}: recordProviderHardLimit failed for offer=${payload.offer_id}:`,
+						err instanceof Error ? err.message : err,
+					);
+					// Fall through to fn_complete_work_offer with "failed" status on error
+				}
+			} else {
+				// Long reset (>= HOLD_WINDOW_MAX_SEC) — route/provider cooldown already set in spawnWithRetry
+				logger.log(
+					`[OfferDispatchHandler] ${agencyId}: P1682 AC-9 long reset — deltaSec=${deltaSec} exceeds HOLD_WINDOW_MAX_SEC=${HOLD_WINDOW_MAX_SEC}, cooldown already applied`,
+				);
+			}
+		}
+	}
+
+	// Only call fn_complete_work_offer if we did NOT place a hold
+	// Held dispatches remain in 'claimed' state with paused_at_provider_limit=true
+	// and will be woken by the reaper when resume_eligible_at expires
+	if (!holdPlaced) {
+		try {
+			await exec(
+				`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, $4)`,
+				[dispatchId, agencyId, claimToken, status],
+			);
+			logger.log(
+				`[OfferDispatchHandler] ${agencyId}: offer=${payload.offer_id} ${status} (exit=${result?.exitCode ?? "n/a"})`,
+			);
+			// P3000: successful delivery — reset starvation debt counter.
+			if (succeeded) void resetDebt(agencyId, exec);
+		} catch (completionErr) {
+			logger.error(
+				`[OfferDispatchHandler] ${agencyId}: fn_complete_work_offer failed for offer ${payload.offer_id} — lease will time out and reaper will requeue:`,
+				completionErr instanceof Error ? completionErr.message : completionErr,
+			);
+		}
 	}
 
 	// P908-D: close the lifecycle span now that fn_complete_work_offer has run.
@@ -692,7 +1071,7 @@ export function _resetMaxInFlightCacheForTest(): void {
 	maxInFlightCache.clear();
 }
 
-async function readAgencyMaxInFlight(
+export async function readAgencyMaxInFlight(
 	agencyId: string,
 	exec: SqlExec,
 	logger: Pick<Console, "log" | "warn" | "error">,

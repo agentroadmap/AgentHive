@@ -35,6 +35,8 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Client } from "pg";
 import { setProviderAuthDown } from "../../core/orchestration/provider-auth.ts";
+import { ROLE_TO_REQUIRED_CAPABILITIES } from "../../core/orchestration/offer-dispatch.ts";
+import { resolveExecutorWorktreeFallback } from "../../core/orchestration/executor-worktree-fallback.ts";
 import {
 	type CliInvocationHandler,
 	type CliInvocationRegistry,
@@ -45,17 +47,35 @@ import { emitOAuthRotateSignal } from "../../core/runtime/oauth-token-monitor.ts
 import * as runtimeConfig from "../../shared/runtime/config.ts";
 import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 import { agentNotifyChannel } from "../messaging/a2a-access-control.ts";
+import {
+	isTerminalProposalStatus,
+	TerminalProposalError,
+} from "../../core/pipeline/post-work-offer.ts";
 import { query } from "../postgres/pool.ts";
+import {
+	isA2AVerb,
+	routeA2AVerb,
+	type VerbHelpers,
+} from "./liaison-a2a-verbs.ts";
 import {
 	AgencyClaimLoop,
 	makeAgencyClaimExecutor,
 	type ListenerClient as ClaimLoopListenerClient,
 } from "./agency-claim-loop.ts";
 import { sendMessage as sendLiaisonMessage } from "./liaison-message-service.ts";
+// P1109 Tier-2: agent_registry FK-anchor + listener_subscription presence are
+// wrapped behind infra-layer helpers instead of raw INSERT/DELETE SQL here.
+import {
+	ensureAgentRegistryRow,
+	recordListenerSubscription,
+	removeListenerSubscription,
+} from "./presence-ops.ts";
 import { resolveLiaisonLlmTimeoutMs } from "./liaison-timeout.ts";
 import {
 	handleTypedTaskRequest,
 	handleWorkerReport,
+	markLiaisonTaskTrackerFailed,
+	detectStuckWorkers,
 	type TaskDispatcherHelpers,
 } from "./task-dispatcher.ts";
 
@@ -144,29 +164,20 @@ export async function runLiaisonAgent(
 	// rather than silently producing a channel name no one will hear.
 	const channel = agentNotifyChannel(identity);
 
-	await query(
-		`INSERT INTO roadmap_workforce.agent_registry
-		    (agent_identity, agent_type, trust_tier, status)
-		 VALUES ($1, 'agency', 'authority', 'active')
-		 ON CONFLICT (agent_identity) DO UPDATE SET status = 'active'`,
-		[identity],
-	);
+	// P1109 Tier-2 (AC-14): FK-anchor row via the tool-layer wrapper, not raw SQL.
+	await ensureAgentRegistryRow(identity);
 
 	const listenClient = opts.createListenClient
 		? await opts.createListenClient()
 		: await connectListenClient(identity);
 	await listenClient.query(`LISTEN "${channel}"`);
 	console.log(`${log} LISTEN active on: ${channel}`);
-	// AC-4 (P1107): register subscription proof in listener_subscription table
-	await query(
-		`INSERT INTO roadmap.listener_subscription
-		    (agent_identity, channel, established_at, established_pid)
-		 VALUES ($1, $2, now(), pg_backend_pid())
-		 ON CONFLICT (agent_identity, channel) DO UPDATE SET
-		   established_at = now(),
-		   established_pid = EXCLUDED.established_pid`,
-		[identity, channel],
-	).catch((err) => console.warn(`${log} listener_subscription upsert failed:`, err?.message));
+
+	// P1109 Tier-2 (AC-4 / AC-6): record listener presence in
+	// roadmap.listener_subscription from the SAME client that holds the LISTEN, so
+	// the established_pid matches the backend fn_listener_reconcile_drift inspects.
+	// Best-effort: a bookkeeping failure must not prevent the inbox loop from running.
+	await recordListenerSubscription(listenClient, identity, channel).catch(() => {});
 
 	// V3-C6 (P1438 step 3b): Conditionally start AgencyClaimLoop if flag enabled
 	// This loop allows the agency to self-claim work offers from the shared work_offers
@@ -246,7 +257,7 @@ export async function runLiaisonAgent(
 		const { rows } = await query(
 			`SELECT id, from_agent, to_agent, message_content, message_type,
 			        proposal_id, project_id, COALESCE(metadata, '{}'::jsonb) AS metadata,
-			        correlation_id, read_at
+			        correlation_id, read_at, reply_to
 			   FROM roadmap.message_ledger
 			  WHERE id = $1`,
 			[messageId],
@@ -288,6 +299,15 @@ export async function runLiaisonAgent(
 			return;
 		}
 
+		// protocol_pong terminates a ping exchange — consume it without
+		// invoking the LLM, otherwise the pong falls through to the generic
+		// handler and triggers an auto-reply chain between two liaisons.
+		if (msg.message_type === "protocol_pong") {
+			await markReadAndResolveTimeout(msg.id);
+			console.log(`${log} PONG consumed from ${msg.from_agent} (no reply)`);
+			return;
+		}
+
 		// P993: Typed A2A task protocol router
 		if (msg.message_type === "task_request") {
 			try {
@@ -296,6 +316,18 @@ export async function runLiaisonAgent(
 					markReadAndResolveTimeout,
 					bridgeTaskToOfferDispatch,
 					monitorTaskDispatch,
+					// P2326 AC-10: wire the live ad-hoc inflight gauge (count
+					// non-terminal sentinel-bucketed squad_dispatch rows).
+					countAdHocInflight: async (sentinelProposalId: number) => {
+						const { rows } = await query<{ inflight: string }>(
+							`SELECT count(*)::text AS inflight
+							   FROM roadmap_workforce.squad_dispatch
+							  WHERE proposal_id = $1
+							    AND offer_status NOT IN ('delivered', 'expired', 'failed')`,
+							[sentinelProposalId],
+						);
+						return Number(rows[0]?.inflight ?? "0");
+					},
 				};
 				await handleTypedTaskRequest(msg, identity, provider, helpers);
 			} catch (err) {
@@ -318,6 +350,32 @@ export async function runLiaisonAgent(
 				await handleWorkerReport(msg, identity, helpers);
 			} catch (err) {
 				console.error(`${log} worker report handler failed:`, err);
+			}
+			return;
+		}
+
+		// P1438 AC-17 + AC-11: minimal liaison↔liaison coordination verbs
+		// (capacity_query / handoff_request / capability_gap). Deterministic
+		// handlers — must run before the generic LLM fallback so a capacity query
+		// gets a substantive live answer, not a canned auto-reply.
+		if (isA2AVerb(msg.message_type)) {
+			try {
+				const helpers: VerbHelpers = {
+					query,
+					insertReply,
+					markRead: markReadAndResolveTimeout,
+					bridgeTaskToOfferDispatch,
+					provider,
+					log,
+				};
+				const outcome = await routeA2AVerb(msg, identity, helpers);
+				console.log(
+					`${log} VERB [${msg.message_type}] → ${outcome.action}` +
+						(outcome.replyId ? ` reply=${outcome.replyId}` : "") +
+						(outcome.dispatchId ? ` dispatch=${outcome.dispatchId}` : ""),
+				);
+			} catch (err) {
+				console.error(`${log} A2A verb handler failed:`, err);
 			}
 			return;
 		}
@@ -364,6 +422,18 @@ export async function runLiaisonAgent(
 				});
 				await markReadAndResolveTimeout(msg.id);
 			}
+			return;
+		}
+
+		// Loop breaker: a generic text/error message that is itself a reply gets
+		// consumed, never auto-replied to. Both endpoints here are bots — replying
+		// to a reply produces an unbounded exchange (2026-06-12: two liaisons
+		// ping-ponged "handler failed" errors every ~3.5s until one side died).
+		if (msg.reply_to != null) {
+			await markReadAndResolveTimeout(msg.id);
+			console.log(
+				`${log} REPLY consumed id=${msg.id} from=${msg.from_agent} (reply_to=${msg.reply_to}, no auto-reply)`,
+			);
 			return;
 		}
 
@@ -440,8 +510,18 @@ export async function runLiaisonAgent(
 		}
 	});
 
+	// P3315 AC-3: Periodic reaper — flip orphaned active tracker rows to 'failed'
+	// so stale rows from failed dispatches never permanently wedge retries.
+	const REAPER_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+	const reaperInterval = setInterval(() => {
+		detectStuckWorkers().catch((err) =>
+			console.warn(`${log} detectStuckWorkers error:`, err),
+		);
+	}, REAPER_INTERVAL_MS);
+
 	return {
 		stop: async () => {
+			clearInterval(reaperInterval);
 			// Stop the claim loop first if it's running
 			if (claimLoop) {
 				try {
@@ -455,12 +535,12 @@ export async function runLiaisonAgent(
 				}
 			}
 
-			// AC-4 (P1107): deregister subscription on disconnect
-			await query(
-				`DELETE FROM roadmap.listener_subscription
-				  WHERE agent_identity = $1 AND channel = $2`,
-				[identity, channel],
-			).catch(() => { /* ignore — connection may be closing */ });
+			// P1109 Tier-2 (AC-5): clean up the listener_subscription row on graceful
+			// shutdown BEFORE closing the client, so fn_listener_reconcile_drift does
+			// not later report it as a stale (pid-not-in-pg_stat_activity) row.
+			await removeListenerSubscription(listenClient, identity, channel).catch(
+				() => {},
+			);
 
 			try {
 				await listenClient.query(`UNLISTEN "${channel}"`);
@@ -544,11 +624,31 @@ export async function bridgeTaskToOfferDispatch(args: {
 }): Promise<TaskBridgeResult> {
 	const { msg, identity, provider } = args;
 	const metadata = msg.metadata ?? {};
+	const taskBrief = taskBriefFromMessage(msg);
+	if (!taskBrief) {
+		throw new Error(
+			"task bridge requires non-empty message_content or metadata.task/brief/message/content",
+		);
+	}
 	const proposalId = numberFrom(metadata.proposal_id) ?? msg.proposal_id;
 	if (!proposalId) {
 		throw new Error(
 			"task bridge requires proposal_id on message_ledger or metadata",
 		);
+	}
+
+	// P2496 AC-4: this bridge INSERTs into squad_dispatch directly, bypassing
+	// postWorkOffer and therefore its AC-1 terminal-status guard. Re-assert that
+	// guard here so an A2A task_request can never resurrect work on a COMPLETE
+	// proposal. The caller catches this and replies with a clear error (see the
+	// task-bridge try/catch in the message handler).
+	const { rows: statusRows } = await query<{ status: string | null }>(
+		`SELECT status FROM roadmap_proposal.proposal WHERE id = $1`,
+		[proposalId],
+	);
+	const proposalStatus = statusRows[0]?.status ?? null;
+	if (isTerminalProposalStatus(proposalStatus)) {
+		throw new TerminalProposalError(proposalId, proposalStatus as string);
 	}
 
 	const role =
@@ -564,21 +664,32 @@ export async function bridgeTaskToOfferDispatch(args: {
 	const capabilities = stringArrayFrom(
 		metadata.required_capabilities ?? metadata.capabilities,
 	);
-	const requiredCapabilities = capabilities.length > 0 ? capabilities : [role];
+	// When the task message doesn't specify capabilities, derive them from the role
+	// via the canonical role→capability map — NOT the role name itself. The old
+	// `[role]` fallback wrote required_capabilities=["developer"] for a developer
+	// task, but agencies advertise the capability "develop" (role names ≠ capability
+	// names), so fn_claim_work_offer's capability gate never matched and the offer
+	// was unclaimable forever. (Found live 2026-06-14: offers 62786/87/88 stuck open.)
+	const requiredCapabilities =
+		capabilities.length > 0
+			? capabilities
+			: (ROLE_TO_REQUIRED_CAPABILITIES[role.toLowerCase()] ?? ["develop"]);
 	const leaseTtlSeconds = numberFrom(metadata.lease_ttl_seconds) ?? 60;
 	const routeHint = stringFrom(metadata.route_hint) ?? provider;
+	// P1445 AC-3: prefer the orchestrator-assigned hint; the env fallback is
+	// gated (opt-in) so the liaison never silently self-selects a shared worktree.
 	const worktreeHint =
 		stringFrom(metadata.worktree_hint) ??
 		stringFrom(metadata.worktree) ??
 		process.env.AGENCY_WORKTREE ??
-		process.env.AGENTHIVE_DEFAULT_EXECUTOR_WORKTREE ??
+		resolveExecutorWorktreeFallback() ??
 		null;
 	const statusPollMs = numberFrom(metadata.status_poll_ms) ?? 10_000;
 	const statusTimeoutMs =
 		numberFrom(metadata.status_timeout_ms) ?? 2 * 60 * 60_000;
 
 	const offerMetadata = {
-		task: msg.message_content,
+		task: taskBrief,
 		source: "message_ledger_task_bridge",
 		source_message_id: msg.id,
 		source_from_agent: msg.from_agent,
@@ -703,11 +814,13 @@ export async function monitorTaskDispatch(args: {
 		const statusKey = `${row.offer_status}:${row.dispatch_status}:${row.worker_identity ?? ""}`;
 		if (statusKey !== lastStatus) {
 			lastStatus = statusKey;
-			const isTerminal = terminalOfferStatus(row.offer_status, row.dispatch_status);
-			const isSuccess = row.offer_status === "delivered" || row.dispatch_status === "completed";
+			const isReverted = revertedOfferStatus(row.offer_status, row.dispatch_status);
+			const isTerminal = terminalOfferStatus(row.offer_status, row.dispatch_status) || isReverted;
+			const isSuccess = !isReverted &&
+				(row.offer_status === "delivered" || row.dispatch_status === "completed");
 			const messageType = isTerminal
 				? isSuccess
-					? "task_result"
+					? "task_status"
 					: "task_error"
 				: "task_status";
 			await insertReply({
@@ -723,7 +836,22 @@ export async function monitorTaskDispatch(args: {
 			});
 		}
 
-		if (terminalOfferStatus(row.offer_status, row.dispatch_status)) return;
+		if (revertedOfferStatus(row.offer_status, row.dispatch_status)) {
+			await markLiaisonTaskTrackerFailed({
+				correlationId: args.correlationId,
+				dispatchId: args.dispatchId,
+			});
+			return;
+		}
+		if (terminalOfferStatus(row.offer_status, row.dispatch_status)) {
+			if (row.offer_status !== "delivered" && row.dispatch_status !== "completed") {
+				await markLiaisonTaskTrackerFailed({
+					correlationId: args.correlationId,
+					dispatchId: args.dispatchId,
+				});
+			}
+			return;
+		}
 		await sleep(Math.max(1_000, args.pollMs));
 	}
 
@@ -756,6 +884,13 @@ function terminalOfferStatus(
 	);
 }
 
+function revertedOfferStatus(
+	offerStatus: string,
+	dispatchStatus: string,
+): boolean {
+	return offerStatus === "open" && dispatchStatus === "open";
+}
+
 function toOfferUuid(dispatchId: number): string {
 	const hex = BigInt(dispatchId).toString(16).padStart(12, "0").slice(-12);
 	return `00000000-0000-0000-0000-${hex}`;
@@ -765,6 +900,21 @@ function stringFrom(value: unknown): string | null {
 	return typeof value === "string" && value.trim().length > 0
 		? value.trim()
 		: null;
+}
+
+function taskBriefFromMessage(msg: IncomingMessage): string | null {
+	const metadata = msg.metadata ?? {};
+	return (
+		stringFrom(msg.message_content) ??
+		stringFrom(metadata.task) ??
+		stringFrom(metadata.brief) ??
+		stringFrom(metadata.message) ??
+		stringFrom(metadata.content) ??
+		stringFrom(metadata.text) ??
+		stringFrom(metadata.body) ??
+		stringFrom(metadata.note) ??
+		stringFrom(metadata.notes)
+	);
 }
 
 function numberFrom(value: unknown): number | null {

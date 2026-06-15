@@ -9,7 +9,9 @@ import { strict as assert } from "node:assert";
 
 import {
 	BackpressureError,
+	TERMINAL_PROPOSAL_STATUSES,
 	TerminalProposalError,
+	isTerminalProposalStatus,
 	postWorkOffer,
 	type QueryFn,
 } from "./post-work-offer.ts";
@@ -196,5 +198,136 @@ test("postWorkOffer: COMPLETE proposal is refused before dispatch insert (termin
 		),
 		false,
 		"terminal status guard must prevent INSERT",
+	);
+});
+
+// ── P2496: shared terminal-status guard (AC-1/AC-4/AC-5 single source of truth) ──
+
+test("P2496 isTerminalProposalStatus: COMPLETE is terminal (case-insensitive)", () => {
+	assert.equal(isTerminalProposalStatus("COMPLETE"), true);
+	assert.equal(isTerminalProposalStatus("complete"), true);
+	assert.equal(isTerminalProposalStatus("Complete"), true);
+});
+
+test("P2496 isTerminalProposalStatus: non-terminal + nullish are not terminal", () => {
+	for (const s of ["DRAFT", "REVIEW", "DEVELOP", "MERGE", "develop"]) {
+		assert.equal(isTerminalProposalStatus(s), false, `${s} must not be terminal`);
+	}
+	assert.equal(isTerminalProposalStatus(null), false);
+	assert.equal(isTerminalProposalStatus(undefined), false);
+	assert.equal(isTerminalProposalStatus(""), false);
+});
+
+test("P2496 TERMINAL_PROPOSAL_STATUSES: contains COMPLETE (the only terminal state today)", () => {
+	assert.equal(TERMINAL_PROPOSAL_STATUSES.has("COMPLETE"), true);
+	assert.equal(TERMINAL_PROPOSAL_STATUSES.has("DEVELOP"), false);
+});
+
+test("P1438 AC-16: posting never queries presence/dispatchable; preflight checks capability only", async () => {
+	// Emergent availability: open-pool posting must not depend on
+	// roadmap.agency.dispatchable / provider heartbeat / bridge liveness. A
+	// pattern-matching mock answers every query so postWorkOffer runs through to
+	// the capability preflight (and the INSERT), then we assert NO query touched a
+	// presence/dispatchable signal.
+	process.env.AGENTHIVE_MAX_INFLIGHT_OFFERS = "20";
+	const calls: Array<{ sql: string; params: unknown[] }> = [];
+	const queue = (async (sql: string, params?: unknown[]) => {
+		calls.push({ sql, params: params ?? [] });
+		if (/pg_notify/i.test(sql)) return { rows: [] } as never;
+		// proposal context lookup → an active, non-terminal, non-paused proposal
+		if (/FROM roadmap_proposal\.proposal\b/i.test(sql) && /WHERE id/i.test(sql)) {
+			return {
+				rows: [
+					{
+						project_id: 1,
+						status: "DEVELOP",
+						maturity: "new",
+						gate_scanner_paused: false,
+						gate_paused_by: null,
+						gate_paused_at: null,
+					},
+				],
+			} as never;
+		}
+		// capability preflight → a capable agency exists
+		if (/provider_registry/i.test(sql)) return { rows: [{ count: 1 }] } as never;
+		if (/recent_runs/i.test(sql)) return { rows: [{ recent_runs: 0 }] } as never;
+		if (/INSERT INTO/i.test(sql)) return { rows: [{ id: 1, dispatch_version: 1 }] } as never;
+		// backpressure + convergence-guard counts → under threshold
+		if (/count/i.test(sql)) return { rows: [{ count: 0 }] } as never;
+		return { rows: [] } as never;
+	}) as never;
+
+	await postWorkOffer(
+		{ proposalId: 4242, squadName: "P4242-test", role: "gate-reviewer", task: "review" },
+		queue,
+	).catch(() => {
+		/* we only assert on the queries made, not the final outcome */
+	});
+
+	// AC-16 core: posting issued NO presence/dispatchable query.
+	for (const call of calls) {
+		assert.doesNotMatch(
+			call.sql,
+			/dispatchable|v_agency_status/i,
+			`posting must not query presence/dispatchable: ${call.sql.replace(/\s+/g, " ").slice(0, 90)}`,
+		);
+	}
+	// And the capability preflight DID run (proves we reached it — capability gap,
+	// not presence, is the only posting gate).
+	assert.ok(
+		calls.some((c) => /provider_registry/i.test(c.sql) && /capabilities/i.test(c.sql)),
+		"capability preflight (provider_registry + capabilities) must run",
+	);
+});
+
+test("P3314: postWorkOffer skips INSERT+NOTIFY when a live (proposal, role) offer already exists", async () => {
+	process.env.AGENTHIVE_MAX_INFLIGHT_OFFERS = "20";
+	const calls: Array<{ sql: string; params: unknown[] }> = [];
+	const queue = (async (sql: string, params?: unknown[]) => {
+		calls.push({ sql, params: params ?? [] });
+		if (/pg_notify/i.test(sql)) return { rows: [] } as never;
+		if (/FROM roadmap_proposal\.proposal\b/i.test(sql) && /WHERE id/i.test(sql)) {
+			return {
+				rows: [
+					{
+						project_id: 1,
+						status: "DEVELOP",
+						maturity: "new",
+						gate_scanner_paused: false,
+						gate_paused_by: null,
+						gate_paused_at: null,
+					},
+				],
+			} as never;
+		}
+		if (/provider_registry/i.test(sql)) return { rows: [{ count: 1 }] } as never;
+		// the dedup guard SELECT (id, by proposal_id + dispatch_role + live status) →
+		// an existing live offer is present
+		if (/dispatch_role = \$2/i.test(sql) && /offer_status IN/i.test(sql)) {
+			return { rows: [{ id: 555 }] } as never;
+		}
+		if (/recent_runs/i.test(sql)) return { rows: [{ recent_runs: 0 }] } as never;
+		if (/INSERT INTO/i.test(sql)) return { rows: [{ id: 999, attempt_count: 1, was_replay: false }] } as never;
+		if (/count/i.test(sql)) return { rows: [{ count: 0 }] } as never;
+		return { rows: [] } as never;
+	}) as never;
+
+	const result = await postWorkOffer(
+		{ proposalId: 4243, squadName: "P4243-test", role: "developer", task: "x" },
+		queue,
+	);
+
+	assert.equal(result.deduped, true, "result must be flagged deduped");
+	assert.equal(result.dispatchId, 555, "dispatchId must point at the existing live offer");
+	assert.equal(
+		calls.some((c) => /INSERT INTO roadmap_workforce\.squad_dispatch/.test(c.sql)),
+		false,
+		"dedup must skip the INSERT (no duplicate offer row)",
+	);
+	assert.equal(
+		calls.some((c) => /pg_notify/.test(c.sql)),
+		false,
+		"dedup must skip the wake NOTIFY (no re-ring)",
 	);
 });

@@ -54,9 +54,9 @@ const dryRun = process.argv.includes("--dry-run");
 const verbose = process.argv.includes("--verbose");
 const projectIdFilter = process.argv.find(arg => arg.startsWith("--project-id="))?.split("=")[1];
 
-const vault = getVault();
-
 async function main(): Promise<void> {
+	// P1072: getVault() is now async — resolve the adapter inside main().
+	const vault = await getVault();
 	console.log(`
 ╔════════════════════════════════════════════════════════════════╗
 ║  Vault v2 Migration: File-Vault → KMS-backed Secrets Manager  ║

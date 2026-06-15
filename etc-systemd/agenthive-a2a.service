@@ -15,7 +15,7 @@ Environment=PATH=/home/gary/.nvm/versions/node/v24.14.0/bin:/usr/local/bin:/usr/
 Environment=HOME=/home/gary
 # P267: drain up to 90s before systemd escalates to SIGKILL
 Environment=AGENTHIVE_A2A_DRAIN_MS=90000
-ExecStart=/home/gary/.nvm/versions/node/v24.14.0/bin/node --import jiti/register scripts/a2a-dispatcher.ts
+ExecStart=/usr/local/bin/bun scripts/a2a-dispatcher.ts
 Restart=on-failure
 RestartSec=15
 TimeoutStopSec=120

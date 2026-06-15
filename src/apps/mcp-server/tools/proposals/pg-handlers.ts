@@ -15,10 +15,6 @@ import type { CallToolResult } from "../../types.ts";
 import { RfcStates, Maturity } from "../../../../core/workflow/state-names.ts";
 import { validateLease, formatValidationError } from "../../../../core/proposal/proposal-integrity.ts";
 import {
-	isRegisteredAgency,
-	hasActiveLiaisonSession,
-} from "../../../../infra/agency/liaison-service.ts";
-import {
 	detectConflicts,
 	type ConflictEntry,
 } from "../../../../core/proposal/directive-conflict-detector.ts";
@@ -464,7 +460,7 @@ export class PgProposalHandlers {
 					content: [
 						{
 							type: "text",
-							text: "⚠️ prop_update: type changes are not permitted via this MCP surface. Use roadmap.fn_reconcile_proposal_type or migration P436. Affected key: 'type'.",
+							text: "⚠️ prop_update: type changes are not permitted via this MCP surface. To change a proposal's workflow template, run: UPDATE roadmap.workflows SET template_id=<target-template-id>, current_stage='<current-status>' WHERE proposal_id=<id>; (list templates: SELECT id, name FROM roadmap.workflow_templates;). Affected key: 'type'.",
 						},
 					],
 				};
@@ -771,6 +767,58 @@ export class PgProposalHandlers {
 				};
 			}
 
+			// P3311: source-side premature-maturity block. Refuse to mark a DEVELOP
+			// proposal 'mature' (= ready for the D3 gate) when it has ACs but ZERO
+			// passing — there is no verified implementation to gate. This is the
+			// symmetric partner of the postWorkOffer demote-guard: without it, the
+			// enhancer revise-loop (and any worker) re-matures unbuilt proposals
+			// faster than the gate guard can demote them, producing an endless
+			// mature<->new oscillation (the D3 skeptic-beta dispatch loop). Blocking
+			// the maturation at the source makes the proposal SETTLE at 'new' so a
+			// developer is dispatched instead of the gate. Gated by the same flag as
+			// the postWorkOffer guard; default on.
+			const prematureBlockEnabled =
+				(process.env.AGENTHIVE_PREMATURE_GATE_GUARD_ENABLED ?? "true").toLowerCase() !==
+				"false";
+			if (prematureBlockEnabled && args.maturity === Maturity.MATURE) {
+				const { rows: gateRows } = await query<{
+					status: string | null;
+					total: number;
+					passing: number;
+				}>(
+					`SELECT p.status,
+					        count(ac.*)::int AS total,
+					        count(ac.*) FILTER (WHERE ac.status = 'pass')::int AS passing
+					   FROM roadmap_proposal.proposal p
+					   LEFT JOIN roadmap_proposal.proposal_acceptance_criteria ac
+					     ON ac.proposal_id = p.id
+					  WHERE p.id = $1
+					  GROUP BY p.status`,
+					[id],
+				);
+				const gate = gateRows[0];
+				if (
+					gate &&
+					gate.status?.toUpperCase() === RfcStates.DEVELOP &&
+					gate.total > 0 &&
+					gate.passing === 0
+				) {
+					return {
+						content: [
+							{
+								type: "text",
+								text:
+									`prop_set_maturity refused: P${id} is in DEVELOP with 0/${gate.total} passing acceptance criteria — ` +
+									`there is no verified implementation to gate, so it cannot be matured. ` +
+									`Deliver the code, then mark ACs passing via mcp_proposal action=verify_ac ` +
+									`(status=pass with evidence) before setting maturity=mature. ` +
+									`Maturity left unchanged; the proposal stays 'new' so a developer is dispatched.`,
+							},
+						],
+					};
+				}
+			}
+
 			// Attribution: explicit agent/author/actor arg, else the active lease
 			// holder. Never default to 'system' (admin identity + erased attribution).
 			const maturityActor = await resolveActingIdentity(
@@ -847,6 +895,7 @@ export class PgProposalHandlers {
 		display_id?: string;
 		durationMinutes?: number;
 		force?: boolean;
+		message?: string;
 	}): Promise<CallToolResult> {
 		try {
 			// P1340 AC-4: accept id|proposal_id|display_id as aliases for the
@@ -879,23 +928,16 @@ export class PgProposalHandlers {
 				[agentArg, "llm", "developer"],
 			);
 
-			// AC-7: liaison is the sole prop_claim gateway for registered agencies.
-			// If the claiming agent identity matches a registered agency, it must have
-			// an active liaison session — otherwise the claim is rejected.
-			const agencyRegistered = await isRegisteredAgency(agentArg);
-			if (agencyRegistered) {
-				const hasSession = await hasActiveLiaisonSession(agentArg);
-				if (!hasSession) {
-					return {
-						content: [
-							{
-								type: "text",
-								text: `Agency '${agentArg}' is registered but has no active liaison session. Dispatch is handled by the universal agenthive-a2a-host floor (DB-driven discovery) — there is no per-agency service to start. If the agency needs an AI liaison to claim/coordinate, cold-wake it; the a2a-host floor attaches the LISTEN session and the offer_dispatch hub.`,
-							},
-						],
-					};
-				}
-			}
+			// P1438 AC-19 (C6 — smart AI-agent liaison): the prop_claim path no longer
+			// requires a registered agency to have an open agency_liaison_session row.
+			// V3's liaison is a cold-wakeable AI session, NOT a per-agency service that
+			// opens a session — so gating claim on session presence locked out exactly
+			// the cold-wake model the design mandates. Availability is now revealed by a
+			// successful claim (emergent presence): the durable gates are registry
+			// existence (the agent_registry upsert above) and lease availability (the
+			// lease/oversized checks below + fn_claim_work_offer's atomic ceiling). The
+			// retired AC-7 "liaison is the sole prop_claim gateway" check used to live
+			// here. See P1438 AC-15/16 (wake-is-not-presence) and P463 AC-7 (superseded).
 
 			// P671 AC-7: Check if proposal is oversized; only split-architect may claim it
 			const proposalCheckResult = await query<{ oversized: boolean }>(
@@ -963,7 +1005,7 @@ export class PgProposalHandlers {
 				);
 			}
 
-			const claimed = await pg.claimLease(id, agentArg, expiresAt);
+			const claimed = await pg.claimLease(id, agentArg, expiresAt, args.message);
 			if (!claimed) {
 				return {
 					content: [

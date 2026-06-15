@@ -347,10 +347,11 @@ export async function resolveGateRole(
 /**
  * Resolve a behavioral persona string from a role name alone (no proposal_type/gate pair).
  *
- * Lookup order:
- *   1. BUILTIN_FALLBACK — match on role name (e.g. 'skeptic-alpha' → D1 persona).
- *   2. gate_role table   — WHERE role = $1 AND lifecycle_status = 'active' LIMIT 1.
- *   3. agent_role_profile — WHERE role = $1, reads prompt_template->>'system' LIMIT 1.
+ * Precedence order (P1392):
+ *   1. File-based Tier-1 (~/. claude/agents/*.md) — new in P1392, highest priority.
+ *   2. BUILTIN_FALLBACK — match on role name (e.g. 'skeptic-alpha' → D1 persona).
+ *   3. gate_role table   — WHERE role = $1 AND lifecycle_status = 'active' LIMIT 1.
+ *   4. agent_role_profile — WHERE role = $1, reads prompt_template->>'system' LIMIT 1.
  *
  * Returns null when no persona is found (caller degrades gracefully — no persona
  * prepended to the task string).  Never throws.
@@ -359,13 +360,29 @@ export async function resolvePersonaByRoleName(
 	roleName: string,
 	queryFn: QueryFn = defaultQuery as QueryFn,
 ): Promise<string | null> {
-	// 1. BUILTIN_FALLBACK: scan values to find a matching role name.
+	// P1392: 1. File-based Tier-1 — highest priority
+	try {
+		const { resolveFilePersona } = await import(
+			"./file-persona-resolver.ts"
+		);
+		const filePersona = await resolveFilePersona(roleName);
+		if (filePersona) {
+			return filePersona.body;
+		}
+	} catch (err) {
+		console.warn(
+			`[GateRoleResolver] file-based persona lookup failed for '${roleName}' (non-fatal):`,
+			err instanceof Error ? err.message : err,
+		);
+	}
+
+	// 2. BUILTIN_FALLBACK: scan values to find a matching role name.
 	for (const entry of Object.values(BUILTIN_FALLBACK)) {
 		if (entry.role === roleName) return entry.persona;
 	}
 
 	try {
-		// 2. gate_role table — keyed by (proposal_type, gate) but also has role column.
+		// 3. gate_role table — keyed by (proposal_type, gate) but also has role column.
 		const gateResult = await queryFn(
 			`SELECT persona
 			   FROM roadmap_proposal.gate_role
@@ -378,7 +395,7 @@ export async function resolvePersonaByRoleName(
 			return gatePersona;
 		}
 
-		// 3. agent_role_profile — wider role registry; system prompt lives in JSONB.
+		// 4. agent_role_profile — wider role registry; system prompt lives in JSONB.
 		const profileResult = await queryFn(
 			`SELECT prompt_template->>'system' AS persona
 			   FROM roadmap.agent_role_profile

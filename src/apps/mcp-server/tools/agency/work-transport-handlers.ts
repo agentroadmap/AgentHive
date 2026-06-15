@@ -12,6 +12,7 @@
  */
 
 import { query } from "../../../../infra/postgres/pool.js";
+import { verifyDeliverables } from "../../../../core/orchestration/deliverable-verifier.js";
 import crypto from "crypto";
 
 const POLL_INTERVAL_MS = 2000;
@@ -40,6 +41,7 @@ export interface AgencySubscribeResult {
 }
 
 export interface AgencySubmitResultInput {
+	agency_identity?: string;
 	dispatch_id: bigint;
 	claim_token: string;
 	status: "completed" | "failed";
@@ -55,9 +57,14 @@ export interface AgencySubmitResultOutput {
 	agent_runs_id?: number;
 	agent_runs_row?: Record<string, any>;
 	message?: string;
+	/** P1438 AC-12/13: false when a 'completed' submit was downgraded for lack of evidence. */
+	delivered?: boolean;
+	/** P1438 AC-12/13: reason the completion was rejected as a delivery (if any). */
+	evidence_rejected?: string;
 }
 
 export interface AgencyHeartbeatInput {
+	agency_identity?: string;
 	dispatch_id: bigint;
 	claim_token: string;
 	lease_seconds?: number;
@@ -84,6 +91,11 @@ export async function verifyAgencyBearer(
 	const authMode = (process.env.MCP_AGENCY_AUTH || "off").toLowerCase();
 	if (authMode !== "on") {
 		return { ok: true }; // Trusted-LAN mode
+	}
+
+	// Auth required: agency_identity must be provided so token can be scoped to registry row
+	if (!agency_identity?.trim()) {
+		return { ok: false, status: 401, reason: "missing_agency_identity" };
 	}
 
 	// Auth required: bearer token must be present and match token_hash
@@ -240,7 +252,7 @@ export async function handleAgencySubmitResult(input: AgencySubmitResultInput): 
 	}
 
 	// Authenticate
-	const authCheck = await verifyAgencyBearer("", input.authorization); // Placeholder; real impl gets from context
+	const authCheck = await verifyAgencyBearer(input.agency_identity || "", input.authorization);
 	if (!authCheck.ok) {
 		const error = new Error(`Authentication failed: ${authCheck.reason}`);
 		(error as any).status = authCheck.status || 401;
@@ -258,7 +270,7 @@ export async function handleAgencySubmitResult(input: AgencySubmitResultInput): 
            dispatch_status = CASE WHEN $2='completed' THEN 'completed' ELSE 'failed' END,
            completed_at = now()
        WHERE id = $1 AND claim_token = $3 AND offer_status = 'claimed'
-       RETURNING proposal_id, dispatch_role, agent_identity, squad_name, required_capabilities`,
+       RETURNING proposal_id, dispatch_role, agent_identity, agency_identity, squad_name, required_capabilities`,
 			[input.dispatch_id, input.status, input.claim_token],
 		);
 
@@ -321,13 +333,69 @@ export async function handleAgencySubmitResult(input: AgencySubmitResultInput): 
 			],
 		);
 
+		// P1438 AC-12/13 (option B): evidence-gate the MCP completion path so the AI
+		// liaison's completions are held to the same bar as the mechanical handler,
+		// reusing verifyDeliverables (single source of truth). A 'completed' submit
+		// only stays 'delivered' if it carries a non-empty result AND the role
+		// artifact exists (proposal_reviews / agent_runs / AC / discussion). The
+		// agent_runs row was just inserted, so the developer check sees it. On a miss
+		// we downgrade the OFFER to failed — the worker ran but produced no canonical
+		// deliverable; never a false 'delivered'. (D4 zero-token gate auto-advance is
+		// unaffected: it completes via fn_complete_work_offer in the mechanical
+		// handler, not this MCP transport path.)
+		let evidenceRejected: string | null = null;
+		if (input.status === "completed") {
+			const summaryEmpty =
+				!output_summary_obj ||
+				(typeof input.output_summary === "string" &&
+					input.output_summary.trim().length === 0);
+			if (summaryEmpty) {
+				evidenceRejected = "empty result summary";
+			} else {
+				const verdict = await verifyDeliverables({
+					proposalId: Number(dispatch.proposal_id),
+					dispatchRole: dispatch.dispatch_role,
+					workerIdentity: dispatch.agent_identity ?? dispatch.agency_identity ?? "",
+					dispatchId: Number(input.dispatch_id),
+				}).catch((e) => ({
+					verified: false,
+					failureReason: `verification error: ${e instanceof Error ? e.message : String(e)}`,
+				}));
+				if (!verdict.verified) {
+					evidenceRejected = verdict.failureReason ?? "no role artifact";
+				}
+			}
+			if (evidenceRejected) {
+				await query(
+					`UPDATE roadmap_workforce.squad_dispatch
+					    SET offer_status = 'failed',
+					        dispatch_status = 'failed',
+					        failure_class = COALESCE(failure_class, 'no_artifact'),
+					        failure_is_transient = false,
+					        metadata = COALESCE(metadata, '{}'::jsonb)
+					                 || jsonb_build_object('evidence_rejected', $2::text)
+					  WHERE id = $1`,
+					[input.dispatch_id, evidenceRejected],
+				);
+			}
+		}
+
 		await query("COMMIT");
 
 		const agent_runs_id = runsResult.rows[0]?.id;
+		if (evidenceRejected) {
+			return {
+				agent_runs_id,
+				message: `Completion downgraded to failed — evidence gate: ${evidenceRejected}`,
+				delivered: false,
+				evidence_rejected: evidenceRejected,
+			} as AgencySubmitResultOutput;
+		}
 		return {
 			agent_runs_id,
 			message: "Result submitted",
-		};
+			delivered: input.status === "completed",
+		} as AgencySubmitResultOutput;
 	} catch (err) {
 		await query("ROLLBACK").catch(() => {});
 		throw err;
@@ -351,7 +419,7 @@ export async function handleAgencyHeartbeat(input: AgencyHeartbeatInput): Promis
 	}
 
 	// Authenticate
-	const authCheck = await verifyAgencyBearer("", input.authorization); // Placeholder
+	const authCheck = await verifyAgencyBearer(input.agency_identity || "", input.authorization);
 	if (!authCheck.ok) {
 		const error = new Error(`Authentication failed: ${authCheck.reason}`);
 		(error as any).status = authCheck.status || 401;

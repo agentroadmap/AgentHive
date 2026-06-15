@@ -225,8 +225,8 @@ export async function briefingAssemble(
       personality = agentResult.rows[0].personality;
     }
 
-    // Also load agent semantic memory for context injection
-    const agentSemantic = await memoryService.getAgentMemory(briefed_by, "semantic");
+    // P1352 AC-6: Load agent semantic memory for context injection, limited to top-K by importance_score
+    const agentSemantic = await memoryService.getAgentMemory(briefed_by, "semantic", 10);
     if (agentSemantic && Object.keys(agentSemantic).length > 0) {
       inherited_memory.push({
         key: `agent_memory:semantic`,

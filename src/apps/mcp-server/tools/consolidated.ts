@@ -79,8 +79,17 @@ function createRouterTool(
 		async handler(input: Record<string, unknown>): Promise<CallToolResult> {
 			const request = input as RouterArgs;
 			const action = request.action?.trim();
-			if (!action || action === "list_actions") {
+
+			// Explicit list_actions request
+			if (action === "list_actions") {
 				return formatActions(name, routes);
+			}
+
+			// Missing or empty action — return error instead of silent default
+			if (!action || action === "") {
+				return textResult(
+					`error: MCP_NO_ACTION\nTool: ${name}\nMessage: action parameter is required; use action=list_actions to enumerate valid actions.\n\nFull tool description:\n${description}`,
+				);
 			}
 
 			const toolName = routes[action];
@@ -196,6 +205,11 @@ const proposalRoutes: RouteMap = {
 	// P1386: Early-exit no-op action
 	report_no_op: "prop_report_no_op",
 	prop_report_no_op: "prop_report_no_op",
+	// P1071: References and parent management
+	add_reference: "add_reference",
+	remove_reference: "remove_reference",
+	list_references: "list_references",
+	set_parent: "set_parent",
 };
 
 const messageRoutes: RouteMap = {
@@ -264,6 +278,11 @@ const agentRoutes: RouteMap = {
 	// P925: operator rename CLI for permanent agent display aliases
 	rename: "agent_rename",
 	agent_rename: "agent_rename",
+	// P1109 Tier-2: presence + listener-subscription via MCP (replaces raw fn_pulse
+	// / LISTEN-bookkeeping SQL in agency processes)
+	pulse: "agent_pulse",
+	subscribe: "agent_subscribe",
+	unsubscribe: "agent_unsubscribe",
 };
 
 const memoryRoutes: RouteMap = {
@@ -298,6 +317,7 @@ const documentRoutes: RouteMap = {
 
 const schemaRoutes: RouteMap = {
 	describe: "schema_describe",
+	lint_migration: "schema_lint_migration",
 };
 
 const opsRoutes: RouteMap = {
@@ -346,6 +366,10 @@ const opsRoutes: RouteMap = {
 	ref_get_term: "ref_get_term",
 	// P498: Config audit tool
 	config_audit: "config_audit",
+	// P828: Config mutation + audit surface
+	config_get: "config_get",
+	config_mutation: "config_mutation",
+	list_config_mutations: "list_config_mutations",
 	// P895: Backup harness
 	backup_take: "backup_take",
 	backup_verify: "backup_verify",
@@ -366,6 +390,8 @@ const opsRoutes: RouteMap = {
 	capacity_clear: "capacity_clear",
 	// P1511: SLA monitoring and health check
 	health_check: "health_check",
+	// P1124: D4 merge-gate validator
+	d4_validate: "d4_validate",
 };
 
 const projectRoutes: RouteMap = {

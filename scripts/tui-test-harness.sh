@@ -106,6 +106,14 @@ echo "[2] Tab → cockpit view"
 send_keys Tab 2
 expect_marker "cockpit header" "ENGINEER'S COCKPIT" || FAILED=$((FAILED+1))
 expect_marker "cockpit Workforce panel" "Workforce" || FAILED=$((FAILED+1))
+# P1374 (P1365-B): the workforce header reports the dispatch bench as
+# "N ready" (and "N ready · M cooling" when any agency is soft-throttled by
+# capacity). "ready" is present whenever at least one idle agency exists, so it
+# is a stable marker for the ready/cooling split feature.
+# NOTE: the AC-8 frozen-mock snapshot ("10 agencies, 3 cooling") and the
+# --update-snapshot baseline require a render against injected mock data; this
+# live-DB harness asserts the format markers present with real data.
+expect_marker "cockpit ready/cooling split" "ready" || FAILED=$((FAILED+1))
 expect_no_crash "cockpit" || FAILED=$((FAILED+1))
 echo
 

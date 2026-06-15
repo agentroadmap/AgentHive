@@ -58,7 +58,18 @@ Important live facts:
 - Do not drop compatibility columns or old views unless your task explicitly completes the runtime migration and verifies every dependent code path.
 - Live data may still contain legacy-cased stage values such as `REVIEW` and `DEVELOP`. Avoid brittle case-sensitive assumptions in SQL and code.
 
-**Process supervision topology (P1095):** MCP and agency liaisons are **not** embedded in the orchestrator — they are independent systemd units. `agenthive-mcp.service` (`Restart=always`, `RestartSec=3`) owns the listener on `127.0.0.1:6421`; liveness check: `curl -fsS http://127.0.0.1:6421/health`. Each active agency runs as `agenthive-agency@<id>.service` (`Restart=on-failure`, `RestartSec=15`, `Requires=agenthive-mcp.service`). The orchestrator, MCP server, state-feed, board, and agency liaison units are peers under systemd — no process is the parent of another; stopping the orchestrator does not stop MCP or liaisons. Full topology and failure-mode table: `docs/architecture/mcp-liaison-topology.md`.
+**Process supervision topology (P1095/P1132):** MCP and agency communication are
+**not** embedded in the orchestrator — they are independent systemd surfaces.
+`agenthive-mcp.service` (`Restart=always`, `RestartSec=3`) owns the listener on
+`127.0.0.1:6421`; liveness check: `curl -fsS
+http://127.0.0.1:6421/health`. The current deterministic agency floor is
+`agenthive-a2a-host.service`, a shared per-host process that attaches LISTEN
+sessions and heartbeats for DB-registered agencies. Do not create new
+`agenthive-agency@<id>` or `agenthive-liaison@<agency>` units; those are legacy
+or transitional surfaces. The orchestrator, MCP server, state-feed, board, and
+A2A host are peers under systemd — no process is the parent of another; stopping
+the orchestrator does not stop MCP or agency communication. Full topology and
+failure-mode table: `docs/architecture/mcp-liaison-topology.md`.
 
 **Pool lifecycle invariant (P1123):** long-running services that use the shared Postgres singleton MUST call `setPoolLifecycleMode("long-running")` at startup. In long-running mode, accidental `getPool().end()` calls are ignored with an error-level stack trace; real shutdown must use `closePool()`, which bypasses the sentinel intentionally. If a service reports `pool_poisoned` on `control_feed` / `agent_lifecycle_events` or `Cannot use a pool after calling end`, follow `docs/operations/board-stale.md`.
 
@@ -139,7 +150,21 @@ Classify every "the agent should do X" before deciding where it lives:
 
 The trap to avoid: using Class-B tooling (memory) to solve a Class-A problem (mechanics). Don't make an agent *recall* that it should log tokens — make it structurally unable *not* to. Memory recall is best-effort and shapes reasoning; it is not an enforcement mechanism.
 
-Why this rule exists: AgentHive has repeatedly been burned by trusting LLM behavior for mechanical guarantees — codex agents marking ACs `pass` with no artifact, hallucinated completion summaries, token ledgers that stayed empty because the "agent should report usage" path was never deterministic (`agent_budget_ledger` 0 rows despite thousands of runs; `agent_usage_snapshot` 0 rows; `agent_runs.tokens_in` defaulting to 0). This is the same principle as **6.0a/6.0b "orchestrator is mechanical"** (lifecycle = DB state + structured fields, never interpreted LLM text), applied to the agency/worker layer. Implementing proposals: P1018 (token ledger writer), P1859 (usage probe), P1022 (quota-aware admission), P1698/P1699 (per-agency caps + dynamic controller).
+**P1376 Amendment (AC-7):** Throttle window coordination must be GREATEST-enforced at the **database layer**. When proactive (agency_capacity.reset_at) and reactive (model_routes.cooldown_until) throttles coexist, both writers (capacity-tracker, provider-cooldown handler) use GREATEST semantics — `UPDATE ... SET <column> = GREATEST(COALESCE(<column>, epoch), <new_value>)` — so that the longer TTL always wins atomically. The resolver then queries the unified `roadmap_workforce.throttle_until_merged` view, which computes `GREATEST(proactive, reactive)` and logs `throttle_source` metadata for audit. This prevents race conditions where a fast reactive cooldown (2 min) could shadow a slow proactive hard throttle (5 min), exposing agencies to over-use. See P1365/P1359/P1376 for implementation details.
+
+Why this rule exists: AgentHive has repeatedly been burned by trusting LLM behavior for mechanical guarantees — codex agents marking ACs `pass` with no artifact, hallucinated completion summaries, token ledgers that stayed empty because the "agent should report usage" path was never deterministic (`agent_budget_ledger` 0 rows despite thousands of runs; `agent_usage_snapshot` 0 rows; `agent_runs.tokens_in` defaulting to 0). This is the same principle as **6.0a/6.0b "orchestrator is mechanical"** (lifecycle = DB state + structured fields, never interpreted LLM text), applied to the agency/worker layer. Implementing proposals: P1018 (token ledger writer), P1859 (usage probe), P1022 (quota-aware admission), P1698/P1699 (per-agency caps + dynamic controller), P1376 (throttle merge).
+
+**P1109 Amendment — encapsulate agent-side DB ops behind MCP / tool-layer wrappers.** Routine agency DB writes must NOT be raw SQL embedded in agency processes; they go through a single audited wrapper so the column/constraint contract lives in one place and schema mismatches surface at the boundary instead of as a runtime `INSERT` failure (the P1017 class: `assigned_agency`, `agent_type='user'`, `host_id`, `presence_state_enum` fabrications). Use these instead of hand-written SQL:
+
+| Operation | ❌ Raw SQL (do not write) | ✅ Wrapped path |
+| :--- | :--- | :--- |
+| Validate a table before writing DDL | `psql -c '\d roadmap.agency'` from memory | `mcp_schema action=describe args={table:'roadmap.agency'}` (Tier 1) |
+| Lint a migration before commit | eyeball the `.sql` | `mcp_schema action=lint_migration args={file_path:'…'}` (Tier 4) |
+| Presence heartbeat | `SELECT roadmap.fn_pulse($1,$2)` | `mcp_agent action=pulse args={agency_id, state:'online'\|'busy'\|'away'\|'offline'}` → `agentPulse()` in `src/infra/agency/presence-ops.ts` (Tier 2) |
+| Record/clear listener presence | `INSERT/DELETE roadmap.listener_subscription` | `mcp_agent action=subscribe`/`unsubscribe`; in-process LISTEN owners call `recordListenerSubscription(listenClient, …)` / `removeListenerSubscription(…)` from `presence-ops.ts` so the recorded `established_pid` is the LISTEN backend (Tier 2) |
+| FK-anchor registry row at boot | `INSERT INTO roadmap_workforce.agent_registry …` | `ensureAgentRegistryRow(identity)` in `presence-ops.ts` (or `mcp_agent action=register`) |
+
+Backend-pid footgun: `roadmap.fn_listener_reconcile_drift()` keys on `listener_subscription.established_pid` vs `pg_stat_activity`. The pooled `query()` wrapper acquires a fresh backend per call, so a pooled `INSERT` records the wrong pid and reconcile flags the row stale immediately. Always record the listener row on the **same** `pg.Client` that holds the `LISTEN` (see `liaison-agent.ts`). Implementing proposal: P1109 (Tier 1/2/4 shipped; Tier 5 apply-migration gated to operator).
 
 ## 4a. Folder Discipline (mandatory for every cubic agent)
 
@@ -208,22 +233,23 @@ See `docs/architecture/architecture-proposal-type.md` for full guidance on when 
 
 ### Workflow States (P706 unified vocabulary)
 
-P706 is the vocabulary authority for workflow stages. This section documents the unified 8-stage RFC vocabulary and 3-stage Hotfix vocabulary that boards, MCP surfaces, and agent-facing docs are expected to use. Treat older labels as migration artifacts only. See P706 for the design authority behind this vocabulary split.
+P706 is the vocabulary authority for workflow stage names. The live Standard RFC
+workflow is currently the five-stage path below. P227 briefly attempted to add
+`CODE_REVIEW`, `TEST_WRITING`, and `TEST_EXECUTION` as hard workflow stages, but
+that migration was reverted; quality checks belong in dispatch/gate roles unless
+a future proposal deliberately reintroduces those stages and updates the live DB.
 
 ### Standard RFC Workflow (product, component, feature, issue)
 
-The RFC workflow is the 8-stage path:
+The RFC workflow is the 5-stage path:
 
-`DRAFT -> REVIEW -> DEVELOP -> CODE_REVIEW -> TEST_WRITING -> TEST_EXECUTION -> MERGE -> COMPLETE`
+`DRAFT -> REVIEW -> DEVELOP -> MERGE -> COMPLETE`
 
 | State | Phase | Description |
 | :--- | :--- | :--- |
 | **DRAFT** | Formation | Initial proposal drafting, framing, and splitting if scope is still too broad. |
 | **REVIEW** | Gate | Feasibility, coherence, dependency, and architecture review before implementation starts. |
 | **DEVELOP** | Build | Main implementation work. |
-| **CODE_REVIEW** | Review | Peer review of the implementation delta. |
-| **TEST_WRITING** | Verify Prep | Add or update the acceptance tests and verification artifacts required for the change. |
-| **TEST_EXECUTION** | Verify | Run the acceptance checks and confirm the proposal is ready to integrate. |
 | **MERGE** | Integrate | Merge readiness, compatibility, rollout checks, and main-branch integration. |
 | **COMPLETE** | Terminal | Integrated and closed as the current shipped baseline. |
 
@@ -245,7 +271,7 @@ Both workflows share the same maturity axis. Workflow stages are rendered from `
 
 | Attribute | RFC value | Hotfix value | Source |
 | :--- | :--- | :--- | :--- |
-| Status values | DRAFT, REVIEW, DEVELOP, CODE_REVIEW, TEST_WRITING, TEST_EXECUTION, MERGE, COMPLETE | DRAFT, DEVELOP, COMPLETE | `roadmap.workflow_stages` |
+| Status values | DRAFT, REVIEW, DEVELOP, MERGE, COMPLETE | DRAFT, DEVELOP, COMPLETE | `roadmap.workflow_stages` |
 | Maturity values | new, active, mature, obsolete | same | `roadmap_proposal.proposal.maturity` |
 | Terminal closure | COMPLETE with terminal-stage semantics from the active workflow | COMPLETE with terminal-stage semantics from the active workflow | `roadmap.workflow_stages` |
 | Obsolete reason | `obsoleted_reason TEXT` free-text | same | `roadmap_proposal.proposal.obsoleted_reason` |
@@ -589,6 +615,21 @@ Two role-resolver layers coexist by design. **Do not merge them.**
 
 **Rule:** changes to gate reviewer personas belong in `roadmap_proposal.gate_role` (then `NOTIFY gate_role_changed`). Changes to queue dispatch roles belong in `roadmap.agent_role_profile`.
 
+#### Agent persona / `vibe` convention (P1355 / P1356)
+
+`roadmap_workforce.agent_registry.personality` (JSONB) carries an agent's
+durable persona — `{vibe, core_truths[], boundaries[], communication_style, expertise[]}` —
+sourced from the agency-agents / OpenClaw `SOUL.md` vocabulary. Following that
+convention, **`personality.vibe` should be a punchy one-liner ≤160 characters**
+(the `fn_validate_personality` CHECK enforces the 160-char cap; the "punchy
+one-liner" framing is guidance, not a constraint). `expertise[]` values are
+drawn from the controlled set `{architect, reviewer, coder, debugger, writer,
+researcher, tester, devops, designer}`. Display surface (`emoji`, `color`,
+`description`, `source`) lives in the sibling `display_metadata` JSONB column,
+not in `personality`. Export an agent's persona to an OpenClaw workspace
+(`SOUL.md` / `IDENTITY.md` / `AGENTS.md`) with `roadmap agent export-openclaw`
+(operator-only; see `src/core/agency/openclaw-export-generator.ts`).
+
 ### 6.0 Database Topology (target architecture)
 
 AgentHive runs on a **two-tier Postgres topology**:
@@ -655,6 +696,21 @@ Boards are workflow-aware surfaces, not fixed RFC boards.
 - Require an explicit Workflow filter so column selection is unambiguous.
 - Do not hardcode stage lists in UI, API, TUI, or orchestration code.
 - When workflow metadata changes, boards must reflect the new ordered stages without a code edit.
+
+### 6.0f Dispatch-class selectors must filter `gate_scanner_paused` at SELECT source (P1411)
+
+Proposals marked with `gate_scanner_paused = true` must be excluded from all dispatch, gate, claim, and spawn decision selectors. Exclusion **must happen at the SQL SELECT source**, not deferred to post-dispatch guards.
+
+**Rule:** every dispatch-class query that reads `roadmap_proposal.proposal` must either:
+1. Filter `WHERE gate_scanner_paused = false` explicitly in the query, OR
+2. Read through `v_dispatchable_proposal` (a view that enforces `WHERE gate_scanner_paused = false`), OR
+3. Query by proposal `id` only (by-id lookups are exempt and may return paused proposals for visibility/management).
+
+**Rationale:** P1393 added a defensive `postWorkOffer` guard that refuses to dispatch paused proposals. However, selecting paused proposals into candidate queues wastes compute on readiness assessment, briefing assembly, and gate evaluation. The guard is necessary but insufficient upstream selection must respect the pause flag to avoid pointless work.
+
+**Scope:** applies to `scanQueues()`, gate-selection logic, stall detection, enhancement-revision targeting, and any other production code that shapes work offers. Views `v_dispatchable_proposal` and `v_mature_queue` are the canonical single source of truth for the pause filter.
+
+**Verification:** `npm run audit:dispatch-selects` enforces this rule as a CI gate.
 
 ### 6.1 DDL belongs in `database/ddl/`
 
@@ -842,6 +898,15 @@ AgentHive is multi-agent. Git discipline is part of system safety.
 
 - **Canonical hooks live in the version-controlled `.githooks/` directory**, activated via `core.hooksPath`. They self-install on `npm install` (the `prepare` script runs `git config core.hooksPath .githooks`); to install manually, run `npm run hooks:install`. Verify with `git config --get core.hooksPath` → must print `.githooks`.
 - **Never put a version bump (or any `git commit`/`git commit --amend`) in a `post-merge`/`post-checkout` hook.** A bump-on-merge hook rewrites the just-pulled upstream commit's hash on *every* puller's machine, guaranteeing divergence from origin and a spurious minor bump per pull — it silently violates the Shared-history rules below. Version bumps are a release-authority action only: use `npm run release:patch|minor|major`. A legacy `.git/hooks/post-merge` doing exactly this caused repeated merge pain; it is retired (2026-06-03). If `core.hooksPath` is unset on a checkout, git falls back to `.git/hooks/` and may re-run such legacy cruft — always confirm hooksPath points to `.githooks`.
+
+### §7a Multi-agent git isolation (P1445 — mechanically enforced)
+
+The conventions above are now backed by code/hook enforcement, not trust. Three layers prevent the cross-agent collisions of 2026-05-30 (a `git checkout` swapping another agent's files; a force-push of another agent's branch; an unreviewed fast-forward to `main`):
+
+- **Worktree-per-agent (AC-1).** Every dispatch-spawned worker runs in its own `git worktree`; the shared repo root is **operator-only**. Enforced by `assertNotRepoRoot(cwd, repoRoot)` (`src/core/orchestration/worktree-guard.ts`), called on the live spawn path in `spawnAgent` (`src/core/orchestration/agent-spawner.ts`). A spawn whose resolved cwd is the repo root is **refused** with `RepoRootSpawnRefused`.
+- **Orchestrator assigns the worktree (AC-2/AC-3).** Worktrees are allocated atomically (`roadmap.worktree_lease`, `claimWorktreeForDispatch`, `FOR UPDATE SKIP LOCKED`) and passed as `worktree_hint`. Agents never self-select. The legacy `AGENTHIVE_DEFAULT_EXECUTOR_WORKTREE` env fallback is **gated off by default** — it is honoured only when `AGENTHIVE_ALLOW_ENV_WORKTREE_FALLBACK=1` is set explicitly (single-agent/dev escape hatch). See `src/core/orchestration/executor-worktree-fallback.ts`.
+- **Branch single-writer + main is MR-only (AC-4/AC-5).** An agent may push **only** the branch whose proposal it holds an active lease on; direct pushes to `main`/`master` are forbidden (merge-request-only). Enforced by the `.githooks/pre-push` hook (logic in `scripts/pre-push-lease-check.mjs`), which checks the branch's proposal id against `roadmap_proposal.proposal_lease` for the pushing agent's identity. GitLab protected-branch config on `main` is the backstop (AC-5, operator-set). Operator override: `AGENTHIVE_PREPUSH_BYPASS=1 git push ...`.
+- **Restart authority (AC-6).** Worker/spawn code (`agent-spawner.ts`, `offer-dispatch-handler.ts`, `liaison-agent.ts`, `orchestrator.ts`, `legacy-dispatch.ts`) never restarts live services. Live `systemctl restart` is an operator/CLI action only (see §15). A regression test asserts zero `systemctl restart` in worker source.
 
 ### Shared-history rules
 
@@ -1216,8 +1281,8 @@ The orchestrator handles the "how" of dispatch. Hermes handles the "what" and "w
 | Cubic Phase | Design Intent | Why | Cost Tier |
 | :--- | :--- | :--- | :--- |
 | **Design** (DRAFT, REVIEW) | Deep reasoning model | Architecture, adversarial review | Premium |
-| **Build** (DEVELOP, CODE_REVIEW, TEST_WRITING) | Code generation model | Implementation, review prep, verification prep | Standard |
-| **Test** (TEST_EXECUTION, MERGE) | Balanced model | Acceptance execution, integration validation | Standard |
+| **Build** (DEVELOP) | Code generation model | Implementation, review prep, verification prep | Standard |
+| **Test** (MERGE) | Balanced model | Acceptance execution, integration validation | Standard |
 | **Ship** (COMPLETE) | Fast economy model | Documentation, finalization, low-cost | Economy |
 
 **To see actual routed models:** Query `model_routes` in the DB or check `roadmap.yaml`. Do not hardcode model names from this table into code — the DB is the source of truth.
@@ -1291,6 +1356,8 @@ When a blocker is out of control, follow the formal hierarchy:
 | **Security/ACL Denial** | Security Agent | Project Owner (Gary) |
 
 **The Gary Rule**: Direct intervention from the Project Owner (Gary) or designated HITL (Derek/Nolan) is reserved for high-level strategic pivots or final "Accepted" state transitions.
+
+**Restart authority (P1445 AC-6).** Restarting live services (`agenthive-mcp`, `agenthive-orchestrator`, `agenthive-a2a`) is an **operator-only** action performed at the console (`sudo systemctl restart <unit>`). A worker mid-dispatch must NEVER restart a live service to "pick up its own code" — that is the change-deployment step, owned by the merge-to-`main` + operator-restart flow, not by the agent that wrote the code. Worker/spawn source contains zero `systemctl restart` (asserted by `src/core/orchestration/__tests__/p1445-isolation-enforcement.test.ts`); the only `systemctl restart` references in `src/` are operator CLI surfaces (`agenthive-cli`, `hive-cli`, state-machine commands).
 
 General escalation triggers:
 
@@ -1389,6 +1456,34 @@ All PostgreSQL connection parameters **must** be read through `ConfigResolver`, 
 - `SecretKeys.PGPASSWORD` is `required: false` — pgpass/libpq are valid authentication paths
 
 This is enforced automatically — violations will fail the CI check.
+
+## 20. Duration-Aware Usage-Limit Handling (P1682)
+
+When a provider signals a usage/quota limit has been reached, the framework places the dispatch in a **hold state** rather than failing it immediately. This allows the dispatch to be automatically re-attempted after a cooldown period expires.
+
+### Environment Variables
+
+| Variable | Type | Default | Purpose |
+| :--- | :---: | ---: | :--- |
+| `AGENTHIVE_HOLD_WINDOW_MAX_SEC` | integer | `1800` | Maximum duration (seconds) a dispatch can remain held at provider limit before automatic wake. After this window expires, the dispatch is eligible for redispatch even if the provider signal suggests a longer cooldown. Safety valve to prevent indefinite holds. |
+| `AGENTHIVE_CLAUDE_CLI_DEFAULT_COOLDOWN_SEC` | integer | `3600` | Default cooldown duration (seconds) applied when the claude CLI provider signals a usage limit. Typically one hour; overridable per provider via `provider_cooldown_map` in `src/core/orchestration/agent-spawner.ts`. |
+| `AGENTHIVE_LONG_LIMIT_COOLDOWN_SEC` | integer | `86400` | Extended cooldown duration (seconds) for long-term limits or hard quota exhaustion (e.g., daily/weekly/monthly caps). Typically 24 hours; allows the provider's quota window to reset. |
+
+### Behavior
+
+1. **Hold placement** (`recordProviderHardLimit`): When a dispatch fails due to provider quota limit, the framework sets `paused_at_provider_limit = true` and records `metadata.resume_eligible_at = now() + cooldown_seconds`.
+2. **Capacity exclusion** (AC-8): Held dispatches do NOT count toward `max_in_flight` capacity. The in-flight query filters: `AND (paused_at_provider_limit = false OR paused_at_provider_limit IS NULL)`.
+3. **Automatic wake** (`reap-stale-rows.ts`): A background sweep periodically checks if `resume_eligible_at` has expired and clears `paused_at_provider_limit = false` to re-enable the dispatch for claiming.
+4. **Dispatch reaper exemption**: The stale-dispatch reaper (which deletes very old dispatches) excludes held rows: `AND paused_at_provider_limit IS NOT TRUE`.
+
+### AC-5 Verification (Wake-to-Redispatch Path)
+
+The integration test verifies the complete wake cycle:
+- Dispatch is held with `paused_at_provider_limit = true` and `resume_eligible_at` set
+- After cooldown expires, the reaper clears `paused_at_provider_limit = false`
+- The dispatch becomes claimable again and can be dispatched to a fresh attempt
+
+---
 
 ## §model-capability-scores — AC-10 (P1006)
 

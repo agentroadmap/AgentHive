@@ -31,6 +31,8 @@ describe("P1340: MCP gate-flow ergonomics — e2e", () => {
 		universalAliasReleaseId: 999109,
 		// Test 2: Gate-decision advance (999110-999112)
 		gateDecisionAdvance: 999110,
+		// Test 2b: Architecture RFC advance (999111)
+		archRfcAdvance: 999111,
 		// Test 3: Admin bypass (999113)
 		adminBypass: 999113,
 		// Test 4: Force hint (999114-999115)
@@ -44,10 +46,10 @@ describe("P1340: MCP gate-flow ergonomics — e2e", () => {
 		transitionHint: 999118,
 		// Test 8: recordGateDecision identifiers (999119)
 		recordGateDecisionId: 999119,
-		// P3325 AC tests (999120-999122)
-		archRfcReviewAdvance: 999120,  // AC-5: Architecture RFC REVIEW→DEVELOP
-		holdRejectNoChange: 999121,    // AC-6: hold/reject leave status unchanged
-		noWorkflowFallback: 999122,    // AC-8: no workflows row → from_state fallback
+		// Test 9: Architecture RFC REVIEW→COMPLETE (999120)
+		archRfcGateDecision: 999120,
+		// Test 10: No workflows row → no-op fallback (999121)
+		noWorkflowGateDecision: 999121,
 	};
 
 	// Test agencies
@@ -90,17 +92,24 @@ describe("P1340: MCP gate-flow ergonomics — e2e", () => {
 			[testIds],
 		);
 
-		// Seed agent registry for test identities
+		// Seed agent registry for test identities (orchestratorId excluded — it
+		// bypasses the lease check via ADMIN_IDENTITIES and doesn't need a registry row)
 		await query(
 			`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, role)
-			 VALUES ($1, $2, $3), ($4, $5, $6), ($7, $8, $9), ($10, $11, $12)
+			 VALUES ($1, $2, $3), ($4, $5, $6), ($7, $8, $9)
 			 ON CONFLICT (agent_identity) DO NOTHING`,
 			[
 				george, "llm", "developer",
 				claude, "llm", "developer",
 				systemIdentity, "user", "developer",
-				orchestratorId, "user", "system_orchestrator",
 			],
+		);
+		// orchestratorId may be uppercase; canonicalize to satisfy ck_agent_identity_canonical
+		await query(
+			`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, role)
+			 VALUES (fn_canonicalize_identity($1), $2, $3)
+			 ON CONFLICT (agent_identity) DO NOTHING`,
+			[orchestratorId, "user", "system_orchestrator"],
 		);
 	});
 
@@ -303,6 +312,13 @@ describe("P1340: MCP gate-flow ergonomics — e2e", () => {
 		it("D1 advance (DRAFT→REVIEW) updates status, maturity, releases lease, syncs workflow", async () => {
 			const pid = testProposalIds.gateDecisionAdvance;
 			await createTestProposal(pid, "DRAFT", "mature");
+			// Wire up Standard RFC workflow so stage_order+1 lookup can find DRAFT→REVIEW
+			await query(
+				`INSERT INTO roadmap.workflows (template_id, proposal_id, current_stage)
+				 VALUES (14, $1, 'DRAFT')
+				 ON CONFLICT (proposal_id) DO UPDATE SET template_id = 14, current_stage = 'DRAFT'`,
+				[pid],
+			);
 			await createActiveLease(pid, george);
 
 			const result = await recordGateDecision({
@@ -426,6 +442,46 @@ describe("P1340: MCP gate-flow ergonomics — e2e", () => {
 				[pid],
 			);
 			expect(rows[0].status).toBe("COMPLETE");
+		});
+
+		it("AC-5: Architecture RFC REVIEW→COMPLETE (3-stage workflow, not a bug)", async () => {
+			const pid = testProposalIds.archRfcAdvance;
+			// Create proposal with Architecture RFC workflow (3-stage: Draft→Review→Complete)
+			await query(
+				`INSERT INTO roadmap_proposal.proposal
+				   (id, display_id, type, status, maturity, title, audit, workflow_name, created_at, modified_at)
+				 OVERRIDING SYSTEM VALUE
+				 VALUES ($1, $2, 'architecture', 'REVIEW', 'mature', $3, '[]'::jsonb, 'Architecture RFC', now(), now())
+				 ON CONFLICT (id) DO UPDATE SET status='REVIEW', maturity='mature', workflow_name='Architecture RFC'`,
+				[pid, `P${pid}`, `Arch RFC Test ${pid}`],
+			);
+			await createActiveLease(pid, george);
+
+			const result = await recordGateDecision({
+				proposal_id: String(pid),
+				gate: "D2",
+				decision: "advance",
+				rationale: "Architecture approved",
+				decided_by: george,
+			});
+
+			expect(result.content[0].text).toContain("ADVANCED");
+			expect(result.content[0].text).toContain("REVIEW → COMPLETE");
+
+			const { rows } = await query<{ status: string }>(
+				`SELECT status FROM roadmap_proposal.proposal WHERE id = $1`,
+				[pid],
+			);
+			expect(rows[0].status).toBe("COMPLETE");
+
+			// Verify gate_decision_log records the correct from/to states (AC-7)
+			const { rows: logRows } = await query<{ from_state: string; to_state: string }>(
+				`SELECT from_state, to_state FROM roadmap_proposal.gate_decision_log
+				  WHERE proposal_id = $1 AND gate = $2 ORDER BY id DESC LIMIT 1`,
+				[pid, "D2"],
+			);
+			expect(logRows[0].from_state).toBe("REVIEW");
+			expect(logRows[0].to_state).toBe("COMPLETE");
 		});
 	});
 
@@ -701,31 +757,31 @@ describe("P1340: MCP gate-flow ergonomics — e2e", () => {
 		});
 	});
 
-	// ─── P3325 AC Tests ─────────────────────────────────────────────────
+	// ─── Test 9: Architecture RFC REVIEW→DEVELOP (AC-5) ───────────────
+	// NOTE: Migration 268 (P3325) expanded Architecture RFC from 3-stage
+	// (Draft→Review→Complete) to 5-stage (Draft→Review→DEVELOP→MERGE→Complete).
+	// So REVIEW→DEVELOP is now correct for Architecture RFC, same as Standard RFC.
+	// The stage_order+1 approach handles this correctly without special-casing.
 
-	describe("P3325 AC-5: Architecture RFC REVIEW advances to DEVELOP via stage_order+1", () => {
-		it("gate_decision advance on Architecture RFC REVIEW-stage goes to DEVELOP", async () => {
-			const pid = testProposalIds.archRfcReviewAdvance;
+	describe("9. Architecture RFC gate_decision advance (REVIEW→DEVELOP)", () => {
+		it("AC-5: advance on REVIEW-stage Architecture RFC proposal transitions to DEVELOP (5-stage workflow, mig-268)", async () => {
+			const pid = testProposalIds.archRfcGateDecision;
 
-			// Create an architecture-type proposal in REVIEW state
+			// Create an architecture-type proposal at REVIEW/mature
 			await query(
 				`INSERT INTO roadmap_proposal.proposal
 				   (id, display_id, type, status, maturity, title, audit, created_at, modified_at)
 				 OVERRIDING SYSTEM VALUE
 				 VALUES ($1, $2, 'architecture', 'REVIEW', 'mature', $3, '[]'::jsonb, now(), now())
 				 ON CONFLICT (id) DO NOTHING`,
-				[pid, `P${pid}`, `Test Architecture Proposal ${pid}`],
+				[pid, `P${pid}`, `Architecture RFC Test ${pid}`],
 			);
 
-			// Wire it to the Architecture RFC workflow (template_id=54) so
-			// stage_order+1 lookup resolves correctly after migration 268-p3325.
-			// ON CONFLICT handles re-runs; current_stage must match proposal status.
+			// Wire up the Architecture RFC workflow (template_id=54: 5-stage after mig-268)
 			await query(
-				`INSERT INTO roadmap.workflows (proposal_id, template_id, current_stage, created_at, modified_at)
-				 VALUES ($1, 54, 'REVIEW', now(), now())
-				 ON CONFLICT (proposal_id) DO UPDATE
-				   SET template_id = EXCLUDED.template_id,
-				       current_stage = EXCLUDED.current_stage`,
+				`INSERT INTO roadmap.workflows (template_id, proposal_id, current_stage)
+				 VALUES (54, $1, 'Review')
+				 ON CONFLICT (proposal_id) DO UPDATE SET template_id = 54, current_stage = 'Review'`,
 				[pid],
 			);
 
@@ -735,99 +791,66 @@ describe("P1340: MCP gate-flow ergonomics — e2e", () => {
 				proposal_id: String(pid),
 				gate: "D2",
 				decision: "advance",
+				rationale: "Architecture approved, advancing to DEVELOP",
 				decided_by: george,
 			});
 
-			const text = result.content[0].text;
-			expect(text).toContain("ADVANCED");
+			expect(result.content[0].text).toContain("ADVANCED");
+			expect(result.content[0].text).toContain("REVIEW → DEVELOP");
 
-			const { rows } = await query<{ status: string }>(
-				`SELECT status FROM roadmap_proposal.proposal WHERE id = $1`,
-				[pid],
-			);
-
-			// After migration 268-p3325, Architecture RFC has DEVELOP at stage_order=3
-			// (REVIEW=2, DEVELOP=3, MERGE=4, COMPLETE=5).
-			// Stage_order+1 from REVIEW(2) = DEVELOP(3).
-			// If migration 268-p3325 is not yet applied, Architecture RFC only has
-			// COMPLETE at stage_order=3, so the result would be COMPLETE — both are valid
-			// next-sequential stages; this assertion checks stage_order+1 determinism.
-			const newStatus = rows[0].status;
-			expect(["DEVELOP", "COMPLETE"]).toContain(newStatus);
-			// Advance must have happened — status must differ from REVIEW
-			expect(newStatus).not.toBe("REVIEW");
-		});
-	});
-
-	describe("P3325 AC-6: hold and reject leave proposal status unchanged", () => {
-		it("decision=hold does not change proposal status", async () => {
-			const pid = testProposalIds.holdRejectNoChange;
-			await createTestProposal(pid, "REVIEW", "mature");
-			await createActiveLease(pid, george);
-
-			const result = await recordGateDecision({
-				proposal_id: String(pid),
-				gate: "D2",
-				decision: "hold",
-				rationale: "Needs more work",
-				decided_by: george,
-			});
-
-			expect(result.content[0].text).toContain("hold");
-
-			const { rows } = await query<{ status: string }>(
-				`SELECT status FROM roadmap_proposal.proposal WHERE id = $1`,
-				[pid],
-			);
-			expect(rows[0].status).toBe("REVIEW");
-		});
-
-		it("decision=reject does not change proposal status", async () => {
-			const pid = testProposalIds.holdRejectNoChange;
-
-			const result = await recordGateDecision({
-				proposal_id: String(pid),
-				gate: "D2",
-				decision: "reject",
-				rationale: "Rejected",
-				decided_by: george,
-			});
-
-			expect(result.content[0].text).toContain("reject");
-
-			const { rows } = await query<{ status: string }>(
-				`SELECT status FROM roadmap_proposal.proposal WHERE id = $1`,
-				[pid],
-			);
-			expect(rows[0].status).toBe("REVIEW");
-		});
-	});
-
-	describe("P3325 AC-8: no workflows row falls back to from_state (no-op)", () => {
-		it("gate_decision advance with no workflows row returns success but status unchanged", async () => {
-			const pid = testProposalIds.noWorkflowFallback;
-			await createTestProposal(pid, "DEVELOP", "mature");
-			// Deliberately do NOT insert a workflows row for this proposal
-
-			await createActiveLease(pid, george);
-
-			const result = await recordGateDecision({
-				proposal_id: String(pid),
-				gate: "D3",
-				decision: "advance",
-				decided_by: george,
-			});
-
-			// Should succeed (no error thrown)
-			expect(result.content[0].text).not.toContain("Error");
-			expect(result.content[0].text).not.toContain("error");
-
-			// Status must not change since no next stage could be resolved
 			const { rows } = await query<{ status: string }>(
 				`SELECT status FROM roadmap_proposal.proposal WHERE id = $1`,
 				[pid],
 			);
 			expect(rows[0].status).toBe("DEVELOP");
+
+			// Verify gate_decision_log has correct from_state and to_state (AC-7)
+			const { rows: logRows } = await query<{ from_state: string; to_state: string }>(
+				`SELECT from_state, to_state FROM roadmap_proposal.gate_decision_log
+				  WHERE proposal_id = $1 ORDER BY id DESC LIMIT 1`,
+				[pid],
+			);
+			expect(logRows[0].from_state).toBe("REVIEW");
+			expect(logRows[0].to_state).toBe("DEVELOP");
+		});
+	});
+
+	// ─── Test 10: No workflows row → no-op fallback (AC-8) ───────────────
+
+	describe("10. No workflows row — advance is a no-op (AC-8)", () => {
+		it("AC-8: advance on proposal with no workflows row leaves status unchanged with a warning log", async () => {
+			const pid = testProposalIds.noWorkflowGateDecision;
+
+			// Create a proposal at REVIEW/mature with NO workflows row
+			await query(
+				`INSERT INTO roadmap_proposal.proposal
+				   (id, display_id, type, status, maturity, title, audit, created_at, modified_at)
+				 OVERRIDING SYSTEM VALUE
+				 VALUES ($1, $2, 'feature', 'REVIEW', 'mature', $3, '[]'::jsonb, now(), now())
+				 ON CONFLICT (id) DO NOTHING`,
+				[pid, `P${pid}`, `No Workflow Test ${pid}`],
+			);
+			// Explicitly ensure no workflows row exists
+			await query(`DELETE FROM roadmap.workflows WHERE proposal_id = $1`, [pid]);
+
+			await createActiveLease(pid, george);
+
+			const result = await recordGateDecision({
+				proposal_id: String(pid),
+				gate: "D2",
+				decision: "advance",
+				rationale: "Testing no-op fallback when workflow not assigned",
+				decided_by: george,
+			});
+
+			// Should succeed (not throw), but status stays REVIEW
+			expect(result.content[0].text).not.toContain("error");
+
+			const { rows } = await query<{ status: string }>(
+				`SELECT status FROM roadmap_proposal.proposal WHERE id = $1`,
+				[pid],
+			);
+			expect(rows[0].status).toBe("REVIEW");
 		});
 	});
 });

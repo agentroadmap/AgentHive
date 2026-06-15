@@ -14,6 +14,7 @@ import {
 	verifyDeliverables,
 	markDeliverableVerificationFailed,
 	getRoleArtifactMap,
+	normalizeDispatchRole,
 	type VerifyDeliverablesInput,
 } from "./deliverable-verifier.ts";
 
@@ -411,11 +412,77 @@ test("Unknown role defaults to verified=true with warning", async () => {
 			workerIdentity: "some-agent",
 		});
 
-		// Should default to pass (unknown role = skip verification)
+		// Should default to pass (no artifact concept = skip verification)
 		assert.strictEqual(result.verified, true, "Unknown roles should pass by default");
-		assert.strictEqual(result.artifactType, "unknown-role");
+		assert.strictEqual(result.artifactType, "no-artifact-role");
 	} finally {
 		// Cleanup
+		await query(`DELETE FROM roadmap_proposal.proposal WHERE id = $1`, [proposalId]);
+	}
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// P1438 AC-12/13: role normalization (anti-placebo) + live-role evidence gate
+// ──────────────────────────────────────────────────────────────────────────────
+
+test("P1438 AC-12: normalizeDispatchRole maps live dispatch roles to artifact checks", () => {
+	// Live squad_dispatch.dispatch_role values must map to a check category —
+	// otherwise the evidence gate is a no-op for the roles that actually run.
+	const expect: Record<string, string | null> = {
+		"gate-reviewer": "gate-review",
+		reviewer: "gate-review",
+		"reviewer-d1": "gate-review",
+		skeptic: "gate-review",
+		"skeptic-alpha": "gate-review",
+		"skeptic-beta": "gate-review",
+		qa: "gate-review",
+		developer: "developer",
+		engineer: "developer",
+		drafter: "developer",
+		"merge-agent": "developer",
+		enhancer: "enhance",
+		enrichment_agent: "enhance",
+		researcher: "enhance",
+		architect: "architect",
+		// no artifact concept → null (skipped)
+		"token-tracker": null,
+		"messaging-tester": null,
+		gate_decision_agent: null,
+	};
+	for (const [role, want] of Object.entries(expect)) {
+		assert.strictEqual(
+			normalizeDispatchRole(role),
+			want,
+			`role '${role}' should normalize to ${want}`,
+		);
+	}
+});
+
+test("P1438 AC-13: LIVE role 'gate-reviewer' (not the internal key) fails the gate with no review row", async () => {
+	// The handler calls verifyDeliverables with payload.role = 'gate-reviewer'.
+	// Before the normalizer this hit the unknown-role default (verified=true) —
+	// a placebo. It must now resolve to the gate-review check and FAIL when no
+	// proposal_reviews row exists (exit-0 alone is not delivery evidence).
+	const proposalRes = await query(
+		`INSERT INTO roadmap_proposal.proposal
+		  (status, maturity, title, type, project_id, audit)
+		  VALUES ($1, $2, $3, $4, $5, $6)
+		  RETURNING id`,
+		["Review", "new", `Test Proposal ${TEST_ID}-livegate`, "feature", 1, '{}'],
+	);
+	const proposalId = proposalRes.rows[0].id;
+	try {
+		const result = await verifyDeliverables({
+			proposalId,
+			dispatchRole: "gate-reviewer", // LIVE role name, not "gate-review"
+			workerIdentity: "claude-bot-gary.a",
+		});
+		assert.strictEqual(
+			result.verified,
+			false,
+			"gate-reviewer with no proposal_reviews row must NOT be verified (AC-13)",
+		);
+	} finally {
 		await query(`DELETE FROM roadmap_proposal.proposal WHERE id = $1`, [proposalId]);
 	}
 });

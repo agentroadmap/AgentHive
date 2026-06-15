@@ -21,7 +21,7 @@ const KNOWN_HOSTS = ["bot", "mac", "hermes", "srv"];
 test("AC-1: Claude-Bot-Documenter renders as Claude-Documenter (identity)", () => {
 	const result = formatAgentLabelLive(
 		{ display_alias: "Claude-Bot-Documenter", agent_identity: "ccs46ant-bot-docum-a" },
-		{ knownHosts: KNOWN_HOSTS },
+		KNOWN_HOSTS,
 	);
 	assert.strictEqual(result, "Claude-Documenter (ccs46ant-bot-docum-a)");
 });
@@ -31,7 +31,7 @@ test("AC-2: NULL alias passthrough is identical to pre-change format", () => {
 	const identity = "ccs46ant-bot-docum-a";
 	const result = formatAgentLabelLive(
 		{ display_alias: null, agent_identity: identity },
-		{ knownHosts: KNOWN_HOSTS },
+		KNOWN_HOSTS,
 	);
 	assert.strictEqual(result, identity);
 });
@@ -40,7 +40,7 @@ test("AC-2: undefined alias passthrough is identical to pre-change format", () =
 	const identity = "ccs46ant-bot-docum-a";
 	const result = formatAgentLabelLive(
 		{ agent_identity: identity },
-		{ knownHosts: KNOWN_HOSTS },
+		KNOWN_HOSTS,
 	);
 	assert.strictEqual(result, identity);
 });
@@ -49,7 +49,7 @@ test("AC-2: undefined alias passthrough is identical to pre-change format", () =
 test("AC-3: Tier 1 alias Claude-Bot is unchanged (2 segments, nothing to strip)", () => {
 	const result = formatAgentLabelLive(
 		{ display_alias: "Claude-Bot", agent_identity: "ccs46ant-bot-a" },
-		{ knownHosts: KNOWN_HOSTS },
+		KNOWN_HOSTS,
 	);
 	assert.strictEqual(result, "Claude-Bot (ccs46ant-bot-a)");
 });
@@ -58,7 +58,7 @@ test("AC-3: Tier 1 alias Claude-Bot is unchanged (2 segments, nothing to strip)"
 test("AC-4: Claude-NewHost-Documenter renders verbatim when NewHost not in knownHosts", () => {
 	const result = formatAgentLabelLive(
 		{ display_alias: "Claude-NewHost-Documenter", agent_identity: "ccs46ant-newhost-docum-a" },
-		{ knownHosts: KNOWN_HOSTS },
+		KNOWN_HOSTS,
 	);
 	assert.strictEqual(result, "Claude-NewHost-Documenter (ccs46ant-newhost-docum-a)");
 });
@@ -66,7 +66,7 @@ test("AC-4: Claude-NewHost-Documenter renders verbatim when NewHost not in known
 test("AC-4: after NewHost added to DB knownHosts, host is stripped", () => {
 	const result = formatAgentLabelLive(
 		{ display_alias: "Claude-NewHost-Documenter", agent_identity: "ccs46ant-newhost-docum-a" },
-		{ knownHosts: [...KNOWN_HOSTS, "newhost"] },
+		[...KNOWN_HOSTS, "newhost"],
 	);
 	assert.strictEqual(result, "Claude-Documenter (ccs46ant-newhost-docum-a)");
 });
@@ -75,7 +75,7 @@ test("AC-4: after NewHost added to DB knownHosts, host is stripped", () => {
 test("AC-5: Claude-Bot-GateReview renders as Claude-GateReview", () => {
 	const result = formatAgentLabelLive(
 		{ display_alias: "Claude-Bot-GateReview", agent_identity: "ccs46ant-bot-grvw-a" },
-		{ knownHosts: KNOWN_HOSTS },
+		KNOWN_HOSTS,
 	);
 	assert.strictEqual(result, "Claude-GateReview (ccs46ant-bot-grvw-a)");
 });
@@ -84,7 +84,7 @@ test("AC-5: Claude-Bot-GateReview renders as Claude-GateReview", () => {
 test("host matching is case-insensitive", () => {
 	const result = formatAgentLabelLive(
 		{ display_alias: "Claude-BOT-Documenter", agent_identity: "ccs46ant-bot-docum-a" },
-		{ knownHosts: KNOWN_HOSTS },
+		KNOWN_HOSTS,
 	);
 	assert.strictEqual(result, "Claude-Documenter (ccs46ant-bot-docum-a)");
 });
@@ -93,7 +93,7 @@ test("host matching is case-insensitive", () => {
 test("empty knownHosts disables all host stripping", () => {
 	const result = formatAgentLabelLive(
 		{ display_alias: "Claude-Bot-Documenter", agent_identity: "ccs46ant-bot-docum-a" },
-		{ knownHosts: [] },
+		[],
 	);
 	assert.strictEqual(result, "Claude-Bot-Documenter (ccs46ant-bot-docum-a)");
 });

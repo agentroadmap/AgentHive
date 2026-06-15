@@ -1191,7 +1191,7 @@ export async function listReviews(args: {
 		}
 
 		const { rows: reviewRows } = await query(
-			`SELECT reviewer_identity, verdict, notes, findings, reviewed_at
+			`SELECT reviewer_identity, verdict, notes, findings, is_blocking, reviewed_at
        FROM roadmap_proposal.proposal_reviews WHERE proposal_id = $1
        ORDER BY reviewed_at DESC`,
 			[propId],
@@ -1210,7 +1210,7 @@ export async function listReviews(args: {
 		};
 		const lines = reviewRows.map(
 			(r) =>
-				`${verdictEmoji[r.verdict] || "?"} ${r.reviewer_identity}: ${r.verdict}${r.notes ? ` — ${r.notes}` : ""}`,
+				`${verdictEmoji[r.verdict] || "?"} ${r.reviewer_identity}: ${r.verdict}${r.is_blocking ? " [is_blocking]" : ""}${r.notes ? ` — ${r.notes}` : ""}`,
 		);
 		return {
 			content: [
@@ -1305,7 +1305,9 @@ export async function addDiscussion(args: {
 	}
 	if (!args.author) {
 		// Default authoring identity so cubic/gate agents don't bounce on a
-		// missing arg — they're system-issued, not user-issued.
+		// missing arg — they're system-issued, not user-issued. (P1389 review:
+		// this is a documented default, not a silent drop — do not convert it
+		// to a rejection; system-issued callers legitimately omit author.)
 		(args as any).author = "system";
 	}
 	try {
@@ -1426,6 +1428,16 @@ export async function recordGateDecision(args: {
 	agent_run_id?: string;
 	ac_verification?: Record<string, unknown>;
 }): Promise<CallToolResult> {
+	// Resolve the canonical identifier from any of the three alias forms.
+	const rawIdentifier = args.id ?? args.proposal_id ?? args.display_id;
+	if (!rawIdentifier) {
+		return {
+			content: [{
+				type: "text",
+				text: "❌ missing proposal identifier — supply proposal_id, id, or display_id",
+			}],
+		};
+	}
 	const VALID_DECISIONS = ["advance", "hold", "reject", "waive", "escalate"];
 	if (!VALID_DECISIONS.includes(args.decision)) {
 		return errorResult(
@@ -1433,65 +1445,78 @@ export async function recordGateDecision(args: {
 			"decision_invalid",
 		);
 	}
-	const identifier = args.id ?? args.proposal_id ?? args.display_id;
-	if (!identifier) {
-		return {
-			content: [{
-				type: "text",
-				text: "missing proposal identifier — provide id=, proposal_id=, or display_id=",
-			}],
-		};
-	}
 	try {
-		const proposalId = await resolveProposalId(identifier);
+		const proposalId = await resolveProposalId(rawIdentifier);
 		if (proposalId === null) {
 			return {
-				content: [{ type: "text", text: `Proposal ${identifier} not found.` }],
+				content: [{ type: "text", text: `Proposal ${rawIdentifier} not found.` }],
 			};
 		}
 
-		// Read current from_state and maturity from the proposal.
+		// Read current from_state, maturity, and workflow_name from the proposal.
 		const { rows: propRows } = await query<{
 			status: string;
 			maturity: string;
+			workflow_name: string;
 		}>(
-			`SELECT status, maturity FROM roadmap_proposal.proposal WHERE id = $1`,
+			`SELECT status, maturity, workflow_name FROM roadmap_proposal.proposal WHERE id = $1`,
 			[proposalId],
 		);
 		if (!propRows.length) {
-			return { content: [{ type: "text", text: `Proposal ${identifier} not found.` }] };
+			return { content: [{ type: "text", text: `Proposal ${rawIdentifier} not found.` }] };
 		}
-		const { status: fromState, maturity } = propRows[0];
+		const { status: fromState, maturity, workflow_name: proposalWorkflow } = propRows[0];
 
-		// Resolve the forward gate target deterministically via stage_order+1.
-		// The previous approach filtered proposal_valid_transitions by
-		// allowed_reasons (forward vs backward), which broke when Architecture RFC
-		// gained both a REVIEW→DEVELOP edge and a REVIEW→COMPLETE fast-path —
-		// the allowed_reasons filter became ambiguous. stage_order+1 always picks
-		// the next sequential stage regardless of allowed_reasons vocabulary.
-		// Falls back to from_state (no-op) when no workflows row exists, or when
-		// the current status has no next stage (terminal state or drift).
+		// Resolve the forward gate target so the fn_apply_gate_advance trigger
+		// actually advances status on an 'advance' decision.
+		// IMPORTANT: use proposal.workflow_name (read above) — NOT the roadmap.workflows
+		// JOIN chain (proposal→workflows→template_id). The JOIN chain can drift (P2754):
+		// a Standard RFC proposal may have its `workflows` row pointing at an Architecture
+		// RFC template, causing advance to resolve REVIEW→COMPLETE instead of REVIEW→DEVELOP.
+		// The canonical source is proposal.workflow_name, looked up in workflow_templates by
+		// name, then the next stage determined deterministically by stage_order+1.
+		// Falls back to from_state (no-op) when no workflows row exists (AC-8) or errors
+		// when a workflow exists but has no forward stage (terminal/drift — AC-2).
 		let toState = fromState;
 		if (args.decision === "advance") {
+			// Check workflow assignment separately so we can distinguish AC-8 (no row)
+			// from AC-2 (row present but no next stage — terminal or drift).
+			const { rows: wfRows } = await query<{ exists: boolean }>(
+				`SELECT EXISTS(SELECT 1 FROM workflows WHERE proposal_id = $1) AS exists`,
+				[proposalId],
+			);
+			const hasWorkflow = wfRows[0]?.exists ?? false;
+
 			const { rows: fwd } = await query<{ to_state: string }>(
-				`SELECT ws_next.stage_name AS to_state
-				   FROM roadmap.workflows w
+				`SELECT UPPER(ws_next.stage_name) AS to_state
+				   FROM roadmap.workflow_templates wt
 				   JOIN roadmap.workflow_stages ws_curr
-				     ON ws_curr.template_id = w.template_id
+				     ON ws_curr.template_id = wt.id
 				    AND UPPER(ws_curr.stage_name) = UPPER($2)
 				   JOIN roadmap.workflow_stages ws_next
-				     ON ws_next.template_id = w.template_id
+				     ON ws_next.template_id = wt.id
 				    AND ws_next.stage_order = ws_curr.stage_order + 1
-				  WHERE w.proposal_id = $1
+				  WHERE wt.name = $1
 				  LIMIT 1`,
-				[proposalId, fromState],
+				[proposalWorkflow, fromState],
 			);
+
 			if (fwd.length) {
 				toState = fwd[0].to_state;
+			} else if (!hasWorkflow) {
+				// AC-8: no workflows row — log and no-op (workflow not yet assigned)
+				console.warn(`[gate_decision] proposal ${proposalId} has no workflows row — advance is a no-op`);
 			} else {
-				console.info(
-					`[gate_decision] proposal ${proposalId}: no next stage found for status=${fromState}` +
-					` (no workflows row, or terminal stage, or status drift); to_state falls back to from_state (no-op)`,
+				// AC-2: workflows row exists but no next stage — terminal or template drift
+				return errorResult(
+					"Gate advance aborted",
+					new Error(
+						`No forward stage edge found for proposal ${args.proposal_id} in state ${fromState}. ` +
+						`Check that workflows.template_id is set to the correct template for this proposal ` +
+						`(run: SELECT w.proposal_id, wt.name FROM roadmap.workflows w ` +
+						`JOIN roadmap.workflow_templates wt ON wt.id = w.template_id ` +
+						`WHERE w.proposal_id = ${proposalId}).`,
+					),
 				);
 			}
 		}
@@ -1549,20 +1574,406 @@ export async function recordGateDecision(args: {
 				[proposalId],
 			);
 			const newState = after[0]?.status ?? fromState;
-			advanceNote =
-				newState.toUpperCase() === toState.toUpperCase()
-					? ` ADVANCED: ${fromState} → ${newState} (Atomic transaction).`
-					: ` (status NOT advanced — still ${newState}; expected ${fromState} → ${toState}. Check for state drift.)`;
+			if (newState.toUpperCase() === toState.toUpperCase()) {
+				// AC-6: sync workflows.current_stage atomically with the advance
+				await query(
+					`UPDATE roadmap.workflows SET current_stage = $1 WHERE proposal_id = $2`,
+					[newState, proposalId],
+				);
+				advanceNote = ` → status ADVANCED ${fromState} → ${newState}. [Atomic: workflows.current_stage synced]`;
+			} else {
+				advanceNote = ` (status NOT advanced — still ${newState}; expected ${fromState} → ${toState}. Check for state drift.)`;
+			}
 		}
 
 		return {
 			content: [{
 				type: "text",
-				text: `✅ Gate decision recorded: id=${rows[0].id} proposal=${identifier} gate=${args.gate} decision=${args.decision}${advanceNote}`,
+				text: `✅ Gate decision recorded: id=${rows[0].id} proposal=${rawIdentifier} gate=${args.gate} decision=${args.decision}${advanceNote}`,
 			}],
 		};
 	} catch (err) {
 		return errorResult("Failed to record gate decision", err);
+	}
+}
+
+// ─── P1071: References and Parent Management ────────────────────────────────
+
+export async function addReference(args: {
+	proposal_id: string;
+	url_or_path: string;
+	label?: string;
+	description?: string;
+}): Promise<CallToolResult> {
+	try {
+		const proposalId = await resolveProposalId(args.proposal_id);
+		if (proposalId === null) {
+			return {
+				content: [
+					{ type: "text", text: `Proposal ${args.proposal_id} not found.` },
+				],
+			};
+		}
+
+		// Validation: url_or_path must be non-empty and not start with javascript: or data:
+		if (!args.url_or_path || !args.url_or_path.trim()) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: "❌ url_or_path is required and must be non-empty.",
+					},
+				],
+			};
+		}
+
+		const normalizedPath = args.url_or_path.trim();
+		if (
+			normalizedPath.toLowerCase().startsWith("javascript:") ||
+			normalizedPath.toLowerCase().startsWith("data:")
+		) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `❌ url_or_path validation failed: '${normalizedPath.slice(0, 50)}' starts with a disallowed scheme (javascript: or data:).`,
+					},
+				],
+			};
+		}
+
+		if (normalizedPath.length > 2048) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `❌ url_or_path exceeds max length (2048 chars): ${normalizedPath.length}`,
+					},
+				],
+			};
+		}
+
+		// Get active agent identity from context
+		const { agentContextStorage } = await import(
+			"../../../../shared/identity/agent-context.ts"
+		);
+		const ctx = agentContextStorage.getStore();
+		if (!ctx?.verified) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: "❌ NO_IDENTITY_CONTEXT: Bearer token required to upload a reference.",
+					},
+				],
+			};
+		}
+
+		const uploadedBy = ctx.verified.principal_id;
+
+		// Derive file_name from label or last path segment
+		let fileName = args.label || normalizedPath.split("/").pop() || "reference";
+		if (!fileName.trim()) {
+			fileName = "reference";
+		}
+
+		// Insert into attachment_registry
+		const { rows } = await query<{ id: bigint; created_at: string }>(
+			`INSERT INTO roadmap.attachment_registry
+			 (proposal_id, file_name, relative_path, uploaded_by, vision_summary, created_at)
+			 VALUES ($1, $2, $3, $4, $5, now())
+			 RETURNING id, created_at`,
+			[proposalId, fileName, normalizedPath, uploadedBy, args.description || null],
+		);
+
+		const ref = rows[0];
+		return {
+			content: [
+				{
+					type: "text",
+					text: `✅ Reference added: id=${ref.id} proposal=${args.proposal_id} file_name="${fileName}"`,
+				},
+			],
+		};
+	} catch (err) {
+		return errorResult("Failed to add reference", err);
+	}
+}
+
+export async function removeReference(args: {
+	proposal_id: string;
+	reference_id: string | number;
+}): Promise<CallToolResult> {
+	try {
+		const proposalId = await resolveProposalId(args.proposal_id);
+		if (proposalId === null) {
+			return {
+				content: [
+					{ type: "text", text: `Proposal ${args.proposal_id} not found.` },
+				],
+			};
+		}
+
+		const referenceId = Number(args.reference_id);
+		if (isNaN(referenceId)) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `❌ reference_id must be a number, got: ${args.reference_id}`,
+					},
+				],
+			};
+		}
+
+		// Check if reference exists and get its uploaded_by
+		const { rows: refRows } = await query<{ uploaded_by: string | null }>(
+			`SELECT uploaded_by FROM roadmap.attachment_registry WHERE id = $1 AND proposal_id = $2`,
+			[referenceId, proposalId],
+		);
+
+		if (refRows.length === 0) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `❌ reference_not_found: No reference #${referenceId} on proposal ${args.proposal_id}`,
+					},
+				],
+			};
+		}
+
+		// Authority check: caller must be the uploader or an operator
+		const { agentContextStorage } = await import(
+			"../../../../shared/identity/agent-context.ts"
+		);
+		const ctx = agentContextStorage.getStore();
+		const callerId = ctx?.verified?.principal_id;
+
+		const uploadedBy = refRows[0].uploaded_by;
+		const isOperator = ctx?.verified?.principal_kind === "operator";
+		const isUploader = callerId === uploadedBy;
+
+		if (!isOperator && !isUploader) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `❌ unauthorized: Only the uploader or an operator can remove this reference.`,
+					},
+				],
+			};
+		}
+
+		// Delete the reference
+		const { rowCount } = await query(
+			`DELETE FROM roadmap.attachment_registry WHERE id = $1 AND proposal_id = $2`,
+			[referenceId, proposalId],
+		);
+
+		if (rowCount === 0) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `❌ reference_not_found: Could not delete reference #${referenceId}`,
+					},
+				],
+			};
+		}
+
+		return {
+			content: [
+				{
+					type: "text",
+					text: `✅ Reference #${referenceId} removed from ${args.proposal_id}`,
+				},
+			],
+		};
+	} catch (err) {
+		return errorResult("Failed to remove reference", err);
+	}
+}
+
+export async function listReferences(args: {
+	proposal_id: string;
+}): Promise<CallToolResult> {
+	try {
+		const proposalId = await resolveProposalId(args.proposal_id);
+		if (proposalId === null) {
+			return {
+				content: [
+					{ type: "text", text: `Proposal ${args.proposal_id} not found.` },
+				],
+			};
+		}
+
+		const { rows } = await query<{
+			id: bigint;
+			file_name: string;
+			relative_path: string;
+			uploaded_by: string | null;
+			created_at: string;
+			vision_summary: string | null;
+		}>(
+			`SELECT id, file_name, relative_path, uploaded_by, created_at, vision_summary
+			 FROM roadmap.attachment_registry
+			 WHERE proposal_id = $1
+			 ORDER BY created_at DESC`,
+			[proposalId],
+		);
+
+		if (rows.length === 0) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `No references on ${args.proposal_id}`,
+					},
+				],
+			};
+		}
+
+		const lines = rows.map(
+			(r) =>
+				`- id=${r.id} file="${r.file_name}" path="${r.relative_path}" uploaded_by="${r.uploaded_by}" created=${r.created_at}${r.vision_summary ? ` summary="${r.vision_summary}"` : ""}`,
+		);
+
+		return {
+			content: [
+				{
+					type: "text",
+					text: `References for ${args.proposal_id}:\n${lines.join("\n")}`,
+				},
+			],
+		};
+	} catch (err) {
+		return errorResult("Failed to list references", err);
+	}
+}
+
+// Helper: check if setting parent_id would create a cycle
+async function checkParentCycle(childId: number, candidateParentId: number): Promise<boolean> {
+	const { rows } = await query<{ cycle_exists: boolean }>(
+		`SELECT EXISTS(
+			WITH RECURSIVE ancestor_chain(id) AS (
+				SELECT parent_id FROM roadmap_proposal.proposal WHERE id = $2 AND parent_id IS NOT NULL
+				UNION ALL
+				SELECT p.parent_id FROM roadmap_proposal.proposal p
+				JOIN ancestor_chain a ON p.id = a.id
+				WHERE p.parent_id IS NOT NULL
+			)
+			SELECT 1 FROM ancestor_chain WHERE id = $1
+		) AS cycle_exists`,
+		[childId, candidateParentId],
+	);
+	return rows[0]?.cycle_exists ?? false;
+}
+
+export async function setParent(args: {
+	id: string;
+	parent_id?: string | null;
+}): Promise<CallToolResult> {
+	try {
+		const proposalId = await resolveProposalId(args.id);
+		if (proposalId === null) {
+			return {
+				content: [
+					{ type: "text", text: `Proposal ${args.id} not found.` },
+				],
+			};
+		}
+
+		// Resolve parent_id if provided
+		let parentId: number | null = null;
+		if (args.parent_id !== undefined && args.parent_id !== null) {
+			parentId = await resolveProposalId(args.parent_id);
+			if (parentId === null) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `❌ parent_not_found: Parent proposal ${args.parent_id} not found.`,
+						},
+					],
+				};
+			}
+		}
+
+		// Validation: no self-parent
+		if (parentId === proposalId) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `❌ A proposal cannot be its own parent.`,
+					},
+				],
+			};
+		}
+
+		// Validation: check for cycles if parent_id is non-null
+		if (parentId !== null) {
+			const hasCycle = await checkParentCycle(proposalId, parentId);
+			if (hasCycle) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `❌ cycle_detected: Setting parent to ${args.parent_id} would create a cycle in the proposal hierarchy.`,
+						},
+					],
+				};
+			}
+		}
+
+		// Get the old parent_id for audit
+		const { rows: oldRows } = await query<{ parent_id: number | null }>(
+			`SELECT parent_id FROM roadmap_proposal.proposal WHERE id = $1`,
+			[proposalId],
+		);
+		const oldParentId = oldRows[0]?.parent_id ?? null;
+
+		// Update the proposal
+		await query(
+			`UPDATE roadmap_proposal.proposal SET parent_id = $2 WHERE id = $1`,
+			[proposalId, parentId],
+		);
+
+		// Get the active agent identity for audit
+		const { agentContextStorage } = await import(
+			"../../../../shared/identity/agent-context.ts"
+		);
+		const ctx = agentContextStorage.getStore();
+		const agentId = ctx?.verified?.principal_id ?? "system";
+
+		// Append to audit JSONB
+		await query(
+			`UPDATE roadmap_proposal.proposal
+			 SET audit = audit || $2::jsonb
+			 WHERE id = $1`,
+			[
+				proposalId,
+				JSON.stringify({
+					ts: new Date().toISOString(),
+					agent: agentId,
+					activity: "SetParent",
+					from_parent_id: oldParentId,
+					to_parent_id: parentId,
+				}),
+			],
+		);
+
+		return {
+			content: [
+				{
+					type: "text",
+					text: `✅ Parent updated for ${args.id}: ${oldParentId ?? "none"} → ${parentId ?? "none"}`,
+				},
+			],
+		};
+	} catch (err) {
+		return errorResult("Failed to set parent", err);
 	}
 }
 
@@ -1883,9 +2294,7 @@ export class RfcWorkflowHandlers {
 			inputSchema: {
 				type: "object",
 				properties: {
-					id: { type: "string", description: "Proposal numeric id (alternative to proposal_id/display_id)" },
-					proposal_id: { type: "string", description: "Proposal numeric id as string" },
-					display_id: { type: "string", description: "Proposal display id, e.g. 'P123'" },
+					proposal_id: { type: "string" },
 					gate: { type: "string", description: "Gate level, e.g. D1, D2, D3, D4" },
 					decision: {
 						type: "string",
@@ -1900,14 +2309,102 @@ export class RfcWorkflowHandlers {
 						description: "JSONB with per-criterion pass/fail map",
 					},
 				},
-				required: ["gate", "decision"],
+				required: ["proposal_id", "gate", "decision"],
 			},
 			handler: (args: any) => recordGateDecision(args),
 		});
 
+		// P1071: References and parent management
+		this.server.addTool({
+			name: "add_reference",
+			description:
+				"Add a reference (file, URL, or artifact) to a proposal. " +
+				"Pass url_or_path as the location (file path or URL), optional label for display name, " +
+				"and optional description for vision/context. " +
+				"url_or_path must not start with javascript: or data:. Caller identity (from bearer token) recorded as uploaded_by.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					proposal_id: { type: "string" },
+					url_or_path: {
+						type: "string",
+						description: "Required: URL or relative file path. Max 2048 chars. Not javascript: or data:.",
+					},
+					label: {
+						type: "string",
+						description: "Optional: display label. Defaults to last path segment of url_or_path.",
+					},
+					description: {
+						type: "string",
+						description: "Optional: vision summary or context for the reference.",
+					},
+				},
+				required: ["proposal_id", "url_or_path"],
+			},
+			handler: (args: any) => addReference(args),
+		});
+
+		this.server.addTool({
+			name: "remove_reference",
+			description:
+				"Remove a reference from a proposal. " +
+				"Authority: caller must be the uploader or an operator.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					proposal_id: { type: "string" },
+					reference_id: {
+						type: ["string", "number"],
+						description: "Numeric reference id from list_references.",
+					},
+				},
+				required: ["proposal_id", "reference_id"],
+			},
+			handler: (args: any) => removeReference(args),
+		});
+
+		this.server.addTool({
+			name: "list_references",
+			description:
+				"List all references attached to a proposal. " +
+				"Returns array of {id, file_name, relative_path, uploaded_by, created_at, vision_summary}, ordered by created_at DESC.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					proposal_id: { type: "string" },
+				},
+				required: ["proposal_id"],
+			},
+			handler: (args: any) => listReferences(args),
+		});
+
+		this.server.addTool({
+			name: "set_parent",
+			description:
+				"Set the parent proposal of this proposal. " +
+				"parent_id can be a numeric ID, display_id (e.g. P1024), or null to clear. " +
+				"Validates: parent exists (if non-null), no self-parent, no cycles. " +
+				"Change is recorded in proposal.audit JSONB.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					id: {
+						type: "string",
+						description: "Proposal display_id or numeric id (required per param-name gotchas).",
+					},
+					parent_id: {
+						type: ["string", "number", "null"],
+						description: "Parent proposal id/display_id, or null to clear.",
+					},
+				},
+				required: ["id"],
+			},
+			handler: (args: any) => setParent(args),
+		});
+
 		// eslint-disable-next-line no-console
 		console.error(
-			"[MCP] Registered 13 RFC workflow tools (state machine, AC, deps, reviews, discussions, gate_decision)",
+			"[MCP] Registered 17 RFC workflow tools (state machine, AC, deps, reviews, discussions, gate_decision, references, parent_management)",
 		);
 	}
 }

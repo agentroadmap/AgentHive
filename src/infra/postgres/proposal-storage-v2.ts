@@ -543,7 +543,11 @@ export async function transitionProposal(
 		);
 	}
 
-	// Validate transition exists
+	// AC-3/AC-4: Validate transition exists against BOTH the compatibility mirror
+	// (proposal_valid_transitions) AND the canonical source (workflow_transitions).
+	// Either source accepting the edge is sufficient — this tolerates mirror drift
+	// (P3326: proposal_valid_transitions can lag workflow_transitions on template
+	// updates) while still enforcing that at least one authoritative source allows it.
 	const { rowCount } = await query(
 		`SELECT 1
      FROM roadmap_proposal.proposal_valid_transitions pvt
@@ -553,6 +557,13 @@ export async function transitionProposal(
      WHERE pvt.workflow_name = ptc.workflow_name
        AND LOWER(pvt.from_state) = LOWER($2)
        AND LOWER(pvt.to_state) = LOWER($3)
+     UNION ALL
+     SELECT 1
+     FROM roadmap.workflow_transitions wt_canon
+     JOIN roadmap.workflows w_canon ON w_canon.template_id = wt_canon.template_id
+     WHERE w_canon.proposal_id = $1
+       AND LOWER(wt_canon.from_stage) = LOWER($2)
+       AND LOWER(wt_canon.to_stage) = LOWER($3)
      LIMIT 1`,
 		[proposalId, fromState, toState],
 	);
@@ -715,6 +726,9 @@ export async function setMaturity(
 				Activity: "MaturityChange",
 				From: prior.maturity ?? "new",
 				To: maturity,
+				// P1389 AC-8: persist the caller's reason for ALL transitions,
+				// not only the mature-path discussion note below.
+				...(reason ? { Reason: reason } : {}),
 			}),
 			proposalId,
 		],
@@ -749,12 +763,15 @@ export async function claimLease(
 	proposalId: number,
 	agentIdentity: string,
 	expiresAt?: Date,
+	claimMessage?: string,
 ): Promise<boolean> {
 	try {
+		// P1389: claimMessage persisted in metadata for claim rationale tracking
+		const metadata = claimMessage ? JSON.stringify({ claim_message: claimMessage }) : null;
 		await query(
-			`INSERT INTO roadmap_proposal.proposal_lease (proposal_id, agent_identity, expires_at)
-       VALUES ($1, $2, $3)`,
-			[proposalId, agentIdentity, expiresAt ?? null],
+			`INSERT INTO roadmap_proposal.proposal_lease (proposal_id, agent_identity, expires_at, metadata)
+       VALUES ($1, $2, $3, $4)`,
+			[proposalId, agentIdentity, expiresAt ?? null, metadata],
 		);
 		return true;
 	} catch {

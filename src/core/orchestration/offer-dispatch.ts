@@ -33,6 +33,11 @@ import type { OfferDispatchPayload } from "../../infra/agency/liaison-message-ty
 import { ObservabilityWriter } from "../observability/observability-writer.ts";
 import * as config from "../../shared/runtime/config.ts";
 import { FlagKeys } from "../../shared/runtime/config-keys.ts";
+import {
+	matchWorkToRoute,
+	type RouteCandidate,
+	type WorkItem,
+} from "./match-work-to-route.ts";
 
 const obs = new ObservabilityWriter("agency:offer-dispatch");
 
@@ -105,6 +110,17 @@ export interface OfferDispatcherOptions {
 	dispatch_sendMessage?: typeof sendMessage;
 	/** Override for test injection — resolves agencyId → agent_identity string. */
 	dispatch_queryAgentIdentity?: (agencyId: bigint) => Promise<string | null>;
+	/**
+	 * P2335 override for test injection — acquires a cubic for the dispatch.
+	 * Returns null to indicate "no cubic acquired" (legacy/worktree_hint fallback
+	 * path, AC-5/AC-14); throw to exercise the AC-13 failure path.
+	 */
+	dispatch_acquireCubic?: (
+		agentIdentity: string,
+		proposalId: number,
+		projectId: number,
+		phase: string,
+	) => Promise<{ cubicId: string; worktreePath: string } | null>;
 }
 
 /**
@@ -118,6 +134,12 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 	private readonly briefingAssembleFn: typeof briefingAssemble;
 	private readonly sendMessageFn: typeof sendMessage;
 	private readonly queryAgentIdentityFn: (agencyId: bigint) => Promise<string | null>;
+	private readonly acquireCubicFn: (
+		agentIdentity: string,
+		proposalId: number,
+		projectId: number,
+		phase: string,
+	) => Promise<{ cubicId: string; worktreePath: string } | null>;
 
 	constructor(opts: OfferDispatcherOptions) {
 		this.orchestratorIdentity = opts.orchestratorIdentity;
@@ -134,6 +156,21 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 					[agencyId.toString()],
 				);
 				return rows[0]?.agent_identity ?? null;
+			});
+		this.acquireCubicFn =
+			opts.dispatch_acquireCubic ??
+			(async (agentIdentity, proposalId, projectId, phase) => {
+				const { rows } = await query<{
+					cubic_id: string;
+					worktree_path: string;
+				}>(
+					`SELECT cubic_id, worktree_path
+					   FROM roadmap.fn_acquire_cubic($1, $2, $3, NULL, NULL, $4)`,
+					[agentIdentity, proposalId, phase, projectId],
+				);
+				const row = rows[0];
+				if (!row?.cubic_id) return null;
+				return { cubicId: row.cubic_id, worktreePath: row.worktree_path };
 			});
 	}
 
@@ -199,6 +236,46 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 			return;
 		}
 
+		// P2335: acquire a project-scoped cubic (worktree workspace) for the
+		// target agency BEFORE dispatch. The cubic_id + cubic_worktree_path are
+		// injected into the payload so the liaison provisions/uses the correct
+		// isolated worktree. The lock is released mechanically on completion by
+		// fn_complete_work_offer (migration 266).
+		//
+		// AC-13: if acquisition fails, do NOT dispatch — complete the offer as
+		// 'failed' so the dispatch-loop circuit breaker observes it immediately
+		// rather than spawning into an unallocated/colliding worktree.
+		let cubic: { cubicId: string; worktreePath: string } | null;
+		try {
+			cubic = await this.acquireCubic(claim, targetAgencyId);
+		} catch (err) {
+			this.logger.error(
+				`[OfferDispatch] P2335 cubic acquisition failed for offer=${claim.offerId} agency=${targetAgencyId}; completing offer as failed:`,
+				err instanceof Error ? err.message : err,
+			);
+			await query(
+				`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, 'failed')`,
+				[claim.dispatchId, this.orchestratorIdentity, claim.claimToken],
+			).catch((e) =>
+				this.logger.error(
+					`[OfferDispatch] P2335 fn_complete_work_offer failed after cubic-acquire failure:`,
+					e instanceof Error ? e.message : e,
+				),
+			);
+			await query(
+				`UPDATE roadmap_workforce.squad_dispatch
+				    SET failure_class = 'cubic_acquire_failed',
+				        failure_is_transient = true,
+				        metadata = metadata || jsonb_build_object(
+				                     'failure_reason', 'cubic_acquire_failed',
+				                     'failed_at', to_jsonb(now())
+				                   )
+				  WHERE id = $1`,
+				[claim.dispatchId],
+			).catch(() => {});
+			return;
+		}
+
 		const briefingId = await this.assembleBriefing(claim, targetAgencyId);
 
 		const payload: OfferDispatchPayload = {
@@ -224,6 +301,10 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 			// the handler falls back to "main" which is not a real worktree
 			// dir and node spawn raises ENOENT before the CLI runs.
 			worktree_hint: extractWorktreeHint(claim.metadata),
+			// P2335: cubic lease — handler prefers cubic_worktree_path over
+			// worktree_hint (AC-9) and provisions the worktree if missing.
+			cubic_id: cubic?.cubicId,
+			cubic_worktree_path: cubic?.worktreePath,
 			// P908-D: thread trace_id so offer-dispatch-handler can open the
 			// offer_completed lifecycle span correlated to this trace.
 			trace_id: extractTraceId(claim.metadata),
@@ -238,6 +319,69 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 			kind: "offer_dispatch",
 			payload: augmented,
 		});
+
+		// AC-5/AC-8 (P3312): shadow-mode — run matcher after dispatch to log matcher_choice
+		// vs the route that will be resolved downstream at spawn time.
+		void (async () => {
+			try {
+				const shadowEnabled = await config
+					.flag(FlagKeys.ADAPTIVE_MATCHER_ENABLED)
+					.catch(() => false);
+				if (shadowEnabled) return; // live mode — matcher already drove route selection upstream
+				const routeHint = extractRouteHint(claim.metadata);
+				const { rows: candidateRows } = await query<{
+					id: number;
+					model_name: string;
+					route_provider: string;
+					tier: string;
+					cost_per_million_input: number | null;
+					priority: number;
+				}>(
+					`SELECT mr.id, mr.model_name, mr.route_provider,
+					        COALESCE(mr.tier, 'tool') AS tier,
+					        mr.cost_per_million_input, mr.priority
+					   FROM roadmap.model_routes mr
+					  WHERE mr.is_enabled = true
+					  ORDER BY mr.priority ASC, COALESCE(mr.cost_per_million_input, 0) ASC`,
+					[],
+				);
+				const candidates: RouteCandidate[] = candidateRows.map((r) => ({
+					route_id: r.id,
+					model_name: r.model_name,
+					route_provider: r.route_provider,
+					tier: r.tier ?? "tool",
+					cost_per_million_input: r.cost_per_million_input,
+					priority: r.priority,
+				}));
+				const workItem: WorkItem = {
+					difficulty: 0.5,
+					task_class: claim.role ?? "develop",
+					provider: routeHint,
+					proposalId: claim.proposalId,
+				};
+				const matcherResult = await matchWorkToRoute(workItem, candidates);
+				const topCandidate =
+					matcherResult.kind === "ranked" ? matcherResult.candidates[0] : null;
+				if (topCandidate) {
+					await query(
+						`INSERT INTO roadmap.route_decision_log
+						   (proposal_id, role, agency_identity, chosen_route_id, eliminated_routes,
+						    matcher_choice, legacy_choice, shadow_mode)
+						 VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, NULL, true)`,
+						[
+							claim.proposalId,
+							claim.role,
+							targetAgencyId,
+							topCandidate.route_id,
+							JSON.stringify([]),
+							JSON.stringify(matcherResult),
+						],
+					);
+				}
+			} catch (_err) {
+				// Fire-and-forget — shadow log errors must never affect dispatch.
+			}
+		})();
 
 		// P908-D: offer_activated span marks the moment the dispatch message was sent.
 		const traceId = extractTraceId(claim.metadata);
@@ -362,6 +506,53 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 		);
 
 		return true;
+	}
+
+	/**
+	 * P2335: acquire a project-scoped cubic for the resolved target agency.
+	 *
+	 * - `targetAgencyId` is the agent_registry.agent_identity TEXT (what
+	 *   pickAgency returns), which is exactly the cubic's owning identity.
+	 * - project_id is resolved from the offer metadata, falling back to the
+	 *   proposal row, defaulting to 1 (control-plane / single-tenant).
+	 * - phase is mapped from the offer role (review/gate roles → 'review',
+	 *   everything else → 'build') to match the cubic phase taxonomy.
+	 *
+	 * Returns null when no cubic_id comes back (handler then falls back to the
+	 * legacy worktree_hint — AC-14). Throws on DB error so dispatch() can take
+	 * the AC-13 "complete as failed" path.
+	 */
+	private async acquireCubic(
+		claim: ClaimedOffer,
+		targetAgencyId: string,
+	): Promise<{ cubicId: string; worktreePath: string } | null> {
+		let projectId = Number(extractProjectId(claim.metadata) ?? "");
+		if (!Number.isFinite(projectId) || projectId <= 0) {
+			projectId = 1;
+			if (claim.proposalId) {
+				try {
+					const { rows } = await query<{ project_id: number | null }>(
+						`SELECT project_id FROM roadmap_proposal.proposal WHERE id = $1`,
+						[claim.proposalId],
+					);
+					const pid = rows[0]?.project_id;
+					if (pid !== undefined && pid !== null) projectId = Number(pid);
+				} catch {
+					/* best-effort — default to project 1 */
+				}
+			}
+		}
+
+		const role = claim.role.toLowerCase();
+		const phase =
+			ROLE_TO_REQUIRED_CAPABILITIES[role]?.[0] === "review" ? "review" : "build";
+
+		return this.acquireCubicFn(
+			targetAgencyId,
+			claim.proposalId,
+			projectId,
+			phase,
+		);
 	}
 
 	private async pickAgency(claim: ClaimedOffer): Promise<string | null> {

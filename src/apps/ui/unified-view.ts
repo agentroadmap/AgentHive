@@ -4,6 +4,10 @@
 
 import type { Core } from "../../core/roadmap.ts";
 import { query as pgQuery } from "../../postgres/pool.ts";
+import {
+	queryWorkforceMetrics,
+	type WorkforceMetrics,
+} from "../../shared/queries/workforce-counts.ts";
 import * as runtimeConfig from "../../shared/runtime/config.ts";
 import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 import { DEFAULT_STATUSES } from "../../shared/constants/index.ts";
@@ -23,6 +27,11 @@ import {
 	buildProposalViewerDirectiveFilterModel,
 	viewProposalEnhanced,
 } from "./proposal-viewer-with-search.ts";
+import {
+	type LifecycleView,
+	type ViewResult,
+	stepLifecycle,
+} from "./screen-lifecycle.ts";
 import { createScreen } from "./tui.ts";
 import {
 	type ViewProposal,
@@ -205,7 +214,9 @@ export async function loadProposalsForUnifiedView(
 	}
 }
 
-type ViewResult = "switch" | "exit";
+// ViewResult is now sourced from the P1139 screen-lifecycle core (the pure,
+// unit-tested decision module) so the live loop and the headless tests share
+// one definition of "switch" | "exit".
 
 /**
  * Main unified view controller that handles Tab switching between views
@@ -614,6 +625,7 @@ export async function runUnifiedView(
 						        ar.role,
 						        COALESCE(a.presence_state, 'unknown') AS presence_state,
 						        COALESCE(a.status, 'unknown')         AS agency_status,
+						        a.agency_id AS agency_id,
 						        a.throttled_until,
 						        COALESCE(a.last_heartbeat_at, ar.updated_at) AS last_heartbeat_at,
 						        sd.proposal_id,
@@ -671,6 +683,21 @@ export async function runUnifiedView(
 						 ORDER BY spent_today DESC
 						 LIMIT 10`,
 					);
+					// P1377 AC-11: canonical workforce counts — single round-trip via
+					// the shared query so the header/subheader render authoritative
+					// numbers (NOT recomputed from the agent array). Awaited
+					// sequentially with the rest (see the parallel-hang note above).
+					// On any error fall back to undefined ⇒ cockpit derives counts
+					// from the in-memory agent array, keeping the panel safe.
+					let workforceMetrics: WorkforceMetrics | undefined;
+					try {
+						workforceMetrics = await queryWorkforceMetrics(
+							(text: string, params?: unknown[]) =>
+								pgQuery(text, (params as any[]) ?? []) as any,
+						);
+					} catch {
+						workforceMetrics = undefined;
+					}
 					const fetchEnd = performance.now();
 
 					// Aggregate status counts into a {STATUS_UPPER: count} map.
@@ -719,6 +746,9 @@ export async function runUnifiedView(
 							capacityHeadroomPct: capacityHeadroom,
 							capacityThrottleAction: row.throttle_action ?? null,
 							capacityResetAt: capacityResetMs,
+							// P1377 AC-9: registration drift — no matching roadmap.agency
+							// row (LEFT JOIN miss ⇒ agency_id IS NULL). Renders [DRIFT].
+							is_drift: row.agency_id == null,
 						};
 					});
 
@@ -754,6 +784,9 @@ export async function runUnifiedView(
 						pipelineCounts,
 						ledger: ledgerData,
 						messages: cockpitMessages,
+						// P1377 AC-11: pass canonical metrics; header/subheader
+						// render these verbatim instead of recomputing.
+						metrics: workforceMetrics,
 						layout: cockpitLayout,
 					});
 					const renderEnd = performance.now();
@@ -1027,30 +1060,20 @@ export async function runUnifiedView(
 			// After the first view, we're no longer on initial load
 			isInitialLoad = false;
 
-			// Handle the result
+			// Handle the result via the P1139 pure lifecycle core. stepLifecycle
+			// owns the P247 Tab cycle (proposal → kanban → cockpit → headlines →
+			// chat → wrap) AND the "destroy only on exit" rule; the live loop no
+			// longer hand-rolls a duplicate switch table (the previous source of
+			// drift between the loop and the tested core). currentView is the same
+			// six-string union as LifecycleView.
+			const step = stepLifecycle(currentView as LifecycleView, result);
 			if (result === "switch") {
-				// User pressed Tab, cycle through views
-				switch (currentView) {
-					case "proposal-list":
-					case "proposal-detail":
-						currentView = "kanban";
-						break;
-					case "kanban":
-						currentView = "cockpit";
-						break;
-					case "cockpit":
-						currentView = "headlines";
-						break;
-					case "headlines":
-						currentView = "chat";
-						break;
-					case "chat":
-						currentView = "proposal-list";
-						break;
-				}
+				// Tab: advance to the next view WITHOUT destroying the screen.
+				currentView = step.nextView as ViewType;
 			} else {
-				// User pressed q/Esc, exit the loop
-				isRunning = false;
+				// q/Esc: terminal exit — the only path that ends the loop (and, once
+				// the live renderers share one screen, the only screen.destroy site).
+				isRunning = step.keepRunning;
 			}
 		}
 	} catch (error) {

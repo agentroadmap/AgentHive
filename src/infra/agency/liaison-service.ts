@@ -16,6 +16,9 @@
 
 import type { PoolClient } from "pg";
 import { query } from "../postgres/pool.ts";
+// P1109 Tier-2: presence heartbeat is wrapped behind agentPulse() instead of a raw
+// `SELECT roadmap.fn_pulse(...)` issued from this agency process.
+import { agentPulse } from "./presence-ops.ts";
 
 export interface LiaisonRegisterPayload {
 	agency_id: string;
@@ -279,7 +282,7 @@ export async function liaisonHeartbeat(
 			liaison_status === "throttled" ? "busy"
 			: liaison_status === "paused"   ? "away"
 			: "online";
-		await query("SELECT roadmap.fn_pulse($1, $2)", [row.agency_id, presenceState]).catch(() => {});
+		await agentPulse(row.agency_id, presenceState).catch(() => {});
 	}
 
 	return {
@@ -483,9 +486,10 @@ export async function listDispatchableAgencies(): Promise<
 }
 
 /**
- * P1104: Signal offline presence via fn_pulse on graceful shutdown.
+ * P1104: Signal offline presence on graceful shutdown.
+ * P1109 Tier-2: wrapped behind agentPulse() instead of a raw fn_pulse query.
  * Best-effort — errors are silently swallowed so shutdown is never blocked.
  */
 export async function liaisonSetOffline(agency_id: string): Promise<void> {
-	await query("SELECT roadmap.fn_pulse($1, $2)", [agency_id, "offline"]).catch(() => {});
+	await agentPulse(agency_id, "offline").catch(() => {});
 }

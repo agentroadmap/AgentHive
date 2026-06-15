@@ -14,7 +14,7 @@ Environment=NODE_ENV=production
 Environment=PATH=${NODE_BIN_DIR}:/usr/local/bin:/usr/bin:/bin
 Environment=HOME=/home/${HOME_USER}
 Environment=AGENCY_ID=%i
-ExecStart=${NODE_BIN} --import jiti/register scripts/start-liaison.ts
+ExecStart=/usr/local/bin/bun scripts/start-liaison.ts
 Restart=on-failure
 RestartSec=15
 TimeoutStopSec=60
