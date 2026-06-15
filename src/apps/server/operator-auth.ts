@@ -38,6 +38,7 @@ export interface OperatorAuthContext {
 	action: string;
 	targetKind?: string;
 	targetIdentity?: string;
+	targetProjectId?: number;
 	requestSummary?: Record<string, unknown>;
 }
 
@@ -178,8 +179,9 @@ export async function authorizeOperator(
 		allowed_actions: string[];
 		revoked_at: string | null;
 		expires_at: string | null;
+		scoped_project_id: number | null;
 	}>(
-		`SELECT id, operator_name, allowed_actions, revoked_at, expires_at
+		`SELECT id, operator_name, allowed_actions, revoked_at, expires_at, scoped_project_id
 		   FROM roadmap.operator_token
 		  WHERE token_sha256 = $1`,
 		[sha],
@@ -266,6 +268,34 @@ export async function authorizeOperator(
 		return out;
 	}
 
+	// 5. Project scope check (AC-5, P3508).
+	// If the token is scoped to a project and the caller specifies a different
+	// targetProjectId, deny the request. NULL scope = full access (no lockout).
+	// Coerce to number: PG may return bigint columns as strings via the driver.
+	if (
+		row.scoped_project_id !== null &&
+		ctx.targetProjectId !== undefined &&
+		Number(ctx.targetProjectId) !== Number(row.scoped_project_id)
+	) {
+		const out = denyOutcome(
+			`project scope: token scoped to project ${row.scoped_project_id}, ` +
+			`caller targets project ${ctx.targetProjectId}.`,
+		);
+		await logAudit({
+			action: ctx.action,
+			decision: out.decision,
+			operatorName: out.operatorName,
+			tokenId: out.tokenId,
+			targetKind: ctx.targetKind,
+			targetIdentity: ctx.targetIdentity,
+			requestSummary: ctx.requestSummary,
+			remoteAddr,
+			responseStatus: out.httpStatus,
+			failureReason: out.failureReason,
+		});
+		return out;
+	}
+
 	// allowed
 	void query(
 		`UPDATE roadmap.operator_token SET last_used_at = now() WHERE id = $1`,
@@ -290,6 +320,201 @@ export async function authorizeOperator(
 		targetIdentity: ctx.targetIdentity,
 		requestSummary: ctx.requestSummary,
 		remoteAddr,
+		responseStatus: 200,
+		failureReason: null,
+	});
+	return out;
+}
+
+/**
+ * Token-only authorization path (AC-9c, P3508).
+ *
+ * Identical logic to authorizeOperator() but operates on a raw token string
+ * instead of an HTTP Request. Used by MCP handlers (e.g. project_create_v2)
+ * that receive the token as a string argument rather than an Authorization header.
+ *
+ * Writes audit rows with remoteAddr=null (no network context available).
+ */
+export async function authorizeOperatorByToken(
+	rawToken: string,
+	ctx: OperatorAuthContext,
+): Promise<OperatorAuthOutcome> {
+	// 1. Are any tokens configured?
+	const { rows: configRows } = await query<{ token_count: number | string }>(
+		`SELECT COUNT(*)::int AS token_count
+		   FROM roadmap.operator_token
+		  WHERE revoked_at IS NULL
+		    AND (expires_at IS NULL OR expires_at > now())`,
+	);
+	const activeTokenCount = Number(configRows[0]?.token_count ?? 0);
+
+	if (activeTokenCount === 0) {
+		const out: OperatorAuthOutcome = {
+			decision: "unconfigured",
+			operatorName: null,
+			tokenId: null,
+			failureReason: "No active operator_token rows configured.",
+			httpStatus: 503,
+		};
+		await logAudit({
+			action: ctx.action,
+			decision: out.decision,
+			operatorName: null,
+			tokenId: null,
+			targetKind: ctx.targetKind,
+			targetIdentity: ctx.targetIdentity,
+			requestSummary: ctx.requestSummary,
+			remoteAddr: null,
+			responseStatus: out.httpStatus,
+			failureReason: out.failureReason,
+		});
+		return out;
+	}
+
+	const sha = hashOperatorToken(rawToken);
+
+	const { rows } = await query<{
+		id: number;
+		operator_name: string;
+		allowed_actions: string[];
+		revoked_at: string | null;
+		expires_at: string | null;
+		scoped_project_id: number | null;
+	}>(
+		`SELECT id, operator_name, allowed_actions, revoked_at, expires_at, scoped_project_id
+		   FROM roadmap.operator_token
+		  WHERE token_sha256 = $1`,
+		[sha],
+	);
+
+	const row = rows[0];
+	const denyOutcome = (reason: string, status = 403): OperatorAuthOutcome => ({
+		decision: "deny",
+		operatorName: row?.operator_name ?? null,
+		tokenId: row?.id ?? null,
+		failureReason: reason,
+		httpStatus: status,
+	});
+
+	if (!row) {
+		const out = denyOutcome("Token not recognized.", 401);
+		await logAudit({
+			action: ctx.action,
+			decision: out.decision,
+			operatorName: out.operatorName,
+			tokenId: out.tokenId,
+			targetKind: ctx.targetKind,
+			targetIdentity: ctx.targetIdentity,
+			requestSummary: ctx.requestSummary,
+			remoteAddr: null,
+			responseStatus: out.httpStatus,
+			failureReason: out.failureReason,
+		});
+		return out;
+	}
+
+	if (row.revoked_at) {
+		const out = denyOutcome("Token revoked.");
+		await logAudit({
+			action: ctx.action,
+			decision: out.decision,
+			operatorName: out.operatorName,
+			tokenId: out.tokenId,
+			targetKind: ctx.targetKind,
+			targetIdentity: ctx.targetIdentity,
+			requestSummary: ctx.requestSummary,
+			remoteAddr: null,
+			responseStatus: out.httpStatus,
+			failureReason: out.failureReason,
+		});
+		return out;
+	}
+
+	if (row.expires_at && new Date(row.expires_at).getTime() <= Date.now()) {
+		const out = denyOutcome("Token expired.");
+		await logAudit({
+			action: ctx.action,
+			decision: out.decision,
+			operatorName: out.operatorName,
+			tokenId: out.tokenId,
+			targetKind: ctx.targetKind,
+			targetIdentity: ctx.targetIdentity,
+			requestSummary: ctx.requestSummary,
+			remoteAddr: null,
+			responseStatus: out.httpStatus,
+			failureReason: out.failureReason,
+		});
+		return out;
+	}
+
+	const allowed = row.allowed_actions ?? [];
+	const actionAllowed = allowed.includes("*") || allowed.includes(ctx.action);
+	if (!actionAllowed) {
+		const out = denyOutcome(
+			`Action '${ctx.action}' not in allowed_actions for operator '${row.operator_name}'.`,
+		);
+		await logAudit({
+			action: ctx.action,
+			decision: out.decision,
+			operatorName: out.operatorName,
+			tokenId: out.tokenId,
+			targetKind: ctx.targetKind,
+			targetIdentity: ctx.targetIdentity,
+			requestSummary: ctx.requestSummary,
+			remoteAddr: null,
+			responseStatus: out.httpStatus,
+			failureReason: out.failureReason,
+		});
+		return out;
+	}
+
+	// Project scope check (matches authorizeOperator logic).
+	// Coerce to number: PG may return bigint columns as strings via the driver.
+	if (
+		row.scoped_project_id !== null &&
+		ctx.targetProjectId !== undefined &&
+		Number(ctx.targetProjectId) !== Number(row.scoped_project_id)
+	) {
+		const out = denyOutcome(
+			`project scope: token scoped to project ${row.scoped_project_id}, ` +
+			`caller targets project ${ctx.targetProjectId}.`,
+		);
+		await logAudit({
+			action: ctx.action,
+			decision: out.decision,
+			operatorName: out.operatorName,
+			tokenId: out.tokenId,
+			targetKind: ctx.targetKind,
+			targetIdentity: ctx.targetIdentity,
+			requestSummary: ctx.requestSummary,
+			remoteAddr: null,
+			responseStatus: out.httpStatus,
+			failureReason: out.failureReason,
+		});
+		return out;
+	}
+
+	void query(
+		`UPDATE roadmap.operator_token SET last_used_at = now() WHERE id = $1`,
+		[row.id],
+	).catch(() => {});
+
+	const out: OperatorAuthOutcome = {
+		decision: "allow",
+		operatorName: row.operator_name,
+		tokenId: row.id,
+		failureReason: null,
+		httpStatus: 200,
+	};
+	await logAudit({
+		action: ctx.action,
+		decision: out.decision,
+		operatorName: out.operatorName,
+		tokenId: out.tokenId,
+		targetKind: ctx.targetKind,
+		targetIdentity: ctx.targetIdentity,
+		requestSummary: ctx.requestSummary,
+		remoteAddr: null,
 		responseStatus: 200,
 		failureReason: null,
 	});

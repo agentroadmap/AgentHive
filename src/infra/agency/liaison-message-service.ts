@@ -8,6 +8,7 @@ import { Client as PgClient } from 'pg';
 import { query } from '../postgres/pool.js';
 import { agentNotifyChannel } from '../messaging/a2a-access-control.js';
 import type { LiaisonMessage, LiaisonMessageAckOutcome } from './liaison-message-types.js';
+import { agentNotifyChannel } from '../messaging/a2a-access-control.js';
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 

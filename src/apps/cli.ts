@@ -44,6 +44,7 @@ import {
 	type SearchResultType,
 } from "../types/index.ts";
 import type { ProposalEditArgs } from "../types/proposal-edit-args.ts";
+import { agentNotifyChannel } from "../infra/messaging/a2a-access-control.ts";
 import {
 	type AgentSelectionValue,
 	processAgentSelection,
