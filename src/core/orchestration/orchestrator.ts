@@ -143,7 +143,11 @@ export class Orchestrator {
 	private staleRowReaperMs = 300_000;
 	private stuckWorkerMs = 60_000;
 	private heartbeatMs = 60_000;
-	private offerClaimEnabled = true;
+	// P1432 AC-1 (matchmaker invariant): default OFF so the orchestrator never
+	// self-claims unless a flag explicitly re-enables it. The invariant must not
+	// depend on a DB flag row existing — a deleted/reset flag falls back to
+	// matchmaker-only, not to self-claiming. Live re-enable is the emergency lever.
+	private offerClaimEnabled = false;
 
 	private offerReapTimer: ReturnType<typeof setInterval> | null = null;
 	private pokeWatchdogTimer: ReturnType<typeof setInterval> | null = null;
@@ -253,7 +257,7 @@ export class Orchestrator {
 		this.staleRowReaperMs = await tryFlag("AGENTHIVE_STALE_ROW_REAPER_INTERVAL_MS", FlagKeys.ORCHESTRATOR_STALE_ROW_REAPER_MS, 300_000, Number);
 		this.stuckWorkerMs = await tryFlag("AGENTHIVE_STUCK_WORKER_WATCHDOG_INTERVAL_MS", FlagKeys.ORCHESTRATOR_STUCK_WORKER_MS, 60_000, Number);
 		this.heartbeatMs = await tryFlag("AGENTHIVE_HEARTBEAT_INTERVAL_MS", FlagKeys.ORCHESTRATOR_HEARTBEAT_MS, 60_000, Number);
-		this.offerClaimEnabled = await tryFlag("AGENTHIVE_OFFER_CLAIM_LOOP", FlagKeys.ORCHESTRATOR_OFFER_CLAIM_ENABLED, true, (s) => s !== "0");
+		this.offerClaimEnabled = await tryFlag("AGENTHIVE_OFFER_CLAIM_LOOP", FlagKeys.ORCHESTRATOR_OFFER_CLAIM_ENABLED, false, (s) => s !== "0");
 
 		// P1144/AC-18: single boot/reload summary of all resolved orchestrator
 		// flags with their env|db|default provenance.

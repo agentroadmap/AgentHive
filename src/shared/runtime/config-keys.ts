@@ -1093,8 +1093,11 @@ export const FlagKeys = {
 			}
 		},
 		required: false,
-		defaultValue: true,
-		description: "Kill switch: false disables offer-claim loop",
+		// P1432 AC-1 (matchmaker invariant): default OFF — the orchestrator must
+		// not self-claim by default. A missing/reset flag falls back to
+		// matchmaker-only; set true to explicitly re-enable the loop (emergency lever).
+		defaultValue: false,
+		description: "Kill switch: false (default) disables the orchestrator offer-claim loop",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
