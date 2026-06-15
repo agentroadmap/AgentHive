@@ -486,12 +486,12 @@ async function runSpawn(args: {
 			null;
 		if (!agencyProvider) {
 			try {
-				const { rows } = await query<{ preferred_provider: string | null }>(
+				const result = (await exec(
 					`SELECT preferred_provider FROM roadmap_workforce.agent_registry
 					 WHERE agent_identity = $1 LIMIT 1`,
 					[agencyId],
-				);
-				agencyProvider = rows[0]?.preferred_provider ?? null;
+				)) as { rows: Array<{ preferred_provider: string | null }> } | undefined;
+				agencyProvider = result?.rows?.[0]?.preferred_provider ?? null;
 			} catch (err) {
 				logger.warn(
 					`[OfferDispatchHandler] ${agencyId}: preferred_provider lookup failed:`,
@@ -515,7 +515,7 @@ async function runSpawn(args: {
 		const persona: string | null =
 			typeof payload.persona === "string" && payload.persona.length > 0
 				? payload.persona
-				: await resolvePersonaByRoleName(payload.role, query as never).catch(() => null);
+				: await resolvePersonaByRoleName(payload.role, exec as never).catch(() => null);
 
 		const baseTask: string =
 			typeof payload.task === "string" && payload.task.length > 0
