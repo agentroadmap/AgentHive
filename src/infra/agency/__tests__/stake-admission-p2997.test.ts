@@ -140,6 +140,33 @@ describe("P2997 evaluateStakeAdmission (AC-8 pre-claim gate)", () => {
 		expect(r.allowed).toBe(true);
 		expect(r.isLegacy).toBe(true);
 	});
+
+	it("fails OPEN (admits as legacy) when stake schema is not yet applied (PG 42703)", async () => {
+		// Migration 283 not yet applied → the stake columns don't exist.
+		// The claim path must NOT break; admit as legacy with no bond enforced.
+		const exec: SqlExec = vi.fn(async () => {
+			const err = new Error('column "stake_microcents" does not exist') as Error & {
+				code?: string;
+			};
+			err.code = "42703";
+			throw err;
+		});
+		const r = await evaluateStakeAdmission("agency/pre-migration", exec);
+		expect(r.allowed).toBe(true);
+		expect(r.isLegacy).toBe(true);
+		expect(r.stakeStatus).toBe(null);
+	});
+
+	it("re-throws unexpected DB errors (does not mask real failures)", async () => {
+		const exec: SqlExec = vi.fn(async () => {
+			const err = new Error("connection terminated") as Error & { code?: string };
+			err.code = "57P01";
+			throw err;
+		});
+		await expect(evaluateStakeAdmission("agency/x", exec)).rejects.toThrow(
+			"connection terminated",
+		);
+	});
 });
 
 describe("P2997 slashStake (AC-7 post-work failure handler)", () => {

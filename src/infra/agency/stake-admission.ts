@@ -90,13 +90,32 @@ export async function evaluateStakeAdmission(
 	agentIdentity: string,
 	exec: SqlExec = defaultQuery as unknown as SqlExec,
 ): Promise<StakeAdmissionResult> {
-	const res = (await exec(
-		`SELECT stake_microcents, stake_status, is_legacy
-		   FROM roadmap_workforce.agent_registry
-		  WHERE agent_identity = $1
-		  LIMIT 1`,
-		[agentIdentity],
-	)) as { rows: RegistryStakeRow[] };
+	let res: { rows: RegistryStakeRow[] };
+	try {
+		res = (await exec(
+			`SELECT stake_microcents, stake_status, is_legacy
+			   FROM roadmap_workforce.agent_registry
+			  WHERE agent_identity = $1
+			  LIMIT 1`,
+			[agentIdentity],
+		)) as { rows: RegistryStakeRow[] };
+	} catch (err) {
+		// Fail OPEN when the stake schema (migration 283) is not yet applied.
+		// PG 42703 = undefined_column, 42P01 = undefined_table. During the
+		// window between this code shipping and the migration landing, the
+		// claim path must never break — admit as legacy (no bond enforced).
+		const code = (err as { code?: string })?.code;
+		if (code === "42703" || code === "42P01") {
+			return {
+				allowed: true,
+				reason: null,
+				stakeStatus: null,
+				stakeMicrocents: 0,
+				isLegacy: true,
+			};
+		}
+		throw err;
+	}
 
 	const row = res.rows?.[0];
 
