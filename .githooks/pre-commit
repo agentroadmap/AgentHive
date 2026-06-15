@@ -49,4 +49,13 @@ if echo "$STAGED" | grep -qE '^src/.*\.tsx?$'; then
   fi
 fi
 
+# P1107 AC-8: message-type drift gate — run when messaging types or migrations change.
+# Catches divergence between roadmap.message_ledger CHECK constraint and TypeScript enum.
+if echo "$STAGED" | grep -qE '^(src/infra/messaging/types\.tsx?|scripts/migrations/.*\.sql)$'; then
+  if ! node --import jiti/register scripts/check-message-type-drift.ts >&2; then
+    echo "[pre-commit] Blocking commit: message_type DB constraint and TypeScript enum have drifted (see above)." >&2
+    exit 1
+  fi
+fi
+
 exit 0

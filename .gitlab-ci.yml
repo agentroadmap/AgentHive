@@ -79,6 +79,32 @@ workflow-states-check:
     paths:
       - node_modules/
 
+# P1107 AC-8: MCP binary bundle gate. esbuild catches dup-declaration corruption
+# that tsc misses (tsconfig.check.json excludes src/apps/mcp-server).
+# Runs on every push; fails with the conflicting identifier named.
+mcp-bundle-gate:
+  stage: check
+  script:
+    - npm ci
+    - npm run check:mcp-bundle
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
+
+# P1107 AC-8: Migration continuity gate. Verifies every on-disk migration file
+# matches a recorded row in roadmap.migration_history. Requires DB access.
+migration-continuity:
+  stage: check
+  script:
+    - npm ci
+    - npm run check:migration-continuity
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
+  allow_failure: true
+
 migration-schema-lint:
   stage: check
   script:
