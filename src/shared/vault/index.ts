@@ -207,6 +207,13 @@ function buildRoutingVault(kind?: string): VaultAdapter {
 
 // ---------------------------------------------------------------------------
 // P1072: DB-driven provider selection + sync→async getVault() cutover
+//
+// No-log policy (AC-7): the [vault] init logs below intentionally emit ONLY
+// non-sensitive identifiers — provider_type and the provider slug — never a
+// secret value. Secret values are returned by VaultAdapter.read() at call time
+// and are never passed to console.* anywhere in this package. Secrets are held
+// encrypted-at-rest in the backing vault; this module only resolves *which*
+// adapter/ref to use. See docs/vault/encryption-at-rest.md.
 // ---------------------------------------------------------------------------
 
 /**
