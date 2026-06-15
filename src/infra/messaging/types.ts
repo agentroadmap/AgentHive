@@ -20,6 +20,11 @@ export const MESSAGE_TYPES = [
 	"task_status",
 	"task_complete",
 	"task_error",
+	"user_message",
+	"throttle_decision",
+	"capacity_query",
+	"handoff_request",
+	"capability_gap",
 ] as const;
 
 export type MessageType = (typeof MESSAGE_TYPES)[number];
