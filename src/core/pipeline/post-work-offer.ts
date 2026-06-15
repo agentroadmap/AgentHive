@@ -571,10 +571,13 @@ async function postWorkOfferImpl(
 		gate_scanner_paused: boolean;
 		gate_paused_by: string | null;
 		gate_paused_at: string | null;
+		task_class: string | null;
+		tier_override: string | null;
 	}>(
 		`SELECT project_id, status, maturity,
 		        gate_scanner_paused, gate_paused_by,
-		        gate_paused_at::text AS gate_paused_at
+		        gate_paused_at::text AS gate_paused_at,
+		        task_class, tier_override
 		 FROM roadmap_proposal.proposal
 		 WHERE id = $1`,
 		[input.proposalId],

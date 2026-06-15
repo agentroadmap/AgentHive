@@ -1445,63 +1445,35 @@ export async function recordGateDecision(args: {
 		const { rows: propRows } = await query<{
 			status: string;
 			maturity: string;
-			workflow_name: string;
 		}>(
-			`SELECT status, maturity, workflow_name FROM roadmap_proposal.proposal WHERE id = $1`,
+			`SELECT status, maturity FROM roadmap_proposal.proposal WHERE id = $1`,
 			[proposalId],
 		);
 		if (!propRows.length) {
 			return { content: [{ type: "text", text: `Proposal ${args.proposal_id} not found.` }] };
 		}
-		const { status: fromState, maturity, workflow_name: proposalWorkflow } = propRows[0];
+		const { status: fromState, maturity } = propRows[0];
 
 		// Resolve the forward gate target so the fn_apply_gate_advance trigger
-		// actually advances status on an 'advance' decision. This handler used to
-		// write to_state = from_state, which made the trigger's idempotency check
-		// (status == to_state -> RETURN NULL) a permanent no-op: gate_decision
-		// recorded a row but never advanced, contradicting the tool description.
-		// Resolve via the SAME workflow source the prop_transition validator uses
-		// (the `workflows` table + workflow_templates), so the two paths agree
-		// even for proposals whose proposal.workflow_name has drifted.
-		//
-		// Pick the single FORWARD transition for this from_state. We identify it by
-		// EXCLUDING the backward reasons (iterate / revision / reject / close ...)
-		// rather than allow-listing forward ones. Allow-listing forward reasons was
-		// a latent bug: every workflow has its own forward vocabulary
-		// (Architecture RFC uses {design_complete,ready_for_review} /
-		// {gate_approved,decision_made,deployment_ready}; Code Review uses
-		// {merge,mature}/{approve,quorum_met}; Governance uses {approve}/{mature,complete}),
-		// none of which overlapped the old hard-coded list — so gate_decision
-		// silently no-op'd for every non-"Standard RFC" workflow. The backward
-		// vocabulary, by contrast, is small and stable across all workflows.
-		// Falls back to from_state (no-op) for non-advance decisions, terminal
-		// states with no forward edge, or genuine ambiguity.
-		//
-		// NOTE (P2754, from P3000 branch): the query below keys on
-		// proposal.workflow_name (read above) — NOT the workflows JOIN chain
-		// (workflows→workflow_templates→name), which can drift and resolve
-		// REVIEW→COMPLETE instead of REVIEW→DEVELOP.
+		// actually advances status on an 'advance' decision. Uses stage_order+1
+		// from workflow_stages — deterministic and workflow-type-aware (Standard RFC:
+		// REVIEW→DEVELOP; Architecture RFC: Review→Complete). Falls back to
+		// from_state (no-op) when no workflows row exists, when the current stage
+		// isn't found in the template, or when there is no next stage (terminal).
 		let toState = fromState;
 		if (args.decision === "advance") {
 			const { rows: fwd } = await query<{ to_state: string }>(
-				`SELECT pvt.to_state
-				   FROM roadmap_proposal.proposal_valid_transitions pvt
-				  WHERE pvt.workflow_name = $1
-				    AND LOWER(pvt.from_state) = LOWER($2)
-				    AND NOT (pvt.allowed_reasons && ARRAY[
-				          'iterate','iteration','revision','revise','changes_requested',
-				          'return','reject','rejected','block','blocked','concerns_raised',
-				          'close','discard','stale','send_back'
-				        ]::text[])
-				  ORDER BY
-				    -- Prefer intermediate stages over terminal states so that
-				    -- REVIEW→DEVELOP is picked before REVIEW→COMPLETE when
-				    -- both transitions exist (e.g. Architecture RFC workflow).
-				    -- Alphabetical fallback resolves any remaining ties.
-				    CASE WHEN LOWER(pvt.to_state) IN ('complete','closed','archived','obsolete') THEN 1 ELSE 0 END,
-				    pvt.to_state
+				`SELECT ws_next.stage_name AS to_state
+				   FROM workflows w
+				   JOIN workflow_stages ws_curr
+				     ON ws_curr.template_id = w.template_id
+				    AND UPPER(ws_curr.stage_name) = UPPER($2)
+				   JOIN workflow_stages ws_next
+				     ON ws_next.template_id = w.template_id
+				    AND ws_next.stage_order = ws_curr.stage_order + 1
+				  WHERE w.proposal_id = $1
 				  LIMIT 1`,
-				[proposalWorkflow, fromState],
+				[proposalId, fromState],
 			);
 			if (fwd.length) toState = fwd[0].to_state;
 		}

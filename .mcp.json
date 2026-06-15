@@ -1,13 +1,8 @@
 {
   "mcpServers": {
     "agenthive": {
-      "type": "http",
-      "url": "http://127.0.0.1:6421/mcp-streamable"
-    },
-    "playwright": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["@playwright/mcp@latest", "--browser", "chromium", "--headless"]
+      "type": "sse",
+      "url": "http://127.0.0.1:6421/sse"
     }
   }
 }

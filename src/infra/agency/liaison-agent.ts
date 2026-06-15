@@ -75,6 +75,7 @@ import {
 	handleTypedTaskRequest,
 	handleWorkerReport,
 	markLiaisonTaskTrackerFailed,
+	detectStuckWorkers,
 	type TaskDispatcherHelpers,
 } from "./task-dispatcher.ts";
 
@@ -509,8 +510,18 @@ export async function runLiaisonAgent(
 		}
 	});
 
+	// P3315 AC-3: Periodic reaper — flip orphaned active tracker rows to 'failed'
+	// so stale rows from failed dispatches never permanently wedge retries.
+	const REAPER_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+	const reaperInterval = setInterval(() => {
+		detectStuckWorkers().catch((err) =>
+			console.warn(`${log} detectStuckWorkers error:`, err),
+		);
+	}, REAPER_INTERVAL_MS);
+
 	return {
 		stop: async () => {
+			clearInterval(reaperInterval);
 			// Stop the claim loop first if it's running
 			if (claimLoop) {
 				try {

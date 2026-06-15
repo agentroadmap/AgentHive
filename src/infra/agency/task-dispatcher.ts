@@ -591,11 +591,6 @@ export async function handleTypedTaskRequest(
 		}
 	} catch (err) {
 		console.warn(`${log} tracker INSERT failed:`, err);
-		try {
-			await releaseProposal(proposalId, identity, "tracker_init_failed");
-		} catch (releaseErr) {
-			console.warn(`${log} lease release also failed:`, releaseErr);
-		}
 		const detail = err instanceof Error ? err.message : String(err);
 		await insertReply({
 			fromAgent: identity,

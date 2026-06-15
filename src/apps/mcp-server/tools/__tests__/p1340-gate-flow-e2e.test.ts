@@ -44,6 +44,8 @@ describe("P1340: MCP gate-flow ergonomics — e2e", () => {
 		transitionHint: 999118,
 		// Test 8: recordGateDecision identifiers (999119)
 		recordGateDecisionId: 999119,
+		// Test 9: Architecture RFC REVIEW→COMPLETE (999120)
+		archRfcGateDecision: 999120,
 	};
 
 	// Test agencies
@@ -694,6 +696,60 @@ describe("P1340: MCP gate-flow ergonomics — e2e", () => {
 
 			expect(result.content[0].text).toContain("missing proposal identifier");
 			expect(result.content[0].text).toContain("proposal_id");
+		});
+	});
+
+	// ─── Test 9: Architecture RFC REVIEW→COMPLETE (AC-5) ───────────────
+
+	describe("9. Architecture RFC gate_decision advance (REVIEW→COMPLETE)", () => {
+		it("AC-5: advance on REVIEW-stage Architecture RFC proposal transitions to COMPLETE", async () => {
+			const pid = testProposalIds.archRfcGateDecision;
+
+			// Create an architecture-type proposal at REVIEW/mature
+			await query(
+				`INSERT INTO roadmap_proposal.proposal
+				   (id, display_id, type, status, maturity, title, audit, created_at, modified_at)
+				 OVERRIDING SYSTEM VALUE
+				 VALUES ($1, $2, 'architecture', 'REVIEW', 'mature', $3, '[]'::jsonb, now(), now())
+				 ON CONFLICT (id) DO NOTHING`,
+				[pid, `P${pid}`, `Architecture RFC Test ${pid}`],
+			);
+
+			// Wire up the Architecture RFC workflow (template_id=54: Draft→Review→Complete)
+			await query(
+				`INSERT INTO roadmap.workflows (template_id, proposal_id, current_stage)
+				 VALUES (54, $1, 'Review')
+				 ON CONFLICT (proposal_id) DO UPDATE SET template_id = 54, current_stage = 'Review'`,
+				[pid],
+			);
+
+			await createActiveLease(pid, george);
+
+			const result = await recordGateDecision({
+				proposal_id: String(pid),
+				gate: "D2",
+				decision: "advance",
+				rationale: "Architecture approved, advancing to Complete",
+				decided_by: george,
+			});
+
+			expect(result.content[0].text).toContain("ADVANCED");
+			expect(result.content[0].text).toContain("REVIEW → COMPLETE");
+
+			const { rows } = await query<{ status: string }>(
+				`SELECT status FROM roadmap_proposal.proposal WHERE id = $1`,
+				[pid],
+			);
+			expect(rows[0].status).toBe("COMPLETE");
+
+			// Verify gate_decision_log has correct from_state and to_state (AC-7)
+			const { rows: logRows } = await query<{ from_state: string; to_state: string }>(
+				`SELECT from_state, to_state FROM roadmap_proposal.gate_decision_log
+				  WHERE proposal_id = $1 ORDER BY id DESC LIMIT 1`,
+				[pid],
+			);
+			expect(logRows[0].from_state).toBe("REVIEW");
+			expect(logRows[0].to_state).toBe("Complete");
 		});
 	});
 });
