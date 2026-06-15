@@ -38,6 +38,11 @@ import {
 	setPoolLifecycleMode,
 	startPoolPoisonWatchdog,
 } from "../../infra/postgres/pool.ts";
+import {
+	getControlPool,
+	getProjectDb,
+} from "../../postgres/pool-registry.ts";
+import pLimit from "p-limit";
 import { sendMessage as sendLiaisonMessage } from "../../infra/agency/liaison-message-service.ts";
 import { discordSend } from "../../infra/discord/notify.ts";
 import { runObservabilityAlertTick } from "../../infra/agency/observability-alerting.ts";
@@ -1170,6 +1175,14 @@ export class RoadmapServer {
 				return await this.handleListProjects();
 			if (pathname === "/api/control-plane/overview" && method === "GET")
 				return await this.handleControlPlaneOverview(req);
+			if (pathname === "/api/control-plane/fleet" && method === "GET")
+				return await this.handleControlPlaneFleet();
+			if (pathname === "/api/control-plane/efficiency" && method === "GET")
+				return await this.handleControlPlaneEfficiency();
+			if (pathname === "/api/control-plane/identity" && method === "GET")
+				return await this.handleControlPlaneIdentity();
+			if (pathname === "/api/control-plane/platform" && method === "GET")
+				return await this.handleControlPlanePlatform();
 			if (pathname === "/api/operator/audit" && method === "GET")
 				return await this.handleOperatorAudit(req);
 			if (pathname === "/api/operator/tokens" && method === "POST")
@@ -4180,6 +4193,220 @@ export class RoadmapServer {
 				{ error: "Failed to load control-plane overview" },
 				{ status: 500 },
 			);
+		}
+	}
+
+	// P3507: bounded cross-project fan-out helper.
+	// Returns { data, errors, partial } envelope — one rejected tenant never
+	// fails the whole response.
+	private async controlPlaneFanOut<T>(
+		queryFn: (pool: import("pg").Pool, project: { project_id: number; slug: string; name: string }) => Promise<T>,
+	): Promise<{ data: T[]; errors: Array<{ project_id: number; slug: string; name: string; error: string }>; partial: boolean }> {
+		const CONTROL_PLANE_CONCURRENCY = 5;
+		const TENANT_TIMEOUT_MS = 5000;
+		const ctrl = getControlPool();
+		const { rows: projects } = await ctrl.query<{ project_id: number; slug: string; name: string }>(
+			"SELECT project_id, slug, name FROM roadmap.project WHERE status='active' ORDER BY project_id",
+		);
+		const limit = pLimit(CONTROL_PLANE_CONCURRENCY);
+		const results = await Promise.allSettled(
+			projects.map((p) =>
+				limit(() =>
+					Promise.race([
+						getProjectDb(p.slug).then((pool) => queryFn(pool, p)),
+						new Promise<never>((_, rej) =>
+							setTimeout(() => rej(new Error("timeout")), TENANT_TIMEOUT_MS),
+						),
+					]),
+				),
+			),
+		);
+		const data: T[] = [];
+		const errors: Array<{ project_id: number; slug: string; name: string; error: string }> = [];
+		for (let i = 0; i < results.length; i++) {
+			const r = results[i]!;
+			if (r.status === "fulfilled") {
+				data.push(r.value);
+			} else {
+				errors.push({ ...projects[i]!, error: (r.reason as Error)?.message ?? "unknown" });
+			}
+		}
+		return { data, errors, partial: errors.length > 0 };
+	}
+
+	// P3507 AC-2 + AC-9: GET /api/control-plane/fleet
+	// Agency/route rows come from the control pool; per-project runtime
+	// counts (active agent_runs, live cubics) fan out via getProjectDb.
+	private async handleControlPlaneFleet(): Promise<Response> {
+		try {
+			const ctrl = getControlPool();
+			const [agenciesResult, routesResult] = await Promise.all([
+				ctrl.query<{
+					agency_id: string;
+					display_name: string | null;
+					host_id: string | null;
+					status: string;
+					last_heartbeat_at: string | null;
+				}>("SELECT agency_id, display_name, host_id, status, last_heartbeat_at FROM roadmap.agency ORDER BY agency_id"),
+				ctrl.query<{
+					route_id: number;
+					model_name: string;
+					route_provider: string;
+					is_enabled: boolean;
+					health_status: string | null;
+				}>("SELECT route_id, model_name, route_provider, is_enabled, health_status FROM roadmap.model_routes ORDER BY route_id").catch(() => ({ rows: [] as { route_id: number; model_name: string; route_provider: string; is_enabled: boolean; health_status: string | null }[] })),
+			]);
+			const { data, errors, partial } = await this.controlPlaneFanOut(async (pool, project) => {
+				const [runsResult, cubicsResult] = await Promise.all([
+					pool.query<{ count: string }>(
+						"SELECT COUNT(*)::text AS count FROM roadmap_workforce.agent_runs WHERE status IN ('active','running') AND ended_at IS NULL",
+					).catch(() => ({ rows: [{ count: "0" }] })),
+					pool.query<{ count: string }>(
+						"SELECT COUNT(*)::text AS count FROM roadmap_workforce.cubic_session WHERE status = 'active'",
+					).catch(() => ({ rows: [{ count: "0" }] })),
+				]);
+				return {
+					project_id: project.project_id,
+					slug: project.slug,
+					name: project.name,
+					active_agent_runs: Number(runsResult.rows[0]?.count ?? 0),
+					live_cubics: Number(cubicsResult.rows[0]?.count ?? 0),
+				};
+			});
+			return Response.json({
+				agencies: agenciesResult.rows,
+				routes: routesResult.rows,
+				projects: data,
+				errors,
+				partial,
+			});
+		} catch (err) {
+			console.error("[control-plane/fleet] error:", (err as Error).message);
+			return Response.json({ error: "Failed to load fleet" }, { status: 500 });
+		}
+	}
+
+	// P3507 AC-3: GET /api/control-plane/efficiency
+	// Cross-project cost/token rollups from agent_budget_ledger.
+	private async handleControlPlaneEfficiency(): Promise<Response> {
+		try {
+			const { data, errors, partial } = await this.controlPlaneFanOut(async (pool, project) => {
+				const result = await pool.query<{
+					total_cost_usd: string | null;
+					total_input_tokens: string | null;
+					total_output_tokens: string | null;
+					dispatch_count: string;
+				}>(
+					`SELECT
+						SUM(cost_usd)::text AS total_cost_usd,
+						SUM(input_tokens)::text AS total_input_tokens,
+						SUM(output_tokens)::text AS total_output_tokens,
+						COUNT(*)::text AS dispatch_count
+					FROM roadmap_efficiency.agent_budget_ledger
+					WHERE created_at > NOW() - INTERVAL '30 days'`,
+				).catch(() => ({
+					rows: [{
+						total_cost_usd: null,
+						total_input_tokens: null,
+						total_output_tokens: null,
+						dispatch_count: "0",
+					}],
+				}));
+				const row = result.rows[0]!;
+				return {
+					project_id: project.project_id,
+					slug: project.slug,
+					name: project.name,
+					total_cost_usd: row.total_cost_usd ? Number(row.total_cost_usd) : null,
+					total_input_tokens: row.total_input_tokens ? Number(row.total_input_tokens) : null,
+					total_output_tokens: row.total_output_tokens ? Number(row.total_output_tokens) : null,
+					dispatch_count: Number(row.dispatch_count),
+				};
+			});
+			return Response.json({ data, errors, partial });
+		} catch (err) {
+			console.error("[control-plane/efficiency] error:", (err as Error).message);
+			return Response.json({ error: "Failed to load efficiency" }, { status: 500 });
+		}
+	}
+
+	// P3507 AC-3: GET /api/control-plane/identity
+	// Cross-project principal/agency identity inventory.
+	private async handleControlPlaneIdentity(): Promise<Response> {
+		try {
+			const ctrl = getControlPool();
+			const agenciesResult = await ctrl.query<{
+				agency_id: string;
+				display_name: string | null;
+				status: string;
+				host_id: string | null;
+				last_heartbeat_at: string | null;
+			}>("SELECT agency_id, display_name, status, host_id, last_heartbeat_at FROM roadmap.agency ORDER BY agency_id");
+			const { data, errors, partial } = await this.controlPlaneFanOut(async (pool, project) => {
+				const result = await pool.query<{
+					agent_identity: string;
+					role: string | null;
+					status: string | null;
+					last_seen_at: string | null;
+				}>(
+					`SELECT agent_identity, role, status, last_seen_at
+					FROM roadmap_workforce.agent_registry
+					ORDER BY agent_identity`,
+				).catch(() => ({ rows: [] as { agent_identity: string; role: string | null; status: string | null; last_seen_at: string | null }[] }));
+				return {
+					project_id: project.project_id,
+					slug: project.slug,
+					name: project.name,
+					agents: result.rows,
+				};
+			});
+			return Response.json({
+				agencies: agenciesResult.rows,
+				projects: data,
+				errors,
+				partial,
+			});
+		} catch (err) {
+			console.error("[control-plane/identity] error:", (err as Error).message);
+			return Response.json({ error: "Failed to load identity" }, { status: 500 });
+		}
+	}
+
+	// P3507 AC-3: GET /api/control-plane/platform
+	// Route health + service status + migration drift.
+	private async handleControlPlanePlatform(): Promise<Response> {
+		try {
+			const ctrl = getControlPool();
+			const routesResult = await ctrl.query<{
+				route_id: number;
+				model_name: string;
+				route_provider: string;
+				is_enabled: boolean;
+				health_status: string | null;
+				last_checked_at: string | null;
+			}>(
+				"SELECT route_id, model_name, route_provider, is_enabled, health_status, last_checked_at FROM roadmap.model_routes ORDER BY route_id",
+			).catch(() => ({ rows: [] as { route_id: number; model_name: string; route_provider: string; is_enabled: boolean; health_status: string | null; last_checked_at: string | null }[] }));
+			const { data, errors, partial } = await this.controlPlaneFanOut(async (pool, project) => {
+				const migResult = await pool.query<{ max_version: string | null }>(
+					"SELECT MAX(version)::text AS max_version FROM roadmap.schema_migrations",
+				).catch(() => ({ rows: [{ max_version: null }] }));
+				return {
+					project_id: project.project_id,
+					slug: project.slug,
+					name: project.name,
+					max_migration_version: migResult.rows[0]?.max_version ?? null,
+				};
+			});
+			return Response.json({
+				routes: routesResult.rows,
+				projects: data,
+				errors,
+				partial,
+			});
+		} catch (err) {
+			console.error("[control-plane/platform] error:", (err as Error).message);
+			return Response.json({ error: "Failed to load platform" }, { status: 500 });
 		}
 	}
 
