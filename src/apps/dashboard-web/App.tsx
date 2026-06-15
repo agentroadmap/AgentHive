@@ -18,9 +18,14 @@ import DirectivesPage from "./components/DirectivesPage";
 import ControlPage from "./components/ControlPage";
 import DispatchPage from "./components/DispatchPage";
 import DocumentsPage from "./components/DocumentsPage";
+import EfficiencyView from "./components/EfficiencyView";
+import FleetView from "./components/FleetView";
+import IdentityView from "./components/IdentityView";
 import KnowledgePage from "./components/KnowledgePage";
 import MapPage from "./components/MapPage";
 import NotFoundPage from "./components/NotFoundPage";
+import PlatformView from "./components/PlatformView";
+import PortfolioHome from "./components/PortfolioHome";
 import ProposalDetailsModal from "./components/ProposalDetailsModal";
 import ProposalsPage from "./components/ProposalsPage";
 import RoutesPage from "./components/RoutesPage";
@@ -209,12 +214,19 @@ export default function App() {
 				<main className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden">
 					<Switch>
 						<Route path="/">
-							<DashboardPage
-								connected={connected}
-								proposals={sharedProposals}
-								agents={agents}
-								channels={channels}
-							/>
+							<PortfolioHome />
+						</Route>
+						<Route path="/fleet">
+							<FleetView />
+						</Route>
+						<Route path="/efficiency">
+							<EfficiencyView />
+						</Route>
+						<Route path="/identity">
+							<IdentityView />
+						</Route>
+						<Route path="/platform">
+							<PlatformView />
 						</Route>
 						<Route path="/board">
 							<BoardPage
