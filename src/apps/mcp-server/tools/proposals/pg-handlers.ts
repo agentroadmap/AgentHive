@@ -1284,7 +1284,12 @@ export class PgProposalHandlers {
 				[proposal.id],
 			);
 
-			// 3. Fetch active lease
+			// 3. Fetch most-recent unreleased lease for the projection.
+			// P1391 AC-8: `released_at IS NULL` is INTENTIONALLY bare here — this
+			// is an audit/projection read that should surface the last holder even
+			// if its TTL just lapsed (the rendered `expires_at` lets the reader see
+			// expiry). Liveness is not a gate on this read, so lease_is_live() is
+			// deliberately not applied.
 			const leaseResult = await query(
 				`SELECT agent_identity, claimed_at, expires_at, released_at
 				 FROM roadmap_proposal.proposal_lease
