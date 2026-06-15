@@ -9,6 +9,7 @@
 
 import type { McpServer } from "../../server.ts";
 import type { CallToolResult, McpToolHandler } from "../../types.ts";
+import { authorizeOperatorByToken } from "../../../server/operator-auth.ts";
 import {
 	addRoute,
 	listCapabilities,
@@ -87,7 +88,7 @@ export function registerProjectTools(server: McpServer): void {
 	server.addTool({
 		name: "project_create_v2",
 		description:
-			"Create a new project with transactional safety (P483 Phase 1). Validates slug, creates DB registry entry, queues worktree directory creation. Returns {ok, project, worktree_created, repair_needed, note}. Pre-freezes signature for P432 project_attach.",
+			"Create a new project with transactional safety (P483 Phase 1 + P3508 AC-6). Validates slug, creates DB registry entry, queues worktree directory creation. Returns {ok, project, worktree_created, repair_needed, note}. Requires operator_token whose allowed_actions contains 'project.create' or '*'.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -110,10 +111,54 @@ export function registerProjectTools(server: McpServer): void {
 					description:
 						"(Optional) Workflow template to clone for new project. Deferred to P483 Phase 2 (requires workflow_templates composite PK).",
 				},
+				operator_token: {
+					type: "string",
+					description:
+						"(P3508 AC-6) Operator bearer token. Must have allowed_actions containing 'project.create' or '*'. Returns structured 403 on denial with audit row.",
+				},
 			},
-			required: ["slug", "name"],
+			required: ["slug", "name", "operator_token"],
 		},
 		async handler(args: Record<string, unknown>): Promise<CallToolResult> {
+			// P3508 AC-6: validate operator_token before delegating to projectCreate.
+			const rawToken = args.operator_token as string | undefined;
+			if (!rawToken || typeof rawToken !== "string" || !rawToken.trim()) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								ok: false,
+								decision: "anonymous",
+								action: "project.create",
+								error: "operator_token is required to create a project.",
+								httpStatus: 401,
+							}),
+						},
+					],
+				};
+			}
+			const outcome = await authorizeOperatorByToken(rawToken.trim(), {
+				action: "project.create",
+				targetKind: "project",
+				requestSummary: { slug: args.slug, name: args.name },
+			});
+			if (outcome.decision !== "allow") {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								ok: false,
+								decision: outcome.decision,
+								action: "project.create",
+								error: outcome.failureReason ?? "Forbidden",
+								httpStatus: outcome.httpStatus,
+							}),
+						},
+					],
+				};
+			}
 			return projectCreate({
 				slug: args.slug as string | undefined,
 				name: args.name as string | undefined,

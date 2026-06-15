@@ -43,6 +43,7 @@ import { discordSend } from "../../infra/discord/notify.ts";
 import { runObservabilityAlertTick } from "../../infra/agency/observability-alerting.ts";
 import type { PoolClient, Client as PgClient } from "pg";
 import { hashOperatorToken, requireOperator } from "./operator-auth.ts";
+import { projectCreate } from "../mcp-server/tools/projects/lifecycle-handlers.ts";
 import { agentContextStorage, type VerifiedPrincipal } from "../../shared/identity/agent-context.ts";
 import { verifyBoundBearer } from "../../core/identity/principal-identity.ts";
 import {
@@ -1168,6 +1169,8 @@ export class RoadmapServer {
 			}
 			if (pathname === "/api/projects" && method === "GET")
 				return await this.handleListProjects();
+			if (pathname === "/api/projects" && method === "POST")
+				return await this.handleCreateProject(req);
 			if (pathname === "/api/control-plane/overview" && method === "GET")
 				return await this.handleControlPlaneOverview(req);
 			if (pathname === "/api/operator/audit" && method === "GET")
@@ -3517,6 +3520,53 @@ export class RoadmapServer {
 				{ error: "Failed to list projects" },
 				{ status: 500 },
 			);
+		}
+	}
+
+	// P3508 AC-8: create a project. Requires operator auth with action 'project.create'.
+	// Shares the same action sentinel as the MCP project_create_v2 path so both
+	// surfaces appear under a single audit query filter.
+	private async handleCreateProject(req: Request): Promise<Response> {
+		const auth = await requireOperator(req, { action: "project.create" });
+		if (auth.rejected) return auth.rejected;
+		try {
+			const body = await req.json();
+			const result = await projectCreate({
+				slug: typeof body.slug === "string" ? body.slug : undefined,
+				name: typeof body.name === "string" ? body.name : undefined,
+				worktree_root:
+					typeof body.worktree_root === "string"
+						? body.worktree_root
+						: undefined,
+				default_workflow_template:
+					typeof body.default_workflow_template === "string"
+						? body.default_workflow_template
+						: undefined,
+			});
+			const text =
+				result.content?.[0]?.type === "text" ? result.content[0].text : "{}";
+			let parsed: Record<string, unknown>;
+			try {
+				parsed = JSON.parse(text);
+			} catch {
+				return Response.json({ error: text }, { status: 500 });
+			}
+			const status =
+				parsed.ok === true
+					? 201
+					: typeof parsed.error === "string" &&
+						  (parsed.error === "invalid_slug" ||
+							parsed.error === "missing_slug" ||
+							parsed.error === "missing_name" ||
+							parsed.error === "empty_name")
+						? 400
+						: parsed.ok === false
+							? 409
+							: 500;
+			return Response.json(parsed, { status });
+		} catch (err) {
+			console.error("[projects] create failed:", (err as Error).message);
+			return Response.json({ error: "project create failed" }, { status: 500 });
 		}
 	}
 

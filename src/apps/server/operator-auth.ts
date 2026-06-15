@@ -14,6 +14,15 @@
 // `operator_token.token_sha256`. Authorization = `allowed_actions`
 // list (use `'*'` for full powers).
 //
+// P3508 AC-5: `OperatorAuthContext` gains an optional `targetProjectId`
+// field. When the matched token has `scoped_project_id IS NOT NULL` and
+// the caller's `targetProjectId` differs, the function returns a 403
+// deny and writes an audit row. NULL scope = full access (no lockout).
+//
+// P3508 AC-9: `authorizeOperatorByToken(rawToken, ctx)` is exported so
+// the MCP path (string arg) shares the identical hash → DB lookup →
+// allowed_actions → audit-write flow as the HTTP path.
+//
 // Every call writes one row to `roadmap.operator_audit_log` regardless
 // of decision so the audit trail is the source of truth for AC-4 review.
 
@@ -39,6 +48,8 @@ export interface OperatorAuthContext {
 	targetKind?: string;
 	targetIdentity?: string;
 	requestSummary?: Record<string, unknown>;
+	/** P3508 AC-5: when set, token's scoped_project_id must match or be NULL. */
+	targetProjectId?: number;
 }
 
 export function hashOperatorToken(rawToken: string): string {
@@ -99,19 +110,18 @@ async function logAudit(args: {
 }
 
 /**
- * Authorize an operator-level request and write an audit row.
+ * Core authorization logic: hash → DB lookup → allowed_actions → project scope → audit.
  *
- * Returns an OperatorAuthOutcome describing the decision. Callers
- * inspect `decision`/`httpStatus`; if not `"allow"`, do NOT proceed
- * with the privileged action — return a Response.json error using the
- * recommended status.
+ * Shared by the HTTP path (authorizeOperator extracts Bearer first) and
+ * the MCP path (authorizeOperatorByToken receives the raw token string).
+ *
+ * P3508 AC-9: single implementation, no duplication.
  */
-export async function authorizeOperator(
-	req: Request,
+export async function authorizeOperatorByToken(
+	rawToken: string,
 	ctx: OperatorAuthContext,
+	remoteAddr: string | null = null,
 ): Promise<OperatorAuthOutcome> {
-	const remoteAddr = clientIp(req);
-
 	// 1. Are any tokens configured at all?
 	const { rows: configRows } = await query<{ token_count: number | string }>(
 		`SELECT COUNT(*)::int AS token_count
@@ -144,42 +154,18 @@ export async function authorizeOperator(
 		return out;
 	}
 
-	// 2. Bearer token present?
-	const raw = extractBearer(req);
-	if (!raw) {
-		const out: OperatorAuthOutcome = {
-			decision: "anonymous",
-			operatorName: null,
-			tokenId: null,
-			failureReason: "Missing Authorization: Bearer <token> header.",
-			httpStatus: 401,
-		};
-		await logAudit({
-			action: ctx.action,
-			decision: out.decision,
-			operatorName: null,
-			tokenId: null,
-			targetKind: ctx.targetKind,
-			targetIdentity: ctx.targetIdentity,
-			requestSummary: ctx.requestSummary,
-			remoteAddr,
-			responseStatus: out.httpStatus,
-			failureReason: out.failureReason,
-		});
-		return out;
-	}
+	const sha = hashOperatorToken(rawToken);
 
-	const sha = hashOperatorToken(raw);
-
-	// 3. Lookup + check action allowlist + revocation/expiry.
+	// 2. Lookup + check action allowlist + revocation/expiry + project scope.
 	const { rows } = await query<{
 		id: number;
 		operator_name: string;
 		allowed_actions: string[];
 		revoked_at: string | null;
 		expires_at: string | null;
+		scoped_project_id: number | null;
 	}>(
-		`SELECT id, operator_name, allowed_actions, revoked_at, expires_at
+		`SELECT id, operator_name, allowed_actions, revoked_at, expires_at, scoped_project_id
 		   FROM roadmap.operator_token
 		  WHERE token_sha256 = $1`,
 		[sha],
@@ -266,7 +252,35 @@ export async function authorizeOperator(
 		return out;
 	}
 
-	// allowed
+	// P3508 AC-5: project scope check.
+	// scoped_project_id=NULL means full scope (never deny based on project).
+	// Coerce to number: pg returns BIGINT as string in JS.
+	const tokenScope =
+		row.scoped_project_id !== null ? Number(row.scoped_project_id) : null;
+	if (
+		tokenScope !== null &&
+		ctx.targetProjectId !== undefined &&
+		tokenScope !== ctx.targetProjectId
+	) {
+		const out = denyOutcome(
+			`Token project scope (${tokenScope}) does not match target project (${ctx.targetProjectId}).`,
+		);
+		await logAudit({
+			action: ctx.action,
+			decision: out.decision,
+			operatorName: out.operatorName,
+			tokenId: out.tokenId,
+			targetKind: ctx.targetKind,
+			targetIdentity: ctx.targetIdentity,
+			requestSummary: ctx.requestSummary,
+			remoteAddr,
+			responseStatus: out.httpStatus,
+			failureReason: out.failureReason,
+		});
+		return out;
+	}
+
+	// allowed — best-effort update of last_used_at
 	void query(
 		`UPDATE roadmap.operator_token SET last_used_at = now() WHERE id = $1`,
 		[row.id],
@@ -294,6 +308,85 @@ export async function authorizeOperator(
 		failureReason: null,
 	});
 	return out;
+}
+
+/**
+ * Authorize an operator-level request and write an audit row.
+ *
+ * Returns an OperatorAuthOutcome describing the decision. Callers
+ * inspect `decision`/`httpStatus`; if not `"allow"`, do NOT proceed
+ * with the privileged action — return a Response.json error using the
+ * recommended status.
+ */
+export async function authorizeOperator(
+	req: Request,
+	ctx: OperatorAuthContext,
+): Promise<OperatorAuthOutcome> {
+	const remoteAddr = clientIp(req);
+
+	// 1. Are any tokens configured at all? (fast path before token extraction)
+	const { rows: configRows } = await query<{ token_count: number | string }>(
+		`SELECT COUNT(*)::int AS token_count
+		   FROM roadmap.operator_token
+		  WHERE revoked_at IS NULL
+		    AND (expires_at IS NULL OR expires_at > now())`,
+	);
+	const activeTokenCount = Number(configRows[0]?.token_count ?? 0);
+
+	if (activeTokenCount === 0) {
+		const out: OperatorAuthOutcome = {
+			decision: "unconfigured",
+			operatorName: null,
+			tokenId: null,
+			failureReason: "No active operator_token rows configured.",
+			httpStatus: 503,
+		};
+		await logAudit({
+			action: ctx.action,
+			decision: out.decision,
+			operatorName: null,
+			tokenId: null,
+			targetKind: ctx.targetKind,
+			targetIdentity: ctx.targetIdentity,
+			requestSummary: ctx.requestSummary,
+			remoteAddr,
+			responseStatus: out.httpStatus,
+			failureReason: out.failureReason,
+		});
+		return out;
+	}
+
+	// 2. Bearer token present?
+	const raw = extractBearer(req);
+	if (!raw) {
+		const out: OperatorAuthOutcome = {
+			decision: "anonymous",
+			operatorName: null,
+			tokenId: null,
+			failureReason: "Missing Authorization: Bearer <token> header.",
+			httpStatus: 401,
+		};
+		await logAudit({
+			action: ctx.action,
+			decision: out.decision,
+			operatorName: null,
+			tokenId: null,
+			targetKind: ctx.targetKind,
+			targetIdentity: ctx.targetIdentity,
+			requestSummary: ctx.requestSummary,
+			remoteAddr,
+			responseStatus: out.httpStatus,
+			failureReason: out.failureReason,
+		});
+		return out;
+	}
+
+	// 3. Delegate to shared token-based logic.
+	// Skip the token-count check (already done above) by calling the internal
+	// path directly after the count check. We re-use authorizeOperatorByToken
+	// but it will re-check the count — that's one extra query but keeps the
+	// logic centralized and avoids subtle divergence.
+	return authorizeOperatorByToken(raw, ctx, remoteAddr);
 }
 
 /**
