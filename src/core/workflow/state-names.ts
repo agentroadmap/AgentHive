@@ -27,6 +27,11 @@ export const Maturity = Object.freeze({
 	ACTIVE: "active",
 	MATURE: "mature",
 	OBSOLETE: "obsolete",
+	// P1028: terminal post-completion validation outcome. A COMPLETE proposal
+	// whose delivery a review session re-confirmed against its original ACs is
+	// promoted to 'validated' (only legal from status=COMPLETE; enforced in the
+	// setMaturity MCP handler + DB proposal_maturity_check constraint).
+	VALIDATED: "validated",
 });
 
 export type MaturityValue = typeof Maturity[keyof typeof Maturity];
