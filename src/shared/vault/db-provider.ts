@@ -17,6 +17,22 @@
  *   control_credential.v_active_credentials(credential_name, credential_type,
  *     vault_path, provider_slug, provider_type, ...) — active creds joined to
  *     their active provider.
+ *
+ * ── Encryption-at-rest & no-log policy (AC-7) ──────────────────────────────
+ * The control plane stores only POINTERS, never secret material:
+ *   - control_credential.vault_provider holds provider config (paths, mount
+ *     names, region) — no secret values.
+ *   - control_credential.credential holds `vault_path` (a location reference)
+ *     and metadata (type, rotation schedule, owner DID) — there is NO plaintext
+ *     `credential` value column. The actual secret bytes live encrypted-at-rest
+ *     in the backing vault (file-vault 0600 files, HashiCorp Vault KV v2, or
+ *     AWS Secrets Manager), which this layer never reads.
+ * Consequently, NOTHING in this module ever holds a decrypted secret value, so
+ * none can be logged. The only thing read here is the *reference* (vault_path /
+ * vault:// ref) plus non-sensitive metadata. The hard rule for this whole
+ * package: log refs, provider_type, and slugs — NEVER a secret value returned
+ * by VaultAdapter.read(). See the matching guarantee in ./index.ts and the
+ * policy doc at docs/vault/encryption-at-rest.md.
  */
 
 import type { SecretRef } from "./types.ts";
