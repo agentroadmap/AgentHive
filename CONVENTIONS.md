@@ -58,7 +58,18 @@ Important live facts:
 - Do not drop compatibility columns or old views unless your task explicitly completes the runtime migration and verifies every dependent code path.
 - Live data may still contain legacy-cased stage values such as `REVIEW` and `DEVELOP`. Avoid brittle case-sensitive assumptions in SQL and code.
 
-**Process supervision topology (P1095):** MCP and agency liaisons are **not** embedded in the orchestrator — they are independent systemd units. `agenthive-mcp.service` (`Restart=always`, `RestartSec=3`) owns the listener on `127.0.0.1:6421`; liveness check: `curl -fsS http://127.0.0.1:6421/health`. Each active agency runs as `agenthive-agency@<id>.service` (`Restart=on-failure`, `RestartSec=15`, `Requires=agenthive-mcp.service`). The orchestrator, MCP server, state-feed, board, and agency liaison units are peers under systemd — no process is the parent of another; stopping the orchestrator does not stop MCP or liaisons. Full topology and failure-mode table: `docs/architecture/mcp-liaison-topology.md`.
+**Process supervision topology (P1095/P1132):** MCP and agency communication are
+**not** embedded in the orchestrator — they are independent systemd surfaces.
+`agenthive-mcp.service` (`Restart=always`, `RestartSec=3`) owns the listener on
+`127.0.0.1:6421`; liveness check: `curl -fsS
+http://127.0.0.1:6421/health`. The current deterministic agency floor is
+`agenthive-a2a-host.service`, a shared per-host process that attaches LISTEN
+sessions and heartbeats for DB-registered agencies. Do not create new
+`agenthive-agency@<id>` or `agenthive-liaison@<agency>` units; those are legacy
+or transitional surfaces. The orchestrator, MCP server, state-feed, board, and
+A2A host are peers under systemd — no process is the parent of another; stopping
+the orchestrator does not stop MCP or agency communication. Full topology and
+failure-mode table: `docs/architecture/mcp-liaison-topology.md`.
 
 **Pool lifecycle invariant (P1123):** long-running services that use the shared Postgres singleton MUST call `setPoolLifecycleMode("long-running")` at startup. In long-running mode, accidental `getPool().end()` calls are ignored with an error-level stack trace; real shutdown must use `closePool()`, which bypasses the sentinel intentionally. If a service reports `pool_poisoned` on `control_feed` / `agent_lifecycle_events` or `Cannot use a pool after calling end`, follow `docs/operations/board-stale.md`.
 
@@ -222,22 +233,23 @@ See `docs/architecture/architecture-proposal-type.md` for full guidance on when 
 
 ### Workflow States (P706 unified vocabulary)
 
-P706 is the vocabulary authority for workflow stages. This section documents the unified 8-stage RFC vocabulary and 3-stage Hotfix vocabulary that boards, MCP surfaces, and agent-facing docs are expected to use. Treat older labels as migration artifacts only. See P706 for the design authority behind this vocabulary split.
+P706 is the vocabulary authority for workflow stage names. The live Standard RFC
+workflow is currently the five-stage path below. P227 briefly attempted to add
+`CODE_REVIEW`, `TEST_WRITING`, and `TEST_EXECUTION` as hard workflow stages, but
+that migration was reverted; quality checks belong in dispatch/gate roles unless
+a future proposal deliberately reintroduces those stages and updates the live DB.
 
 ### Standard RFC Workflow (product, component, feature, issue)
 
-The RFC workflow is the 8-stage path:
+The RFC workflow is the 5-stage path:
 
-`DRAFT -> REVIEW -> DEVELOP -> CODE_REVIEW -> TEST_WRITING -> TEST_EXECUTION -> MERGE -> COMPLETE`
+`DRAFT -> REVIEW -> DEVELOP -> MERGE -> COMPLETE`
 
 | State | Phase | Description |
 | :--- | :--- | :--- |
 | **DRAFT** | Formation | Initial proposal drafting, framing, and splitting if scope is still too broad. |
 | **REVIEW** | Gate | Feasibility, coherence, dependency, and architecture review before implementation starts. |
 | **DEVELOP** | Build | Main implementation work. |
-| **CODE_REVIEW** | Review | Peer review of the implementation delta. |
-| **TEST_WRITING** | Verify Prep | Add or update the acceptance tests and verification artifacts required for the change. |
-| **TEST_EXECUTION** | Verify | Run the acceptance checks and confirm the proposal is ready to integrate. |
 | **MERGE** | Integrate | Merge readiness, compatibility, rollout checks, and main-branch integration. |
 | **COMPLETE** | Terminal | Integrated and closed as the current shipped baseline. |
 
@@ -259,7 +271,7 @@ Both workflows share the same maturity axis. Workflow stages are rendered from `
 
 | Attribute | RFC value | Hotfix value | Source |
 | :--- | :--- | :--- | :--- |
-| Status values | DRAFT, REVIEW, DEVELOP, CODE_REVIEW, TEST_WRITING, TEST_EXECUTION, MERGE, COMPLETE | DRAFT, DEVELOP, COMPLETE | `roadmap.workflow_stages` |
+| Status values | DRAFT, REVIEW, DEVELOP, MERGE, COMPLETE | DRAFT, DEVELOP, COMPLETE | `roadmap.workflow_stages` |
 | Maturity values | new, active, mature, obsolete | same | `roadmap_proposal.proposal.maturity` |
 | Terminal closure | COMPLETE with terminal-stage semantics from the active workflow | COMPLETE with terminal-stage semantics from the active workflow | `roadmap.workflow_stages` |
 | Obsolete reason | `obsoleted_reason TEXT` free-text | same | `roadmap_proposal.proposal.obsoleted_reason` |
@@ -1269,8 +1281,8 @@ The orchestrator handles the "how" of dispatch. Hermes handles the "what" and "w
 | Cubic Phase | Design Intent | Why | Cost Tier |
 | :--- | :--- | :--- | :--- |
 | **Design** (DRAFT, REVIEW) | Deep reasoning model | Architecture, adversarial review | Premium |
-| **Build** (DEVELOP, CODE_REVIEW, TEST_WRITING) | Code generation model | Implementation, review prep, verification prep | Standard |
-| **Test** (TEST_EXECUTION, MERGE) | Balanced model | Acceptance execution, integration validation | Standard |
+| **Build** (DEVELOP) | Code generation model | Implementation, review prep, verification prep | Standard |
+| **Test** (MERGE) | Balanced model | Acceptance execution, integration validation | Standard |
 | **Ship** (COMPLETE) | Fast economy model | Documentation, finalization, low-cost | Economy |
 
 **To see actual routed models:** Query `model_routes` in the DB or check `roadmap.yaml`. Do not hardcode model names from this table into code — the DB is the source of truth.

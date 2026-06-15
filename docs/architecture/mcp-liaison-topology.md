@@ -36,9 +36,10 @@ systemd
 
 A2A host process:
   - One shared pg.Pool for all LISTEN sessions
-  - Loads agency list from roadmap_workforce.agent_registry
-    (WHERE host_affinity = $AGENTHIVE_HOST AND agent_type='agency'
-           AND status IN ('active','dormant'))
+  - Loads agency list from `roadmap_workforce.agent_registry`, joined to
+    `roadmap.agency` and `roadmap_workforce.provider_registry`
+    (host matches `$AGENTHIVE_HOST`, registry and agency are active/dormant,
+    and provider row is active and non-retired)
   - Issues one LISTEN per agency: agenthive-a2a-listen-<identity>
   - Issues one LISTEN for flags reload: agenthive-a2a-host-flags-<host>
   - Heartbeats on behalf of all attached agencies
@@ -96,11 +97,17 @@ Host-scoped query matching the discovery contract in `scripts/start-a2a-host.ts:
 
 ```sql
 WITH expected AS (
-  SELECT agent_identity
-  FROM roadmap_workforce.agent_registry
-  WHERE host_affinity = $host
-    AND agent_type = 'agency'
-    AND status IN ('active', 'dormant')
+  SELECT DISTINCT ar.agent_identity
+  FROM roadmap_workforce.agent_registry ar
+  JOIN roadmap.agency a ON a.agency_id = ar.agent_identity
+  JOIN roadmap_workforce.provider_registry pr ON pr.agency_id = ar.id
+  WHERE (ar.host_affinity = $host OR ar.host_affinity IS NULL OR ar.host_affinity = '')
+    AND ar.agent_type IN ('agency', 'llm')
+    AND ar.status IN ('active', 'dormant')
+    AND a.status IN ('active', 'dormant')
+    AND pr.status NOT IN ('offline', 'retired')
+    AND pr.is_active = true
+    AND coalesce(ar.preferred_provider, '') <> ''
 ),
 attached AS (
   SELECT agency_id
