@@ -157,6 +157,16 @@ export async function runLiaisonAgent(
 		: await connectListenClient(identity);
 	await listenClient.query(`LISTEN "${channel}"`);
 	console.log(`${log} LISTEN active on: ${channel}`);
+	// AC-4 (P1107): register subscription proof in listener_subscription table
+	await query(
+		`INSERT INTO roadmap.listener_subscription
+		    (agent_identity, channel, established_at, established_pid)
+		 VALUES ($1, $2, now(), pg_backend_pid())
+		 ON CONFLICT (agent_identity, channel) DO UPDATE SET
+		   established_at = now(),
+		   established_pid = EXCLUDED.established_pid`,
+		[identity, channel],
+	).catch((err) => console.warn(`${log} listener_subscription upsert failed:`, err?.message));
 
 	// V3-C6 (P1438 step 3b): Conditionally start AgencyClaimLoop if flag enabled
 	// This loop allows the agency to self-claim work offers from the shared work_offers
@@ -444,6 +454,13 @@ export async function runLiaisonAgent(
 					);
 				}
 			}
+
+			// AC-4 (P1107): deregister subscription on disconnect
+			await query(
+				`DELETE FROM roadmap.listener_subscription
+				  WHERE agent_identity = $1 AND channel = $2`,
+				[identity, channel],
+			).catch(() => { /* ignore — connection may be closing */ });
 
 			try {
 				await listenClient.query(`UNLISTEN "${channel}"`);

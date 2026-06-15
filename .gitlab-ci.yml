@@ -121,6 +121,37 @@ migration-schema-lint:
       [ "$fail" = "0" ] && echo "OK: all roadmap.* table refs covered by migration DDL."
       exit $fail
 
+binary-bundle-check:
+  stage: check
+  script:
+    - npm ci
+    - node scripts/check-mcp-bundle.mjs
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
+
+message-type-drift:
+  stage: check
+  script:
+    - npm ci
+    - npm run audit:message-type-drift
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
+
+migration-continuity:
+  stage: check
+  script:
+    - npm ci
+    - npm run audit:migration-continuity
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
+  allow_failure: true
+
 # ─── Stage 2: Test ────────────────────────────────────────────
 test:
   stage: test
