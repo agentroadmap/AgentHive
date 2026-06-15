@@ -42,7 +42,7 @@ describeLive("P3508: operator project scope enforcement", () => {
 			[
 				`test-p3508-${sha.slice(0, 8)}`,
 				sha,
-				JSON.stringify(opts.allowed_actions),
+				opts.allowed_actions,
 				opts.scoped_project_id,
 			],
 		);

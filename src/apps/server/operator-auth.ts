@@ -271,10 +271,11 @@ export async function authorizeOperator(
 	// 5. Project scope check (AC-5, P3508).
 	// If the token is scoped to a project and the caller specifies a different
 	// targetProjectId, deny the request. NULL scope = full access (no lockout).
+	// Coerce to number: PG may return bigint columns as strings via the driver.
 	if (
 		row.scoped_project_id !== null &&
 		ctx.targetProjectId !== undefined &&
-		ctx.targetProjectId !== row.scoped_project_id
+		Number(ctx.targetProjectId) !== Number(row.scoped_project_id)
 	) {
 		const out = denyOutcome(
 			`project scope: token scoped to project ${row.scoped_project_id}, ` +
@@ -468,10 +469,11 @@ export async function authorizeOperatorByToken(
 	}
 
 	// Project scope check (matches authorizeOperator logic).
+	// Coerce to number: PG may return bigint columns as strings via the driver.
 	if (
 		row.scoped_project_id !== null &&
 		ctx.targetProjectId !== undefined &&
-		ctx.targetProjectId !== row.scoped_project_id
+		Number(ctx.targetProjectId) !== Number(row.scoped_project_id)
 	) {
 		const out = denyOutcome(
 			`project scope: token scoped to project ${row.scoped_project_id}, ` +
