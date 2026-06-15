@@ -837,7 +837,16 @@ export async function renewLease(
 }
 
 /**
- * Get active leases.
+ * Get active (unreleased) leases, each tagged with a derived `lease_status`
+ * of 'open' | 'active' | 'expired'.
+ *
+ * P1391 AC-8: the `released_at IS NULL` predicate is INTENTIONALLY bare — this
+ * helper returns expired-but-unreleased rows too, labelled `lease_status =
+ * 'expired'`, so callers (e.g. the claim path, which filters to
+ * 'active'|'open') and the lease-listing UI can distinguish live from expired.
+ * The `expires_at > now()` half of liveness lives in the CASE expression and in
+ * the callers' filter — the same logical decision as lease_is_live(), just not
+ * collapsed into the WHERE clause.
  */
 export async function getActiveLeases(proposalId?: number) {
 	if (proposalId !== undefined) {

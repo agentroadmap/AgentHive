@@ -61,7 +61,16 @@ export const RELEASE_REASONS_BY_OUTCOME = {
 	incomplete: [
 		"gate_hold",              // gate verdict: hold for revision
 		"gate_reject",            // gate verdict: reject; needs different approach
-		"lease_expired",          // TTL expired without explicit release
+		// P1391 (AC-10) DEPRECATED: `lease_expired` — natural TTL expiry now
+		// releases the lease automatically via the partial EXCLUDE constraint
+		// `proposal_lease_no_overlap_live` (migration 283); the stale-lease
+		// reaper is retired (AC-3). No NEW writes should use `lease_expired`;
+		// it is retained ONLY so historical rows (and the one-time backfill in
+		// migration 283) keep a valid release_reason under the CHECK. For an
+		// agent that genuinely could not finish, use `released_unfinished`.
+		// NB: `send_back` is dead (0 historical uses) and was never a release
+		// reason here — see the gate-verdict handler for the deprecation note.
+		"lease_expired",          // DEPRECATED (P1391): TTL expiry auto-releases; historical only
 		"manual_release",         // operator manually released; explicit incomplete
 		"released_unfinished",    // releaser is done for now but work isn't
 		"reassigned",             // lease reassigned to another agent

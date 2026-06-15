@@ -346,6 +346,12 @@ export async function validateLease(
 		return { valid: true };
 	}
 
+	// P1391 AC-8: the `released_at IS NULL` predicate here is INTENTIONALLY bare.
+	// Liveness (the `expires_at > now()` half of lease_is_live) is evaluated
+	// immediately below in TS so we can emit a DISTINCT `lease_expired` error
+	// (vs `no_lease`) with the expiry timestamp. Folding `expires_at > now()`
+	// into the SQL would collapse those two diagnostics into one. The two halves
+	// of the liveness decision are thus on the same logical predicate.
 	const { rows } = await query<LeaseRow>(
 		`SELECT agent_identity, expires_at, released_at
      FROM roadmap_proposal.proposal_lease

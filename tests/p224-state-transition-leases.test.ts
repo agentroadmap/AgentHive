@@ -17,7 +17,11 @@ import { query } from "../src/postgres/pool.ts";
 import * as pg from "../src/infra/postgres/proposal-storage-v2.ts";
 import { validateLease, formatValidationError } from "../src/core/proposal/proposal-integrity.ts";
 import { getGateQueue, filterUnlockedProposals, getUnlockedGateQueue } from "../src/core/proposal/gate-scanner-v2.ts";
-import { cleanupStaleLeasesIfNeeded } from "../src/core/proposal/stale-lease-cleanup.ts";
+// P1391 (AC-3): the stale-lease reaper (src/core/proposal/stale-lease-cleanup.ts)
+// is RETIRED. Natural TTL expiry now releases leases automatically via the
+// partial EXCLUDE constraint `proposal_lease_no_overlap_live` (migration 283);
+// no janitor runs. The "AC-6: Stale lease cleanup" describe block below was
+// removed accordingly — TTL re-claim is covered by tests/unit/p1391-lease-ttl.test.ts.
 
 describe("P224 — State transition lease enforcement", () => {
 	let proposalId: number;
@@ -258,84 +262,10 @@ describe("P224 — State transition lease enforcement", () => {
 		});
 	});
 
-	describe("AC-6: Stale lease cleanup", () => {
-		it("should identify and release stale expired leases", async () => {
-			const agent = "stale-agent";
-
-			// Create a lease that expired 15 minutes ago (> 10 min old and already expired)
-			const staleTime = new Date(Date.now() - 15 * 60 * 1000);
-			const expiredTime = new Date(Date.now() - 5 * 60 * 1000);
-			await query(
-				`INSERT INTO roadmap_proposal.proposal_lease
-         (proposal_id, agent_identity, claimed_at, expires_at, released_at)
-       VALUES ($1, $2, $3, $4, NULL)`,
-				[proposalId, agent, staleTime, expiredTime],
-			);
-
-			// Verify it exists before cleanup
-			const beforeResult = await query(
-				"SELECT id FROM roadmap_proposal.proposal_lease WHERE proposal_id = $1 AND released_at IS NULL",
-				[proposalId],
-			);
-			assert(beforeResult.rows.length > 0, "Stale lease exists before cleanup");
-
-			// Run cleanup
-			const cleanedCount = await cleanupStaleLeasesIfNeeded();
-			assert(cleanedCount >= 1, "At least one stale lease should be cleaned");
-
-			// Verify it's now released
-			const afterResult = await query(
-				"SELECT release_reason FROM roadmap_proposal.proposal_lease WHERE proposal_id = $1 AND released_at IS NOT NULL",
-				[proposalId],
-			);
-			assert(afterResult.rows.length > 0, "Stale lease should be released after cleanup");
-			assert(
-				afterResult.rows[0].release_reason.includes("auto-released"),
-				"Release reason should indicate auto-cleanup",
-			);
-
-			// Clean up
-			await query("DELETE FROM roadmap_proposal.proposal_lease WHERE proposal_id = $1", [proposalId]);
-		});
-
-		it("should not clean up active non-expired leases", async () => {
-			const agent = "active-agent";
-
-			// Create an active lease that won't expire for another hour
-			const recentTime = new Date(Date.now() - 1 * 60 * 1000);
-			const futureTime = new Date(Date.now() + 60 * 60 * 1000);
-			await query(
-				`INSERT INTO roadmap_proposal.proposal_lease
-         (proposal_id, agent_identity, claimed_at, expires_at, released_at)
-       VALUES ($1, $2, $3, $4, NULL)`,
-				[proposalId, agent, recentTime, futureTime],
-			);
-
-			// Verify it exists before cleanup
-			const beforeResult = await query(
-				"SELECT id FROM roadmap_proposal.proposal_lease WHERE proposal_id = $1 AND released_at IS NULL",
-				[proposalId],
-			);
-			assert(beforeResult.rows.length > 0, "Active lease exists before cleanup");
-
-			// Run cleanup (should not affect active leases)
-			await cleanupStaleLeasesIfNeeded();
-
-			// Verify it's still active
-			const afterResult = await query(
-				"SELECT id FROM roadmap_proposal.proposal_lease WHERE proposal_id = $1 AND released_at IS NULL",
-				[proposalId],
-			);
-			assert(afterResult.rows.length > 0, "Active lease should remain active after cleanup");
-
-			// Clean up
-			await query("DELETE FROM roadmap_proposal.proposal_lease WHERE proposal_id = $1", [proposalId]);
-		});
-
-		// P753: removed test "should cleanup stale transition_queue processing entries"
-		// — transition_queue table retired and cleanupStaleTransitionProcessing()
-		// helper deleted. Lease cleanup tests above remain authoritative.
-	});
+	// P1391 (AC-3): "AC-6: Stale lease cleanup" describe block removed. The
+	// reaper it exercised (cleanupStaleLeasesIfNeeded) is retired; natural TTL
+	// expiry releases leases via the partial EXCLUDE constraint with no janitor.
+	// See tests/unit/p1391-lease-ttl.test.ts for the TTL re-claim coverage.
 
 	describe("AC-7: E2E concurrent transition attempts", () => {
 		it("should allow only the leaseholder to transition", async () => {
