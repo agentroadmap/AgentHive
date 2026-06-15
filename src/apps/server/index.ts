@@ -39,6 +39,7 @@ import {
 	startPoolPoisonWatchdog,
 } from "../../infra/postgres/pool.ts";
 import { sendMessage as sendLiaisonMessage } from "../../infra/agency/liaison-message-service.ts";
+import { agentNotifyChannel } from "../../infra/messaging/a2a-access-control.ts";
 import { discordSend } from "../../infra/discord/notify.ts";
 import { runObservabilityAlertTick } from "../../infra/agency/observability-alerting.ts";
 import type { PoolClient, Client as PgClient } from "pg";
@@ -5660,7 +5661,7 @@ export class RoadmapServer {
 		// Close notify relay client
 		if (this._operatorNotifyClient) {
 			try {
-				await this._operatorNotifyClient.query(`UNLISTEN "a2a_msg_operator"`);
+				await this._operatorNotifyClient.query(`UNLISTEN "${agentNotifyChannel("operator")}"`);
 			} catch {}
 			try {
 				await this._operatorNotifyClient.end();
@@ -5677,10 +5678,11 @@ export class RoadmapServer {
 			const { Client } = await import("pg");
 			const notifyClient = new Client({ connectionString: process.env.DATABASE_URL });
 			await notifyClient.connect();
-			await notifyClient.query(`LISTEN "a2a_msg_operator"`);
+			const operatorChannel = agentNotifyChannel("operator");
+			await notifyClient.query(`LISTEN "${operatorChannel}"`);
 
 			notifyClient.on("notification", (msg) => {
-				if (msg.channel !== "a2a_msg_operator") return;
+				if (msg.channel !== operatorChannel) return;
 				try {
 					const payload = JSON.parse(msg.payload ?? "{}");
 					const frame = `event: a2a_message\ndata: ${JSON.stringify(payload)}\n\n`;

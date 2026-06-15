@@ -32,6 +32,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { agentNotifyChannel } from "../../../infra/messaging/a2a-access-control.ts";
 
 type QueryFn = <T = Record<string, unknown>>(
 	sql: string,
@@ -225,7 +226,7 @@ async function checkListenActive(
                  WHERE query = $1
                    AND state IN ('idle', 'active')
             ) AS exists`,
-			[`LISTEN "a2a_msg_${agent_identity}"`],
+			[`LISTEN "${agentNotifyChannel(agent_identity)}"`],
 		);
 		return Boolean(rows[0]?.exists);
 	} catch {

@@ -12,9 +12,9 @@ import type { LiaisonMessage, LiaisonMessageAckOutcome } from './liaison-message
 
 const MESSAGE_SEQUENCE_WINDOW = 100; // Buffer out-of-order messages up to this window
 const SIGNED_AT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
-// P1017 AC-4: unified channel prefix — matches fn_a2a_message_notify and
-// fn_liaison_notify_new_message (both fire 'a2a_msg_' after migration 144).
-const LISTEN_CHANNEL_PREFIX = "a2a_msg_";
+// P1456 AC-17: fn_liaison_notify_new_message fires 'liaison_message_' || agency_id
+// (per migration 182-p1408; fn_a2a_message_notify fires 'msg_' || to_agent via agentNotifyChannel).
+const LISTEN_CHANNEL_PREFIX = "liaison_message_";
 
 // Signing key: shared secret from env, falls back to deterministic dev sentinel.
 // P208 RSA key-pair integration is separate; HMAC-SHA256 is the wire implementation.
