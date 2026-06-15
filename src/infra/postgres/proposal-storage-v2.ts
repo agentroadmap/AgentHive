@@ -670,14 +670,16 @@ export async function getValidTransitions(proposalId: number): Promise<
  */
 export async function setMaturity(
 	proposalId: number,
-	maturity: "new" | "active" | "mature" | "obsolete",
+	// P1028 AC-20 (site 3): 'validated' added to the typed signature so the
+	// post-completion-review handler can promote a COMPLETE proposal end-to-end.
+	maturity: "new" | "active" | "mature" | "obsolete" | "validated",
 	agentIdentity: string,
 	reason?: string,
 ): Promise<ProposalRow | null> {
-	const validMaturityValues = new Set([Maturity.NEW, Maturity.ACTIVE, Maturity.MATURE, Maturity.OBSOLETE]);
+	const validMaturityValues = new Set([Maturity.NEW, Maturity.ACTIVE, Maturity.MATURE, Maturity.OBSOLETE, Maturity.VALIDATED]);
 	if (!validMaturityValues.has(maturity)) {
 		throw new Error(
-			`Invalid maturity '${maturity}'. Must be one of: ${[Maturity.NEW, Maturity.ACTIVE, Maturity.MATURE, Maturity.OBSOLETE].join(", ")}`,
+			`Invalid maturity '${maturity}'. Must be one of: ${[Maturity.NEW, Maturity.ACTIVE, Maturity.MATURE, Maturity.OBSOLETE, Maturity.VALIDATED].join(", ")}`,
 		);
 	}
 

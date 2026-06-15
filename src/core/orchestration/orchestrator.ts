@@ -10,6 +10,11 @@ import { closePool, getPool, query } from "../../infra/postgres/pool.ts";
 import { pulseHeartbeat } from "../../infra/pulse/heartbeat.ts";
 import { enqueueNotification } from "../notifications/enqueue.ts";
 import { postWorkOffer } from "../pipeline/post-work-offer.ts";
+import {
+	POST_REVIEW_ROLE,
+	runPostReviewScanTick,
+	type PostReviewCandidate,
+} from "../pipeline/post-completion-review.ts";
 import { reapStaleRows } from "../pipeline/reap-stale-rows.ts";
 import { getUnlockedGateQueue } from "../proposal/gate-scanner-v2.ts";
 import { spawnAgent, spawnWithRetry } from "./agent-spawner.ts";
@@ -79,6 +84,10 @@ const ORCHESTRATOR_LIAISON_PROVIDER =
 	process.env.ORCHESTRATOR_LIAISON_PROVIDER ?? null;
 
 const DEFAULT_POKE_WATCHDOG_INTERVAL_MS = 60_000;
+// P1028 AC-4: post-completion-review scan cadence (default 15 minutes).
+const DEFAULT_POST_REVIEW_INTERVAL_MS = Number(
+	process.env.AGENTHIVE_POST_REVIEW_INTERVAL_MS ?? 15 * 60 * 1000,
+);
 const DEFAULT_LIVENESS_ALERT_INTERVAL_MS = Number(
 	process.env.AGENTHIVE_LIVENESS_ALERT_INTERVAL_MS ?? 60_000,
 );
@@ -123,6 +132,8 @@ export interface OrchestratorConfig {
 	shutdownDrainMs?: number;
 	/** P765: liveness alerting tick interval in ms (default 60 s). */
 	livenessAlertIntervalMs?: number;
+	/** P1028 AC-4: post-completion-review scan cadence (default 15 min). */
+	postReviewIntervalMs?: number;
 }
 
 export class Orchestrator {
@@ -130,6 +141,7 @@ export class Orchestrator {
 	private offerReapIntervalMs: number;
 	private readonly pokeWatchdogIntervalMs: number;
 	private readonly livenessAlertIntervalMs: number;
+	private readonly postReviewIntervalMs: number;
 	private pokeOpts: PokeWatchdogOptions;
 	private shutdownDrainMs: number;
 
@@ -152,6 +164,9 @@ export class Orchestrator {
 	private offerReapTimer: ReturnType<typeof setInterval> | null = null;
 	private pokeWatchdogTimer: ReturnType<typeof setInterval> | null = null;
 	private livenessAlertTimer: ReturnType<typeof setInterval> | null = null;
+	// P1028 AC-4: post-completion-review scan tick (every 15 min).
+	private postReviewTimer: ReturnType<typeof setInterval> | null = null;
+	private postReviewInFlight = false;
 	private offerReapInFlight = false;
 
 	// P902-A: lifecycle state for start()/stop().
@@ -176,6 +191,8 @@ export class Orchestrator {
 			config.pokeWatchdogIntervalMs ?? DEFAULT_POKE_WATCHDOG_INTERVAL_MS;
 		this.livenessAlertIntervalMs =
 			config.livenessAlertIntervalMs ?? DEFAULT_LIVENESS_ALERT_INTERVAL_MS;
+		this.postReviewIntervalMs =
+			config.postReviewIntervalMs ?? DEFAULT_POST_REVIEW_INTERVAL_MS;
 		this.pokeOpts = {
 			idleThresholdMin: config.pokeIdleThresholdMin ?? 5,
 			stormCap: config.pokeStormCap ?? 10,
@@ -793,8 +810,18 @@ export class Orchestrator {
 			void runLivenessAlertingTick(console, "Orchestrator");
 		}, this.livenessAlertIntervalMs);
 
+		// P1028 AC-4: post-completion-review scan — posts review offers for COMPLETE
+		// proposals whose deferred review window has opened.
+		this.postReviewTimer = setInterval(() => {
+			if (this.stopping || this.postReviewInFlight) return;
+			this.postReviewInFlight = true;
+			void this._runPostReviewTick().finally(() => {
+				this.postReviewInFlight = false;
+			});
+		}, this.postReviewIntervalMs);
+
 		console.log(
-			`[Orchestrator] Maintenance started — offer reaper every ${this.offerReapIntervalMs}ms, poke watchdog every ${this.pokeWatchdogIntervalMs}ms, liveness alerting every ${this.livenessAlertIntervalMs}ms`,
+			`[Orchestrator] Maintenance started — offer reaper every ${this.offerReapIntervalMs}ms, poke watchdog every ${this.pokeWatchdogIntervalMs}ms, liveness alerting every ${this.livenessAlertIntervalMs}ms, post-review scan every ${this.postReviewIntervalMs}ms`,
 		);
 	}
 
@@ -812,6 +839,39 @@ export class Orchestrator {
 			clearInterval(this.livenessAlertTimer);
 			this.livenessAlertTimer = null;
 		}
+		if (this.postReviewTimer) {
+			clearInterval(this.postReviewTimer);
+			this.postReviewTimer = null;
+		}
+	}
+
+	/**
+	 * P1028 AC-4: one post-completion-review scan. Selects COMPLETE proposals
+	 * whose review window has opened and posts a review offer (role=
+	 * 'post-completion-review') for each via postWorkOffer(). The
+	 * dispatch_version carries review_version so a needs_iteration reschedule
+	 * (which bumps review_version) yields a fresh idempotency key (AC-5).
+	 */
+	private async _runPostReviewTick(): Promise<void> {
+		await runPostReviewScanTick(
+			query,
+			async (cand: PostReviewCandidate) => {
+				await postWorkOffer({
+					proposalId: cand.id,
+					squadName: `post-review-${cand.display_id}`,
+					role: POST_REVIEW_ROLE,
+					task:
+						`Post-completion review of ${cand.display_id}: re-evaluate the delivered ` +
+						`work against its original acceptance criteria in the live environment. ` +
+						`Return a structured verdict {verdict, confidence, gaps, follow_on_title?, follow_on_scope?}.`,
+					// AC-5: review_version drives the dispatch_version so each reschedule
+					// produces a distinct idempotency key.
+					dispatchVersion: cand.review_version,
+				});
+			},
+			console,
+			"Orchestrator",
+		);
 	}
 
 	// ─── Unified dispatch loop ─────────────────────────────────────────────────

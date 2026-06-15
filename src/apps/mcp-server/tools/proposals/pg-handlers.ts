@@ -755,7 +755,10 @@ export class PgProposalHandlers {
 				};
 			}
 
-			const validMaturityValues = [Maturity.NEW, Maturity.ACTIVE, Maturity.MATURE, Maturity.OBSOLETE];
+			// P1028 AC-20 (site 1): 'validated' added to the handler allowlist so the
+			// post-completion-review path is accepted before any DB call. The
+			// status='COMPLETE' gate for 'validated' is enforced just below (AC-3/AC-12).
+			const validMaturityValues = [Maturity.NEW, Maturity.ACTIVE, Maturity.MATURE, Maturity.OBSOLETE, Maturity.VALIDATED];
 			if (!validMaturityValues.includes(args.maturity as typeof validMaturityValues[number])) {
 				return {
 					content: [
@@ -765,6 +768,32 @@ export class PgProposalHandlers {
 						},
 					],
 				};
+			}
+
+			// P1028 AC-3 / AC-12: 'validated' is the terminal post-completion outcome.
+			// It is ONLY legal from status='COMPLETE' (the review session re-confirmed
+			// delivered work in the live environment). Reject otherwise, naming the
+			// required status. Enforced in this handler so the rejection holds end-to-end
+			// (not just at the DB constraint, which permits the value for any status).
+			if (args.maturity === Maturity.VALIDATED) {
+				const { rows: statusRows } = await query<{ status: string | null }>(
+					`SELECT status FROM roadmap_proposal.proposal WHERE id = $1`,
+					[id],
+				);
+				const curStatus = statusRows[0]?.status ?? null;
+				if (curStatus?.toUpperCase() !== RfcStates.COMPLETE) {
+					return {
+						content: [
+							{
+								type: "text",
+								text:
+									`prop_set_maturity refused: maturity='validated' requires status='COMPLETE' ` +
+									`(post-completion review outcome); proposal is currently '${curStatus ?? "unknown"}'. ` +
+									`A proposal can only be validated after its delivery reaches COMPLETE.`,
+							},
+						],
+					};
+				}
 			}
 
 			// P3311: source-side premature-maturity block. Refuse to mark a DEVELOP
@@ -843,7 +872,7 @@ export class PgProposalHandlers {
 
 			const updated = await pg.setMaturity(
 				id,
-				args.maturity as "new" | "active" | "mature" | "obsolete",
+				args.maturity as "new" | "active" | "mature" | "obsolete" | "validated",
 				maturityActor,
 				args.reason,
 			);
