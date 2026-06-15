@@ -393,6 +393,19 @@ export class PgMessagingHandlers {
 					}
 					throw err;
 				}
+
+				// P1456 AC-7: resolve a display_alias (e.g. 'orchestrator') to the
+				// concrete agent_identity that actively owns it, BEFORE the ACL
+				// check and ledger insert — so ACL is evaluated against the real
+				// recipient and the message routes to a channel a listener owns.
+				// A stale/moved alias does not resolve and is left untouched.
+				const { resolveAliasForSend } = await import(
+					"../../../../infra/messaging/alias-resolver.ts"
+				);
+				const aliasResolution = await resolveAliasForSend(canonicalToAgent);
+				if (aliasResolution.resolvedFromAlias) {
+					canonicalToAgent = canonicalizeIdentity(aliasResolution.identity);
+				}
 			}
 
 			// P159 AC-5: Soft-fail identity verification for all agents (not just user/*)
