@@ -5961,7 +5961,8 @@ export class RoadmapServer {
 		// Close notify relay client
 		if (this._operatorNotifyClient) {
 			try {
-				await this._operatorNotifyClient.query(`UNLISTEN "${agentNotifyChannel("operator")}"`)
+				await this._operatorNotifyClient.query(`UNLISTEN "${agentNotifyChannel("operator")}"`);
+
 			} catch {}
 			try {
 				await this._operatorNotifyClient.end();

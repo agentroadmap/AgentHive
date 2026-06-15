@@ -17,6 +17,7 @@ import {
 	canonicalizeIdentity,
 	InvalidIdentityError,
 } from "../../../../infra/messaging/identity.ts";
+import { agentNotifyChannel } from "../../../../infra/messaging/a2a-access-control.ts";
 import { getPool, query } from "../../../../postgres/pool.ts";
 import type { CallToolResult } from "../../types.ts";
 
@@ -125,7 +126,7 @@ export async function handleMsgReply(
 			[original.id],
 		);
 
-		// pg_notify the recipient on their canonical msg_ channel
+		// pg_notify the recipient on msg_${recipientAgent} (via agentNotifyChannel)
 		// Build JSON in JS to avoid json_build_object anyelement type-inference failure
 		const notifyPayload = JSON.stringify({
 			message_id: replyId,

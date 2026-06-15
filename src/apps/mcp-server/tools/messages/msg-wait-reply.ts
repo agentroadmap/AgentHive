@@ -3,7 +3,7 @@
  *
  * P833 Phase 2: Reply waiter with pg_notify + fallback polling
  * - Looks up correlation_id for the given message_id
- * - Subscribes to pg_notify channel msg_${agent}, filters by correlation_id
+ * - Subscribes to pg_notify channel msg_${agent} (via agentNotifyChannel), filters by correlation_id
  * - Poll fallback every 5s: SELECT id FROM message_ledger WHERE correlation_id = $cid AND acked_at IS NOT NULL
  * - On timeout_ms exceeded: INSERT into message_timeout_tracking (idempotent via UNIQUE on message_id)
  * - Returns { replied: boolean, reply_message_id?: number, timed_out: boolean }
