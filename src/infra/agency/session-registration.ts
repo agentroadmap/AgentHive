@@ -130,7 +130,8 @@ export async function registerSession(
     }
 
     // ── 3. Upsert session principal_identity (AC-5 step 1) ──────────────────
-    // Requires migration 233 to have added 'delegated' to the CHECK constraint.
+    // Requires migration 283-p1456 to have added 'delegated' to the
+    // principal_identity.credential_kind CHECK constraint.
     const principalId = sessionIdentity;
     await query(
         `INSERT INTO roadmap.principal_identity
@@ -205,13 +206,17 @@ export async function reapSession(
         [sessionIdentity, reason],
     );
 
-    // Revoke principal_identity
+    // Revoke principal_identity.
+    // NOTE: roadmap.principal_identity has a CHECK constraint
+    // pi_revoke_requires_reason: (revoked_at IS NULL OR revocation_reason IS NOT NULL).
+    // We MUST set revocation_reason in the same UPDATE or the revoke fails.
     await query(
         `UPDATE roadmap.principal_identity
-            SET revoked_at = now()
+            SET revoked_at        = now(),
+                revocation_reason = $2
           WHERE principal_id = $1
             AND revoked_at IS NULL`,
-        [resolvedPrincipal],
+        [resolvedPrincipal, `session-reap: ${reason}`],
     );
 
     // Revoke authority_grant
@@ -224,6 +229,53 @@ export async function reapSession(
             AND revoked_at IS NULL`,
         [grantorPrincipalId, resolvedPrincipal],
     );
+}
+
+export interface StaleSessionReapResult {
+    /** Session identities that were reaped this sweep. */
+    reaped: string[];
+}
+
+/**
+ * Crash-recovery reaper for interactive-session rows (AC-6 crash path).
+ *
+ * The clean-exit path (reapSession) handles graceful shutdown. When a CLI
+ * process is SIGKILLed or its host dies, no clean-exit fires and the
+ * agent_registry row, session principal_identity, and authority_grant rows
+ * linger as `active`/un-revoked. The existing P269 unified reaper
+ * (reap-stale-rows.ts) and the stale-agency poke watchdog do NOT touch
+ * agent_registry rows by last_seen_at, so session rows need their own sweep.
+ *
+ * This marks any `role='interactive-session'` + `status='active'` row whose
+ * last_seen_at is older than `staleAfterSeconds` as inactive, then revokes
+ * its delegation records — mirroring reapSession() exactly so a crashed
+ * session leaves the same audit trail as a clean exit.
+ *
+ * Idempotent and safe to call on an interval. Returns the identities reaped.
+ */
+export async function reapStaleSessions(
+    staleAfterSeconds = 15 * 60,
+    reason = "stale-heartbeat",
+): Promise<StaleSessionReapResult> {
+    // Select-then-reap so we can revoke the matching principal/grant rows and
+    // report exactly which identities were swept.
+    const staleRes = await query<{ agent_identity: string }>(
+        `SELECT agent_identity
+           FROM roadmap_workforce.agent_registry
+          WHERE role = 'interactive-session'
+            AND status = 'active'
+            AND last_seen_at < now() - ($1 || ' seconds')::interval`,
+        [String(staleAfterSeconds)],
+    );
+
+    const reaped: string[] = [];
+    for (const { agent_identity } of staleRes.rows) {
+        // reapSession is idempotent and sets all three rows consistently.
+        // grantor defaults to user/gary; principalId defaults to the identity.
+        await reapSession(agent_identity, agent_identity, "user/gary", reason);
+        reaped.push(agent_identity);
+    }
+    return { reaped };
 }
 
 /**
