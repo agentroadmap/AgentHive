@@ -43,6 +43,7 @@ import {
 	type SearchResultType,
 } from "../types/index.ts";
 import type { ProposalEditArgs } from "../types/proposal-edit-args.ts";
+import { agentNotifyChannel } from "../infra/messaging/a2a-access-control.ts";
 import {
 	type AgentSelectionValue,
 	processAgentSelection,
@@ -5526,7 +5527,7 @@ agentsCmd
 		}
 
 		// Wait for reply via pg LISTEN on our own DM channel
-		const pgChannel = `a2a_msg_${fromAgent}`;
+		const pgChannel = agentNotifyChannel(fromAgent);
 		const listenClient = await pool.connect();
 		await listenClient.query(`LISTEN "${pgChannel}"`);
 

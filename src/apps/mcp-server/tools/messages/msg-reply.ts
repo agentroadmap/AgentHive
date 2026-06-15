@@ -12,6 +12,7 @@
  */
 
 import { verifyUserBearer } from "../../../../infra/messaging/bearer-auth.ts";
+import { agentNotifyChannel } from "../../../../infra/messaging/a2a-access-control.ts";
 import {
 	canonicalizeIdentity,
 	InvalidIdentityError,
@@ -124,7 +125,7 @@ export async function handleMsgReply(
 			[original.id],
 		);
 
-		// pg_notify the recipient on channel a2a_msg_${recipientAgent}
+		// pg_notify the recipient on agentNotifyChannel(recipientAgent)
 		// Build JSON in JS to avoid json_build_object anyelement type-inference failure
 		const notifyPayload = JSON.stringify({
 			message_id: replyId,
@@ -136,7 +137,7 @@ export async function handleMsgReply(
 		const client = await pool.connect();
 		try {
 			await client.query(`SELECT pg_notify($1, $2)`, [
-				`a2a_msg_${recipientAgent}`,
+				agentNotifyChannel(recipientAgent),
 				notifyPayload,
 			]);
 		} finally {
