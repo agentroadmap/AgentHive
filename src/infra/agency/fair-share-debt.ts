@@ -96,6 +96,33 @@ export async function checkStarvation(
 }
 
 /**
+ * Operator override: set reserved_override_active=true for an agent so the
+ * next dispatch is admitted regardless of current spend (bypasses the daily cap
+ * for a single offer). The flag is cleared by resetDebt() after successful dispatch.
+ *
+ * Used by: `hive quota override --agent <id> --allow-next` (admin CLI).
+ * Audit log entry should be written by the caller before invoking this.
+ */
+export async function activateOperatorOverride(
+  agentIdentity: string,
+  exec: SqlExec = defaultQuery as SqlExec,
+): Promise<void> {
+  try {
+    await exec(
+      `INSERT INTO roadmap_workforce.fair_share_debt
+              (agent_identity, cycles_since_dispatch, reserved_override_active, updated_at)
+       VALUES ($1, 0, true, now())
+       ON CONFLICT (agent_identity) DO UPDATE
+         SET reserved_override_active = true,
+             updated_at               = now()`,
+      [agentIdentity],
+    );
+  } catch (err) {
+    console.warn("[FairShareDebt] activateOperatorOverride failed:", (err as Error).message);
+  }
+}
+
+/**
  * Record that a reserved-headroom slot was granted (sets reserved_override_active=true
  * temporarily so the next dispatch can proceed even if debt is not yet reset).
  */
