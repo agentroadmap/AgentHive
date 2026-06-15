@@ -432,9 +432,6 @@ export function registerConsolidatedTools(server: McpServer): void {
 				"LIST (prop_list): `search` IS honored as a title ILIKE substring filter (title only, not body). `q`/`title_contains` are silently ignored. For full-text/body search use `proposal_search`. " +
 				"VERIFY_AC: each AC needs its own call (1-indexed item_number); ACs stay 'pending' until you explicitly call verify_ac with status='pass' — NOT inferred from tests passing or maturity advance. status enum is {pass, fail, blocked, waived}, NOT 'verified'. " +
 				"ADD_ACCEPTANCE_CRITERIA: pass `criteria: string[]` (array of full sentences), NOT individual title/description fields nor `acceptance_criteria` key. " +
-				"SUBMIT_REVIEW: reviewer identity field is `reviewer` on input (NOT reviewer_identity / agent_identity / identity). Response returns it as `reviewer_identity`. Pass `is_blocking: true` to mark a blocking review (now persisted correctly). " +
-				"ADD_DISCUSSION: entries persist in storage and are readable via MCP projections, but the board UI does NOT render discussion entries — use `submit_review` for findings that need to be visible to operators. " +
-				"PROP_LIST/LIST: `search` filters by title ILIKE (substring, title only); `q`/`title_contains` ignored; body/keyword search lives in `proposal_search`. " +
 				"Use action=list_actions to enumerate every action name.",
 			proposalRoutes,
 		),
