@@ -571,13 +571,18 @@ async function postWorkOfferImpl(
 		gate_scanner_paused: boolean;
 		gate_paused_by: string | null;
 		gate_paused_at: string | null;
-		task_class: string | null;
-		tier_override: string | null;
 	}>(
+		// NOTE: proposal-pinned difficulty overrides (task_class/tier_override) are
+		// NOT read here — they were SELECTed by P3310 (b63542cc) but the columns
+		// were never migrated onto roadmap_proposal.proposal and the values were
+		// never wired into the assessor (overrides flow via input.tierOverride /
+		// input.taskClassOverride instead). The dead SELECT crashed every dispatch
+		// with 42703 "column task_class does not exist" once the orchestrator
+		// restarted onto this code. Removed. Re-add WITH a migration + ctx→input
+		// wiring if proposal-level pinning is actually built.
 		`SELECT project_id, status, maturity,
 		        gate_scanner_paused, gate_paused_by,
-		        gate_paused_at::text AS gate_paused_at,
-		        task_class, tier_override
+		        gate_paused_at::text AS gate_paused_at
 		 FROM roadmap_proposal.proposal
 		 WHERE id = $1`,
 		[input.proposalId],
