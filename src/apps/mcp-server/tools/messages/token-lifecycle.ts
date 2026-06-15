@@ -159,7 +159,14 @@ export async function issueUserToken(args: {
 			[identity],
 		);
 		registered = r.rows.length > 0;
-	} catch {
+	} catch (err) {
+		// Fail closed (treat as unregistered) — correct for an auth gate — but do
+		// NOT swallow silently: a real DB error masquerading as identity_not_registered
+		// is misleading (it cost a debugging session). Surface it for observability.
+		console.warn(
+			`[token_issue] registration lookup for '${identity}' failed; denying (fail-closed):`,
+			err instanceof Error ? err.message : err,
+		);
 		registered = false;
 	}
 	if (!registered) {
