@@ -434,6 +434,15 @@ export async function handleTypedTaskRequest(
 			 WHERE correlation_id = $3`,
 			[dispatchId, identity, correlationId],
 		);
+
+		// P1366: propagate worker_identity to squad_dispatch so attribution is
+		// available for Cockpit and audit trails without joining liaison_task_tracker.
+		await query(
+			`UPDATE roadmap_workforce.squad_dispatch
+			    SET worker_identity = $1
+			  WHERE id = $2 AND worker_identity IS NULL`,
+			[identity, dispatchId],
+		);
 	} catch (err) {
 		const detail = err instanceof Error ? err.message : String(err);
 		console.error(`${log} bridge failed:`, detail);

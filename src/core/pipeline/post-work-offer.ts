@@ -241,6 +241,12 @@ export interface WorkOfferInput {
 	gateFromStage?: string | null;
 	gateToStage?: string | null;
 	gateRoleSource?: string | null;
+	/**
+	 * P1366: Optional worker identity to record at offer creation time.
+	 * Typically left NULL (pending claim); set when the dispatching caller
+	 * already knows which agent will handle the work (e.g. direct A2A dispatch).
+	 */
+	workerIdentity?: string | null;
 }
 
 export interface WorkOfferResult {
@@ -684,10 +690,10 @@ async function postWorkOfferImpl(
 	}>(
 		`INSERT INTO roadmap_workforce.squad_dispatch
 		   (proposal_id, project_id, squad_name, dispatch_role, dispatch_status,
-		    offer_status, agent_identity, required_capabilities, metadata,
+		    offer_status, agent_identity, worker_identity, required_capabilities, metadata,
 		    workflow_state, idempotency_key, dispatch_version, attempt_count)
-		 VALUES ($1, $2, $3, $4, 'open', 'open', NULL, $5::jsonb, $6::jsonb,
-		         $7, $8, $9, 1)
+		 VALUES ($1, $2, $3, $4, 'open', 'open', NULL, $5, $6::jsonb, $7::jsonb,
+		         $8, $9, $10, 1)
 		 ON CONFLICT (idempotency_key)
 		   WHERE dispatch_status IN ('open', 'assigned', 'active')
 		 DO UPDATE SET
@@ -705,6 +711,7 @@ async function postWorkOfferImpl(
 			ctx.project_id ?? null,
 			input.squadName,
 			input.role,
+			input.workerIdentity ?? null,
 			caps,
 			JSON.stringify(metadata),
 			ctx.status ?? null,
