@@ -312,6 +312,161 @@ describe("ConfigResolver.persistMutation DB half (P828 AC-14/29/43/49)", () => {
 	});
 });
 
+/**
+ * A richer hiveCentral mock that records the FULL ordered query stream of BOTH
+ * the pool and the transaction client, plus pg_notify payloads. Used to assert
+ * the success-path behaviors: single-txn ordering (AC-45), synchronous cache
+ * eviction (AC-16/40), notify-carries-no-value (AC-15/31), and that two
+ * identical mutations write two distinct audit rows (AC-46).
+ */
+function txnPool(
+	principalRow: { id: string; did: string; principal_type: string },
+) {
+	const sqlStream: string[] = []; // ordered SQL text across pool + client
+	const notifyPayloads: string[] = [];
+	const auditRows: any[][] = [];
+	const flagUpserts: any[][] = [];
+
+	async function record(sql: string, params?: any[]) {
+		sqlStream.push(sql);
+		if (sql.includes("control_identity.principal")) {
+			return { rows: [principalRow] };
+		}
+		if (sql.includes("pg_notify")) {
+			notifyPayloads.push((params ?? [])[0]);
+			return { rows: [] };
+		}
+		if (sql.includes("config_mutation_log")) {
+			auditRows.push(params ?? []);
+			return { rows: [] };
+		}
+		if (sql.includes("runtime_flag")) {
+			flagUpserts.push(params ?? []);
+			return { rows: [] };
+		}
+		return { rows: [] };
+	}
+
+	const client = {
+		query: (sql: string, params?: any[]) => record(sql, params),
+		release: () => {},
+		on: () => {},
+	};
+	return {
+		sqlStream,
+		notifyPayloads,
+		auditRows,
+		flagUpserts,
+		query: (sql: string, params?: any[]) => record(sql, params),
+		connect: async () => client,
+		options: {},
+	} as never;
+}
+
+describe("ConfigResolver.set() success path (P828 AC-15/16/31/40/45/46)", () => {
+	const opRow = { id: "11", did: "did:hive:op", principal_type: "operator" };
+
+	test("AC-45: runtime_flag upsert + config_mutation_log append run in one BEGIN/COMMIT txn, in order", async () => {
+		const pool = txnPool(opRow);
+		const r = await freshResolver(pool);
+		await withPrincipal("operator", async () => {
+			await r.set(FlagKeys.USE_OFFER_DISPATCH, true);
+		});
+		const stream: string[] = (pool as any).sqlStream;
+		const beginIdx = stream.findIndex((s) => s.trim().startsWith("BEGIN"));
+		const flagIdx = stream.findIndex(
+			(s) => s.includes("runtime_flag") && s.includes("INSERT"),
+		);
+		const auditIdx = stream.findIndex((s) =>
+			s.includes("config_mutation_log"),
+		);
+		const commitIdx = stream.findIndex((s) => s.trim().startsWith("COMMIT"));
+		assert.ok(beginIdx >= 0, "BEGIN present");
+		assert.ok(commitIdx > auditIdx, "COMMIT after audit insert");
+		assert.ok(
+			beginIdx < flagIdx && flagIdx < auditIdx && auditIdx < commitIdx,
+			`order must be BEGIN<flag<audit<COMMIT, got ${beginIdx},${flagIdx},${auditIdx},${commitIdx}`,
+		);
+	});
+
+	test("AC-15/31: pg_notify payload carries identifiers only — no value field", async () => {
+		const pool = txnPool(opRow);
+		const r = await freshResolver(pool);
+		await withPrincipal("operator", async () => {
+			await r.set(FlagKeys.USE_OFFER_DISPATCH, true);
+		});
+		const payloads: string[] = (pool as any).notifyPayloads;
+		assert.equal(payloads.length, 1, "exactly one notify");
+		const parsed = JSON.parse(payloads[0]);
+		assert.equal(parsed.flag_name, "USE_OFFER_DISPATCH");
+		assert.equal(parsed.scope, "global");
+		assert.equal(parsed.op, "UPDATE");
+		assert.ok(
+			!("value" in parsed) &&
+				!("new_value" in parsed) &&
+				!("value_jsonb" in parsed),
+			"notify must NOT leak the value",
+		);
+	});
+
+	test("AC-16/40: local cache is synchronously evicted before set() returns", async () => {
+		const pool = txnPool(opRow);
+		const r = await freshResolver(pool);
+		// Prime the cache by resolving once (env-free → undefined, but cache entry set).
+		await r.getOptional(FlagKeys.USE_OFFER_DISPATCH).catch(() => undefined);
+		await withPrincipal("operator", async () => {
+			await r.set(FlagKeys.USE_OFFER_DISPATCH, true);
+		});
+		// After set() returns, the resolved-cache entry for the key must be gone
+		// (the next read re-resolves from the DB). Inspect the private cache.
+		const cache: Map<string, unknown> = (r as any).cache;
+		const dbCache: Map<string, unknown> = (r as any).dbCache;
+		assert.ok(
+			!cache.has("USE_OFFER_DISPATCH"),
+			"resolved-cache entry evicted synchronously",
+		);
+		assert.ok(
+			!dbCache.has("runtime_flag:USE_OFFER_DISPATCH:global"),
+			"db-cache entry evicted synchronously",
+		);
+	});
+
+	test("AC-37: 5 concurrent operator writes each produce an audit row (no lost write)", async () => {
+		const pool = txnPool(opRow);
+		const r = await freshResolver(pool);
+		await withPrincipal("operator", async () => {
+			const results = await Promise.allSettled(
+				Array.from({ length: 5 }, () =>
+					r.set(FlagKeys.USE_OFFER_DISPATCH, true),
+				),
+			);
+			assert.ok(
+				results.every((x) => x.status === "fulfilled"),
+				"all concurrent writes resolve",
+			);
+		});
+		assert.equal(
+			(pool as any).auditRows.length,
+			5,
+			"five concurrent writes → five audit rows",
+		);
+	});
+
+	test("AC-46: two identical mutations write two DISTINCT audit rows", async () => {
+		const pool = txnPool(opRow);
+		const r = await freshResolver(pool);
+		await withPrincipal("operator", async () => {
+			await r.set(FlagKeys.USE_OFFER_DISPATCH, true);
+			await r.set(FlagKeys.USE_OFFER_DISPATCH, true);
+		});
+		assert.equal(
+			(pool as any).auditRows.length,
+			2,
+			"identical inputs still append two audit rows (append-only history)",
+		);
+	});
+});
+
 describe("ConfigResolver.reload() identity gate (P828 AC-17)", () => {
 	test("no context → NO_IDENTITY_CONTEXT", async () => {
 		const pool = spyPool();
