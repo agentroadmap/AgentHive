@@ -535,6 +535,10 @@ export async function verifyAC(args: {
 	verification_notes?: string;
 	details?: Record<string, unknown>;
 	category?: string;
+	// P3563 AC-7 (Pillar-4): waiving an AC requires a non-empty reason
+	// (verification_notes or waive_reason) AND a genuine operator_token.
+	waive_reason?: string;
+	operator_token?: string;
 }): Promise<CallToolResult> {
 	try {
 		// P157 fix: validate required fields and provide clear error messages
@@ -615,6 +619,35 @@ export async function verifyAC(args: {
 		}
 
 		const ac = acRows[0];
+
+		// P3563 Pillar-4 (AC-7): waiver, not silent skip. A waive requires BOTH a
+		// non-empty reason AND a genuine authorized operator (operator_token).
+		// Flag-gated — no-op when AGENTHIVE_GATE_AC_INVARIANT_ENABLED is OFF, so
+		// pre-P3563 behavior (any actor may waive without reason) is unchanged.
+		if (args.status === "waived") {
+			const { checkWaiverAuthority } = await import(
+				"../../../../core/gate/verifier-independence.ts"
+			);
+			const waive = await checkWaiverAuthority({
+				reason: args.waive_reason ?? args.verification_notes,
+				operatorToken: args.operator_token,
+				proposalId,
+				itemNumber: itemNum,
+				verifier: args.verified_by,
+			}).catch(() => ({ blocked: false }) as Awaited<
+				ReturnType<typeof checkWaiverAuthority>
+			>);
+			if (waive.blocked) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `❌ [${waive.code ?? "WAIVE_REFUSED"}] ${waive.reason}`,
+						},
+					],
+				};
+			}
+		}
 
 		// P3563 Pillar-3 (origination): refuse a CONTENT pass self-certified by a
 		// builder-agency verifier (flag-gated; no-op when the invariant is OFF).
@@ -2275,6 +2308,21 @@ export class RfcWorkflowHandlers {
 						description:
 							"AC evidence category — when provided the handler validates that 'details' " +
 							"contains the required keys for that category (returns 422 SCHEMA_MISMATCH on violation).",
+					},
+					waive_reason: {
+						type: "string",
+						description:
+							"P3563 AC-7: reason for a waive (status='waived'). When the gate-AC " +
+							"invariant flag is ON, a waive requires a non-empty reason here (or in " +
+							"verification_notes) AND an authorized operator_token. Ignored otherwise.",
+					},
+					operator_token: {
+						type: "string",
+						description:
+							"P3563 AC-7: operator token authorizing a waive (status='waived'). " +
+							"Required when the gate-AC invariant flag is ON — the same P3508 " +
+							"operator-token path used for elevated gate actions. Self-asserted " +
+							"agency 'authority' is NOT accepted (fail-closed).",
 					},
 				},
 				required: ["proposal_id", "item_number", "status", "verified_by"],
