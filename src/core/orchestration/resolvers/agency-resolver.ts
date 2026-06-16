@@ -124,6 +124,9 @@ export async function resolveAgency(
 		 WHERE pr.status NOT IN ('offline', 'retired')
 		   AND (a.status IS NULL OR a.status <> 'retired')
 		   AND ar.agent_type <> 'coordinator'
+		   -- P1456 AC-2: interactive CLI session instances are addressable
+		   -- (A2A) but NOT dispatchable. Exclude them from candidate selection.
+		   AND ar.role IS DISTINCT FROM 'interactive-session'
 		   AND ar.agent_identity NOT LIKE 'test/%'
 		   AND (pr.project_id IS NULL OR pr.project_id = $1)
 		   AND COALESCE(inf.in_flight_count, 0) < pr.max_in_flight
