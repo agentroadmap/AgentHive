@@ -1521,6 +1521,71 @@ export async function recordGateDecision(args: {
 			}
 		}
 
+		// P3566 pre-check: for non-terminal advance decisions, verify that an
+		// independent approver exists BEFORE inserting the gate_decision_log row.
+		// This surfaces a friendly error instead of letting the DB trigger fire a
+		// cryptic check_violation (AC-1 independence guard in fn_guard_gate_advance).
+		// Terminal gates (DEVELOP→MERGE, MERGE→COMPLETE) are handled by P3563.
+		const decidedBy = args.decided_by ?? "mcp";
+		if (
+			args.decision === "advance" &&
+			(
+				(fromState.toUpperCase() === "DRAFT"   && toState.toUpperCase() === "REVIEW") ||
+				(fromState.toUpperCase() === "REVIEW"  && toState.toUpperCase() === "DEVELOP")
+			)
+		) {
+			const { rows: indepRows } = await query<{ is_independent: boolean }>(
+				`SELECT roadmap.fn_actor_is_independent($1, $2, p.state_changed_at) AS is_independent
+				   FROM roadmap_proposal.proposal p
+				  WHERE p.id = $3`,
+				[proposalId, decidedBy, proposalId],
+			);
+			if (indepRows.length && indepRows[0].is_independent === false) {
+				return errorResult(
+					`Gate advance ${fromState}→${toState} on proposal ${rawIdentifier} requires an ` +
+					`INDEPENDENT reviewer. No proposal_reviews approve found from an actor other than ` +
+					`'${decidedBy}' since the proposal entered ${fromState}. ` +
+					`Submit a review via action=submit_review from a DIFFERENT identity before calling gate_decision. ` +
+					`(P3566 AC-1)`,
+					"independence_violation",
+				);
+			}
+
+			// Also check for unresolved blocking reviews (AC-2 friendly pre-check).
+			const { rows: blockRows } = await query<{ latest_indep_ts: string | null }>(
+				`SELECT MAX(pr.reviewed_at) AS latest_indep_ts
+				   FROM roadmap_proposal.proposal_reviews pr
+				   JOIN roadmap_proposal.proposal p ON p.id = pr.proposal_id
+				  WHERE pr.proposal_id = $1
+				    AND pr.verdict = 'approve'
+				    AND pr.reviewer_identity IS DISTINCT FROM $2
+				    AND (p.state_changed_at IS NULL OR pr.reviewed_at >= p.state_changed_at)`,
+				[proposalId, decidedBy],
+			);
+			const latestIndepTs = blockRows[0]?.latest_indep_ts ?? null;
+			if (latestIndepTs !== null) {
+				const { rows: hasBlocking } = await query<{ blocked: boolean }>(
+					`SELECT EXISTS (
+					    SELECT 1
+					      FROM roadmap_proposal.proposal_reviews pr
+					     WHERE pr.proposal_id = $1
+					       AND (pr.is_blocking = true OR pr.verdict IN ('request_changes', 'reject'))
+					       AND pr.reviewed_at > $2::timestamptz
+					 ) AS blocked`,
+					[proposalId, latestIndepTs],
+				);
+				if (hasBlocking[0]?.blocked) {
+					return errorResult(
+						`Gate advance ${fromState}→${toState} on proposal ${rawIdentifier} is blocked ` +
+						`by an unresolved blocking review. A request_changes or reject review was filed ` +
+						`after the latest independent approve. Resolve the blocking review (obtain a new ` +
+						`independent approve after the blocker) before calling gate_decision. (P3566 AC-2)`,
+						"blocking_review",
+					);
+				}
+			}
+		}
+
 		// Shadow-mode skip: if a row with the same agent_run_id already exists,
 		// the new MCP path already wrote the canonical record — skip the insert.
 		if (args.agent_run_id) {
