@@ -174926,11 +174926,11 @@ ${config5.themeCSS}`;
 });
 
 // src/apps/dashboard-web/main.tsx
-var import_react80 = __toESM(require_react(), 1);
+var import_react81 = __toESM(require_react(), 1);
 var import_client = __toESM(require_client(), 1);
 
 // src/apps/dashboard-web/App.tsx
-var import_react76 = __toESM(require_react(), 1);
+var import_react77 = __toESM(require_react(), 1);
 
 // node_modules/regexparam/dist/index.mjs
 function parse(input, loose) {
@@ -175176,6 +175176,20 @@ var Switch = ({ children, location: location2 }) => {
     let match = 0;
     if (import_react.isValidElement(element) && (match = matchRoute(router.parser, element.props.path, location2 || originalLocation, element.props.nest))[0])
       return import_react.cloneElement(element, { match });
+  }
+  return null;
+};
+var Redirect = (props) => {
+  const { to, href = to } = props;
+  const router = useRouter();
+  const [, navigate2] = useLocationFromRouter(router);
+  const redirect = useEvent(() => navigate2(to || href, props));
+  const { ssrContext } = router;
+  useIsomorphicLayoutEffect(() => {
+    redirect();
+  }, []);
+  if (ssrContext) {
+    ssrContext.redirectTo = to;
   }
   return null;
 };
@@ -236659,8 +236673,40 @@ function useBoardColumns(workflowName = "Standard RFC", connected = false, board
   return { columns, isLoading, error: error3, refresh: fetchColumns };
 }
 
-// src/apps/dashboard-web/hooks/useWebSocket.ts
+// src/apps/dashboard-web/hooks/useProject.ts
 var import_react75 = __toESM(require_react(), 1);
+var DEFAULT_PROJECT_ID = 1;
+function parseProjectId(raw3) {
+  if (raw3 == null)
+    return null;
+  if (!/^\d+$/.test(raw3))
+    return null;
+  const n3 = Number(raw3);
+  return Number.isInteger(n3) && n3 > 0 ? n3 : null;
+}
+function useProject() {
+  const params = useParams();
+  const projectId = parseProjectId(params?.projectId);
+  const { projects, loading, error: error3 } = useProjectScope();
+  import_react75.useEffect(() => {
+    if (projectId != null) {
+      setStoredProjectId(projectId);
+    }
+  }, [projectId]);
+  const project = projectId != null ? projects.find((p5) => p5.project_id === projectId) ?? null : null;
+  return {
+    projectId,
+    isValid: projectId != null,
+    projectName: project?.name ?? null,
+    projectSlug: project?.slug ?? null,
+    project,
+    loading,
+    error: error3
+  };
+}
+
+// src/apps/dashboard-web/hooks/useWebSocket.ts
+var import_react76 = __toESM(require_react(), 1);
 function isObject3(value2) {
   return typeof value2 === "object" && value2 !== null;
 }
@@ -236684,17 +236730,17 @@ function asArrayOf(value2, guard) {
 }
 function useWebSocket(url) {
   const wsUrl = url ?? (typeof window !== "undefined" ? `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}` : "ws://localhost:6420");
-  const [connected, setConnected] = import_react75.useState(false);
-  const [proposals, setProposals] = import_react75.useState([]);
-  const [agents, setAgents] = import_react75.useState([]);
-  const [channels2, setChannels] = import_react75.useState([]);
-  const [messages2, setMessages] = import_react75.useState([]);
-  const [notifications2, setNotifications] = import_react75.useState([]);
-  const [bellEnabled, setBellEnabled] = import_react75.useState(false);
-  const [boardReloadSignal, setBoardReloadSignal] = import_react75.useState(0);
-  const wsRef = import_react75.useRef(null);
-  const reconnectTimeoutRef = import_react75.useRef(undefined);
-  const connect = import_react75.useCallback(() => {
+  const [connected, setConnected] = import_react76.useState(false);
+  const [proposals, setProposals] = import_react76.useState([]);
+  const [agents, setAgents] = import_react76.useState([]);
+  const [channels2, setChannels] = import_react76.useState([]);
+  const [messages2, setMessages] = import_react76.useState([]);
+  const [notifications2, setNotifications] = import_react76.useState([]);
+  const [bellEnabled, setBellEnabled] = import_react76.useState(false);
+  const [boardReloadSignal, setBoardReloadSignal] = import_react76.useState(0);
+  const wsRef = import_react76.useRef(null);
+  const reconnectTimeoutRef = import_react76.useRef(undefined);
+  const connect = import_react76.useCallback(() => {
     if (wsRef.current) {
       const old = wsRef.current;
       old.onopen = null;
@@ -236858,7 +236904,7 @@ function useWebSocket(url) {
       ws.close();
     };
   }, [wsUrl]);
-  import_react75.useEffect(() => {
+  import_react76.useEffect(() => {
     connect();
     return () => {
       if (reconnectTimeoutRef.current) {
@@ -236869,7 +236915,7 @@ function useWebSocket(url) {
       }
     };
   }, [connect]);
-  import_react75.useEffect(() => {
+  import_react76.useEffect(() => {
     const off = onProjectScopeChange((id33) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN)
@@ -236889,7 +236935,7 @@ function useWebSocket(url) {
     });
     return off;
   }, []);
-  const reconnect = import_react75.useCallback(() => {
+  const reconnect = import_react76.useCallback(() => {
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
     }
@@ -237020,6 +237066,79 @@ function toSharedChannel(channel2) {
     type: "group"
   };
 }
+function ProjectWorkspace({
+  proposals,
+  sharedProposals,
+  sharedAgents,
+  sharedChannels,
+  agents,
+  channels: channels2,
+  connected,
+  statuses,
+  activeWorkflow,
+  columnDwell,
+  onWorkflowChange,
+  onProposalClick
+}) {
+  useProject();
+  return /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(Switch, {
+    children: [
+      /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(Route, {
+        path: "/board",
+        children: /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(BoardPage, {
+          proposals,
+          statuses,
+          activeWorkflow,
+          onWorkflowChange,
+          onProposalClick: (p5) => onProposalClick(p5),
+          columnDwell
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(Route, {
+        path: "/proposals",
+        children: /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(ProposalsPage_default, {
+          proposals: sharedProposals,
+          onProposalClick: (p5) => onProposalClick(p5)
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(Route, {
+        path: "/directives",
+        children: /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(DirectivesPage_default, {
+          proposals: sharedProposals
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(Route, {
+        path: "/agents",
+        children: /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(AgentsPage_default, {
+          agents: sharedAgents
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(Route, {
+        path: "/dispatches",
+        children: /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(DispatchPage_default, {}, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(Route, {
+        path: "/settings",
+        children: /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(SettingsPage_default, {}, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(Route, {
+        path: "/",
+        children: /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(BoardPage, {
+          proposals,
+          statuses,
+          activeWorkflow,
+          onWorkflowChange,
+          onProposalClick: (p5) => onProposalClick(p5),
+          columnDwell
+        }, undefined, false, undefined, this)
+      }, undefined, false, undefined, this),
+      /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(Route, {
+        path: "*",
+        children: /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(NotFoundPage, {}, undefined, false, undefined, this)
+      }, undefined, false, undefined, this)
+    ]
+  }, undefined, true, undefined, this);
+}
 function App() {
   const {
     connected,
@@ -237030,7 +237149,7 @@ function App() {
     bellEnabled,
     boardReloadSignal
   } = useWebSocket();
-  const [activeWorkflow, setActiveWorkflow] = import_react76.useState(() => {
+  const [activeWorkflow, setActiveWorkflow] = import_react77.useState(() => {
     if (typeof window !== "undefined") {
       return window.localStorage.getItem("roadmap.board.workflow") || "Standard RFC";
     }
@@ -237042,16 +237161,16 @@ function App() {
     col.stage_name,
     col.avg_dwell_days != null ? Number(col.avg_dwell_days) : null
   ]));
-  import_react76.useEffect(() => {
+  import_react77.useEffect(() => {
     if (typeof window !== "undefined") {
       window.localStorage.setItem("roadmap.board.workflow", activeWorkflow);
     }
   }, [activeWorkflow]);
-  const sharedProposals = import_react76.useMemo(() => proposals.map(toSharedProposal), [proposals]);
-  const sharedAgents = import_react76.useMemo(() => agents.map(toSharedAgent), [agents]);
-  const sharedChannels = import_react76.useMemo(() => channels2.map(toSharedChannel), [channels2]);
-  const [activeProposal, setActiveProposal] = import_react76.useState(null);
-  const resolvedActiveProposal = import_react76.useMemo(() => {
+  const sharedProposals = import_react77.useMemo(() => proposals.map(toSharedProposal), [proposals]);
+  const sharedAgents = import_react77.useMemo(() => agents.map(toSharedAgent), [agents]);
+  const sharedChannels = import_react77.useMemo(() => channels2.map(toSharedChannel), [channels2]);
+  const [activeProposal, setActiveProposal] = import_react77.useState(null);
+  const resolvedActiveProposal = import_react77.useMemo(() => {
     if (!activeProposal)
       return null;
     const match2 = sharedProposals.find((proposal) => proposalMatchesSelection(proposal, activeProposal));
@@ -237095,33 +237214,63 @@ function App() {
                   children: /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(PlatformView_default, {}, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
                 /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(Route, {
-                  path: "/board",
-                  children: /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(BoardPage, {
+                  path: "/project/:projectId",
+                  nest: true,
+                  children: /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(ProjectWorkspace, {
                     proposals,
+                    sharedProposals,
+                    sharedAgents,
+                    sharedChannels,
+                    agents,
+                    channels: channels2,
+                    connected,
                     statuses,
                     activeWorkflow,
+                    columnDwell,
                     onWorkflowChange: handleWorkflowChange,
-                    onProposalClick: (p5) => handleProposalClick(p5),
-                    columnDwell
+                    onProposalClick: handleProposalClick
+                  }, undefined, false, undefined, this)
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(Route, {
+                  path: "/board",
+                  children: /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(Redirect, {
+                    to: `/project/${DEFAULT_PROJECT_ID}/board`,
+                    replace: true
                   }, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
                 /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(Route, {
                   path: "/proposals",
-                  children: /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(ProposalsPage_default, {
-                    proposals: sharedProposals,
-                    onProposalClick: (p5) => handleProposalClick(p5)
+                  children: /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(Redirect, {
+                    to: `/project/${DEFAULT_PROJECT_ID}/proposals`,
+                    replace: true
                   }, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
                 /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(Route, {
                   path: "/directives",
-                  children: /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(DirectivesPage_default, {
-                    proposals: sharedProposals
+                  children: /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(Redirect, {
+                    to: `/project/${DEFAULT_PROJECT_ID}/directives`,
+                    replace: true
                   }, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
                 /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(Route, {
                   path: "/agents",
-                  children: /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(AgentsPage_default, {
-                    agents: sharedAgents
+                  children: /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(Redirect, {
+                    to: `/project/${DEFAULT_PROJECT_ID}/agents`,
+                    replace: true
+                  }, undefined, false, undefined, this)
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(Route, {
+                  path: "/dispatches",
+                  children: /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(Redirect, {
+                    to: `/project/${DEFAULT_PROJECT_ID}/dispatches`,
+                    replace: true
+                  }, undefined, false, undefined, this)
+                }, undefined, false, undefined, this),
+                /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(Route, {
+                  path: "/settings",
+                  children: /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(Redirect, {
+                    to: `/project/${DEFAULT_PROJECT_ID}/settings`,
+                    replace: true
                   }, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
                 /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(Route, {
@@ -237155,10 +237304,6 @@ function App() {
                     className: "h-full p-4 sm:p-6",
                     children: /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(ActivityFeed_default, {}, undefined, false, undefined, this)
                   }, undefined, false, undefined, this)
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(Route, {
-                  path: "/dispatches",
-                  children: /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(DispatchPage_default, {}, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
                 /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(Route, {
                   path: "/control",
@@ -237195,10 +237340,6 @@ function App() {
                   }, undefined, false, undefined, this)
                 }, undefined, false, undefined, this),
                 /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(Route, {
-                  path: "/settings",
-                  children: /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(SettingsPage_default, {}, undefined, false, undefined, this)
-                }, undefined, false, undefined, this),
-                /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(Route, {
                   path: "*",
                   children: /* @__PURE__ */ jsx_dev_runtime40.jsxDEV(NotFoundPage, {}, undefined, false, undefined, this)
                 }, undefined, false, undefined, this)
@@ -237217,7 +237358,7 @@ function App() {
 }
 
 // src/apps/dashboard-web/components/ui/Toast.tsx
-var import_react77 = __toESM(require_react(), 1);
+var import_react78 = __toESM(require_react(), 1);
 
 // node_modules/clsx/dist/clsx.mjs
 function r3(e3) {
@@ -239069,7 +239210,7 @@ function cn(...inputs) {
 
 // src/apps/dashboard-web/components/ui/Toast.tsx
 var jsx_dev_runtime41 = __toESM(require_jsx_dev_runtime(), 1);
-var ToastContext = import_react77.createContext(undefined);
+var ToastContext = import_react78.createContext(undefined);
 var toastIdCounter = 0;
 var typeStyles = {
   success: "bg-[var(--color-success-bg)] text-[var(--color-success-fg)] border-[var(--color-success)]",
@@ -239084,8 +239225,8 @@ var typeIcons = {
   info: "ℹ"
 };
 function SingleToast({ item, onDismiss }) {
-  const timerRef = import_react77.useRef(null);
-  import_react77.useEffect(() => {
+  const timerRef = import_react78.useRef(null);
+  import_react78.useEffect(() => {
     const dur = item.duration ?? 5000;
     timerRef.current = setTimeout(() => onDismiss(item.id), dur);
     return () => {
@@ -239117,11 +239258,11 @@ function SingleToast({ item, onDismiss }) {
   }, undefined, true, undefined, this);
 }
 var ToastProvider = ({ children: children2 }) => {
-  const [toasts, setToasts] = import_react77.useState([]);
-  const dismiss = import_react77.useCallback((id33) => {
+  const [toasts, setToasts] = import_react78.useState([]);
+  const dismiss = import_react78.useCallback((id33) => {
     setToasts((prev2) => prev2.filter((t4) => t4.id !== id33));
   }, []);
-  const toast = import_react77.useCallback((message, type3 = "info", duration) => {
+  const toast = import_react78.useCallback((message, type3 = "info", duration) => {
     const id33 = `toast-${++toastIdCounter}`;
     setToasts((prev2) => [...prev2, { id: id33, type: type3, message, duration }]);
   }, []);
@@ -239143,18 +239284,18 @@ var ToastProvider = ({ children: children2 }) => {
 };
 
 // src/apps/dashboard-web/contexts/HealthCheckContext.tsx
-var import_react79 = __toESM(require_react(), 1);
+var import_react80 = __toESM(require_react(), 1);
 
 // src/apps/dashboard-web/hooks/useHealthCheck.tsx
-var import_react78 = __toESM(require_react(), 1);
+var import_react79 = __toESM(require_react(), 1);
 var RECONNECT_DELAY = 5000;
 function useHealthCheck() {
-  const [isOnline, setIsOnline] = import_react78.useState(true);
-  const [wasDisconnected, setWasDisconnected] = import_react78.useState(false);
-  const wsRef = import_react78.useRef(null);
-  const reconnectTimeoutRef = import_react78.useRef(null);
-  const isMountedRef = import_react78.useRef(true);
-  const connectWebSocket = import_react78.useCallback(() => {
+  const [isOnline, setIsOnline] = import_react79.useState(true);
+  const [wasDisconnected, setWasDisconnected] = import_react79.useState(false);
+  const wsRef = import_react79.useRef(null);
+  const reconnectTimeoutRef = import_react79.useRef(null);
+  const isMountedRef = import_react79.useRef(true);
+  const connectWebSocket = import_react79.useCallback(() => {
     if (!isMountedRef.current) {
       return;
     }
@@ -239191,13 +239332,13 @@ function useHealthCheck() {
       setWasDisconnected(true);
     }
   }, []);
-  const retry = import_react78.useCallback(() => {
+  const retry = import_react79.useCallback(() => {
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
     }
     connectWebSocket();
   }, [connectWebSocket]);
-  import_react78.useEffect(() => {
+  import_react79.useEffect(() => {
     isMountedRef.current = true;
     const connectTimer = setTimeout(() => {
       connectWebSocket();
@@ -239224,7 +239365,7 @@ function useHealthCheck() {
 
 // src/apps/dashboard-web/contexts/HealthCheckContext.tsx
 var jsx_dev_runtime42 = __toESM(require_jsx_dev_runtime(), 1);
-var HealthCheckContext = import_react79.createContext(undefined);
+var HealthCheckContext = import_react80.createContext(undefined);
 function HealthCheckProvider({ children: children2 }) {
   const healthCheck = useHealthCheck();
   return /* @__PURE__ */ jsx_dev_runtime42.jsxDEV(HealthCheckContext.Provider, {
@@ -239236,7 +239377,7 @@ function HealthCheckProvider({ children: children2 }) {
 // src/apps/dashboard-web/main.tsx
 var jsx_dev_runtime43 = __toESM(require_jsx_dev_runtime(), 1);
 var root10 = import_client.default.createRoot(document.getElementById("root"));
-root10.render(/* @__PURE__ */ jsx_dev_runtime43.jsxDEV(import_react80.default.StrictMode, {
+root10.render(/* @__PURE__ */ jsx_dev_runtime43.jsxDEV(import_react81.default.StrictMode, {
   children: /* @__PURE__ */ jsx_dev_runtime43.jsxDEV(ThemeProvider, {
     children: /* @__PURE__ */ jsx_dev_runtime43.jsxDEV(ToastProvider, {
       children: /* @__PURE__ */ jsx_dev_runtime43.jsxDEV(HealthCheckProvider, {
