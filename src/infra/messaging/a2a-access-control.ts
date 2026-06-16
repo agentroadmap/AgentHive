@@ -21,10 +21,17 @@ const SYSTEM_AGENTS = new Set(["system", "orchestrator"]);
 /**
  * Canonical pg_notify channel for an agent's direct-message inbox.
  *
- * P1103 AC-2: channel prefix unified to 'msg_'. MUST match the channel name
- * produced by `roadmap.fn_a2a_message_notify`
+ * P1103 AC-2 / P1456 AC-16: channel prefix unified to 'msg_'. MUST match the
+ * channel name produced by `roadmap.fn_a2a_message_notify`
  * (scripts/migrations/169-p1103-unify-listen-channel.sql). The trigger emits
  *   pg_notify('msg_' || NEW.to_agent, ...)
+ *
+ * AC-16 verification: the live DB trigger body can be inspected with:
+ *   SELECT prosrc FROM pg_proc WHERE proname = 'fn_a2a_message_notify';
+ * and must contain the literal string  'msg_' || NEW.to_agent  (or equivalent).
+ * If this function is renamed or the prefix changes, update both this constant
+ * AND the trigger definition atomically — a mismatch silently drops all
+ * real-time wake-ups and msg_read(wait_ms=N) falls through to the no-message path.
  * with the raw identity, and downstream consumers (msg-wait-reply,
  * msg-reply, agent-liveness probe, server/index operator listener,
  * scripts/start-message-agent) all LISTEN on `msg_<raw>`. This
