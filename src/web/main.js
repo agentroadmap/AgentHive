@@ -185974,7 +185974,7 @@ function vbnet(Prism) {
   });
 }
 
-// node_modules/hastscript/node_modules/property-information/lib/util/schema.js
+// node_modules/refractor/node_modules/property-information/lib/util/schema.js
 class Schema {
   constructor(property, normal, space) {
     this.property = property;
@@ -185988,7 +185988,7 @@ Schema.prototype.property = {};
 Schema.prototype.normal = {};
 Schema.prototype.space = null;
 
-// node_modules/hastscript/node_modules/property-information/lib/util/merge.js
+// node_modules/refractor/node_modules/property-information/lib/util/merge.js
 function merge(definitions, space) {
   const property = {};
   const normal = {};
@@ -186000,12 +186000,12 @@ function merge(definitions, space) {
   return new Schema(property, normal, space);
 }
 
-// node_modules/hastscript/node_modules/property-information/lib/normalize.js
+// node_modules/refractor/node_modules/property-information/lib/normalize.js
 function normalize(value) {
   return value.toLowerCase();
 }
 
-// node_modules/hastscript/node_modules/property-information/lib/util/info.js
+// node_modules/refractor/node_modules/property-information/lib/util/info.js
 class Info {
   constructor(property, attribute) {
     this.property = property;
@@ -186023,7 +186023,7 @@ Info.prototype.commaOrSpaceSeparated = false;
 Info.prototype.mustUseProperty = false;
 Info.prototype.defined = false;
 
-// node_modules/hastscript/node_modules/property-information/lib/util/types.js
+// node_modules/refractor/node_modules/property-information/lib/util/types.js
 var exports_types = {};
 __export(exports_types, {
   spaceSeparated: () => spaceSeparated,
@@ -186046,7 +186046,7 @@ function increment() {
   return 2 ** ++powers;
 }
 
-// node_modules/hastscript/node_modules/property-information/lib/util/defined-info.js
+// node_modules/refractor/node_modules/property-information/lib/util/defined-info.js
 var checks = Object.keys(exports_types);
 
 class DefinedInfo extends Info {
@@ -186069,7 +186069,7 @@ function mark(values, key, value) {
   }
 }
 
-// node_modules/hastscript/node_modules/property-information/lib/util/create.js
+// node_modules/refractor/node_modules/property-information/lib/util/create.js
 var own2 = {}.hasOwnProperty;
 function create(definition) {
   const property = {};
@@ -186090,7 +186090,7 @@ function create(definition) {
   return new Schema(property, normal, definition.space);
 }
 
-// node_modules/hastscript/node_modules/property-information/lib/xlink.js
+// node_modules/refractor/node_modules/property-information/lib/xlink.js
 var xlink = create({
   space: "xlink",
   transform(_, prop) {
@@ -186107,7 +186107,7 @@ var xlink = create({
   }
 });
 
-// node_modules/hastscript/node_modules/property-information/lib/xml.js
+// node_modules/refractor/node_modules/property-information/lib/xml.js
 var xml = create({
   space: "xml",
   transform(_, prop) {
@@ -186116,17 +186116,17 @@ var xml = create({
   properties: { xmlLang: null, xmlBase: null, xmlSpace: null }
 });
 
-// node_modules/hastscript/node_modules/property-information/lib/util/case-sensitive-transform.js
+// node_modules/refractor/node_modules/property-information/lib/util/case-sensitive-transform.js
 function caseSensitiveTransform(attributes, attribute) {
   return attribute in attributes ? attributes[attribute] : attribute;
 }
 
-// node_modules/hastscript/node_modules/property-information/lib/util/case-insensitive-transform.js
+// node_modules/refractor/node_modules/property-information/lib/util/case-insensitive-transform.js
 function caseInsensitiveTransform(attributes, property) {
   return caseSensitiveTransform(attributes, property.toLowerCase());
 }
 
-// node_modules/hastscript/node_modules/property-information/lib/xmlns.js
+// node_modules/refractor/node_modules/property-information/lib/xmlns.js
 var xmlns = create({
   space: "xmlns",
   attributes: { xmlnsxlink: "xmlns:xlink" },
@@ -186134,7 +186134,7 @@ var xmlns = create({
   properties: { xmlns: null, xmlnsXLink: null }
 });
 
-// node_modules/hastscript/node_modules/property-information/lib/aria.js
+// node_modules/refractor/node_modules/property-information/lib/aria.js
 var aria = create({
   transform(_, prop) {
     return prop === "role" ? prop : "aria-" + prop.slice(4).toLowerCase();
@@ -186192,7 +186192,7 @@ var aria = create({
   }
 });
 
-// node_modules/hastscript/node_modules/property-information/lib/html.js
+// node_modules/refractor/node_modules/property-information/lib/html.js
 var html = create({
   space: "html",
   attributes: {
@@ -186499,7 +186499,7 @@ var html = create({
   }
 });
 
-// node_modules/hastscript/node_modules/property-information/lib/svg.js
+// node_modules/refractor/node_modules/property-information/lib/svg.js
 var svg = create({
   space: "svg",
   attributes: {
@@ -187057,7 +187057,7 @@ var svg = create({
   }
 });
 
-// node_modules/hastscript/node_modules/property-information/lib/find.js
+// node_modules/refractor/node_modules/property-information/lib/find.js
 var valid = /^data[-\w.:]+$/i;
 var dash = /-[a-z]/g;
 var cap = /[A-Z]/g;
@@ -187092,11 +187092,11 @@ function kebab($0) {
 function camelcase($0) {
   return $0.charAt(1).toUpperCase();
 }
-// node_modules/hastscript/node_modules/property-information/index.js
+// node_modules/refractor/node_modules/property-information/index.js
 var html2 = merge([xml, xlink, xmlns, aria, html], "html");
 var svg2 = merge([xml, xlink, xmlns, aria, svg], "svg");
 
-// node_modules/hast-util-parse-selector/lib/index.js
+// node_modules/refractor/node_modules/hast-util-parse-selector/lib/index.js
 var search = /[#.]/g;
 function parseSelector(selector, defaultTagName) {
   const value = selector || "";
@@ -187168,7 +187168,7 @@ function stringify2(values, options) {
   return input.join((settings.padRight ? " " : "") + "," + (settings.padLeft === false ? "" : " ")).trim();
 }
 
-// node_modules/hastscript/lib/core.js
+// node_modules/refractor/node_modules/hastscript/lib/core.js
 var buttonTypes = new Set(["menu", "submit", "reset", "button"]);
 var own3 = {}.hasOwnProperty;
 function core(schema, defaultTagName, caseSensitive) {
@@ -187309,7 +187309,7 @@ function createAdjustMap(values) {
   return result;
 }
 
-// node_modules/hastscript/lib/html.js
+// node_modules/refractor/node_modules/hastscript/lib/html.js
 var h = core(html2, "div");
 // node_modules/character-entities-legacy/index.js
 var characterEntitiesLegacy = [
