@@ -67,7 +67,8 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					p.display_id AS proposal_id,
 					pst.transitioned_by AS agent_id,
 					p.display_id || ' state ' || upper(COALESCE(pst.from_state, '?')) || ' -> ' || upper(pst.to_state)
-						|| COALESCE(' by ' || NULLIF(pst.transitioned_by, ''), '') AS message
+						|| COALESCE(' by ' || NULLIF(pst.transitioned_by, ''), '')
+						|| COALESCE(' — ' || left(p.title, 48), '') AS message
 				FROM roadmap_proposal.proposal_state_transitions pst
 				LEFT JOIN roadmap_proposal.proposal p ON p.id = pst.proposal_id
 
@@ -81,7 +82,8 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					pmt.transitioned_by AS agent_id,
 					p.display_id || ' [' || upper(COALESCE(state_at.to_state, p.status, '?')) || '] maturity ' ||
 						COALESCE(pmt.from_maturity, '?') || ' -> ' || pmt.to_maturity
-						|| COALESCE(' by ' || NULLIF(pmt.transitioned_by, ''), '') AS message
+						|| COALESCE(' by ' || NULLIF(pmt.transitioned_by, ''), '')
+						|| COALESCE(' — ' || left(p.title, 48), '') AS message
 				FROM roadmap_proposal.proposal_maturity_transitions pmt
 				LEFT JOIN roadmap_proposal.proposal p ON p.id = pmt.proposal_id
 				LEFT JOIN LATERAL (
@@ -151,7 +153,11 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 						ELSE
 							COALESCE(p.display_id || ' ', '') ||
 								'[' || upper(COALESCE(p.status, '?')) || '] ' || pe.event_type
-					END AS message
+					END
+						|| CASE
+							WHEN pe.event_type = 'proposal_created' THEN ''
+							ELSE COALESCE(' — ' || left(p.title, 48), '')
+						END AS message
 				FROM roadmap_proposal.proposal_event pe
 				LEFT JOIN roadmap_proposal.proposal p ON p.id = pe.proposal_id
 				WHERE pe.event_type NOT IN ('status_changed', 'maturity_changed', 'lease_claimed', 'lease_released')
@@ -165,7 +171,8 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					p.display_id AS proposal_id,
 					ml.from_agent AS agent_id,
 					COALESCE(ml.from_agent, 'agent') || ' -> ' || COALESCE(ml.to_agent, ml.channel, 'broadcast') || ': ' ||
-						left(regexp_replace(COALESCE(ml.message_content, ''), E'[\\n\\r]+', ' ', 'g'), 120) AS message
+						left(regexp_replace(COALESCE(ml.message_content, ''), E'[\\n\\r]+', ' ', 'g'), 120)
+						|| COALESCE(' — ' || left(p.title, 48), '') AS message
 				FROM roadmap.message_ledger ml
 				LEFT JOIN roadmap_proposal.proposal p ON p.id = ml.proposal_id
 				WHERE btrim(COALESCE(ml.message_content, '')) <> ''
@@ -217,7 +224,8 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 						CASE
 							WHEN ar.duration_ms IS NOT NULL THEN ' [' || (ar.duration_ms / 1000)::text || 's]'
 							ELSE ''
-						END AS message
+						END
+						|| COALESCE(' — ' || left(p.title, 48), '') AS message
 				FROM roadmap_workforce.agent_runs ar
 				LEFT JOIN roadmap_proposal.proposal p ON p.id = ar.proposal_id
 				LEFT JOIN roadmap_workforce.v_agent_display_label ar_reg ON ar_reg.agent_identity = ar.agent_identity
