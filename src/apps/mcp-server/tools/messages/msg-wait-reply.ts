@@ -14,6 +14,7 @@
 import { query, getPool } from "../../../../postgres/pool.ts";
 import type { CallToolResult } from "../../types.ts";
 import { verifyUserBearer } from "../../../../infra/messaging/bearer-auth.ts";
+import { agentNotifyChannel } from "../../../../infra/messaging/a2a-access-control.ts";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
 	return {
@@ -46,7 +47,7 @@ async function waitForReplyViaNotify(
 ): Promise<{ replied: boolean; replyMessageId?: number }> {
 	const pool = getPool();
 	const client = await pool.connect();
-	const pgChannel = `a2a_msg_${agent}`;
+	const pgChannel = agentNotifyChannel(agent);
 
 	try {
 		await client.query(`LISTEN "${pgChannel}"`);

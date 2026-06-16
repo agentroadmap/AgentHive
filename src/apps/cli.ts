@@ -17,6 +17,7 @@ import {
 import { computeSequences } from "../core/proposal/sequences.ts";
 import { loadStateNames, RfcStates } from "../core/workflow/state-names.ts";
 import { getPool, query as pgQuery } from "../infra/postgres/pool.ts";
+import { agentNotifyChannel } from "../infra/messaging/a2a-access-control.ts";
 import {
 	DEFAULT_CLAIM_DURATION_MINUTES,
 	DEFAULT_DIRECTORIES,
@@ -5526,7 +5527,7 @@ agentsCmd
 		}
 
 		// Wait for reply via pg LISTEN on our own DM channel
-		const pgChannel = `a2a_msg_${fromAgent}`;
+		const pgChannel = agentNotifyChannel(fromAgent);
 		const listenClient = await pool.connect();
 		await listenClient.query(`LISTEN "${pgChannel}"`);
 

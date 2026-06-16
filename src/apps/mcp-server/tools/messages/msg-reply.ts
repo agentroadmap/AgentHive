@@ -18,6 +18,7 @@ import {
 } from "../../../../infra/messaging/identity.ts";
 import { getPool, query } from "../../../../postgres/pool.ts";
 import type { CallToolResult } from "../../types.ts";
+import { agentNotifyChannel } from "../../../../infra/messaging/a2a-access-control.ts";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
 	return {
@@ -136,7 +137,7 @@ export async function handleMsgReply(
 		const client = await pool.connect();
 		try {
 			await client.query(`SELECT pg_notify($1, $2)`, [
-				`a2a_msg_${recipientAgent}`,
+				agentNotifyChannel(recipientAgent),
 				notifyPayload,
 			]);
 		} finally {

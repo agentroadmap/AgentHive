@@ -74,6 +74,7 @@ import {
 	resumeAgencyOperator,
 	retireAgencyOperator,
 } from "../../core/orchestration/resolvers/agency-resolver.ts";
+import { agentNotifyChannel } from "../../infra/messaging/a2a-access-control.ts";
 
 // Regex pattern to match any prefix (letters followed by dash)
 const PREFIX_PATTERN = /^[a-zA-Z]+-/i;
@@ -5660,7 +5661,7 @@ export class RoadmapServer {
 		// Close notify relay client
 		if (this._operatorNotifyClient) {
 			try {
-				await this._operatorNotifyClient.query(`UNLISTEN "a2a_msg_operator"`);
+				await this._operatorNotifyClient.query(`UNLISTEN "${agentNotifyChannel('operator')}"`);
 			} catch {}
 			try {
 				await this._operatorNotifyClient.end();
@@ -5677,10 +5678,10 @@ export class RoadmapServer {
 			const { Client } = await import("pg");
 			const notifyClient = new Client({ connectionString: process.env.DATABASE_URL });
 			await notifyClient.connect();
-			await notifyClient.query(`LISTEN "a2a_msg_operator"`);
+			await notifyClient.query(`LISTEN "${agentNotifyChannel('operator')}"`);
 
 			notifyClient.on("notification", (msg) => {
-				if (msg.channel !== "a2a_msg_operator") return;
+				if (msg.channel !== agentNotifyChannel('operator')) return;
 				try {
 					const payload = JSON.parse(msg.payload ?? "{}");
 					const frame = `event: a2a_message\ndata: ${JSON.stringify(payload)}\n\n`;
