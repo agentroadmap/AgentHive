@@ -19,9 +19,29 @@
  */
 
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, delimiter } from "node:path";
 import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 import { query } from "../../postgres/pool.ts";
+
+// Resolve jiti/test deps from THIS process's installation so a worktree without
+// its own node_modules still runs the re-execution (a missing jiti would let a
+// failing test exit 0 during --import startup → a false "still passing").
+const SELF_NODE_MODULES = resolve(process.cwd(), "node_modules");
+
+// Resolve `jiti/register` to an ABSOLUTE path once. `node --import jiti/register`
+// resolves the bare specifier from the spawn cwd; a worktree without jiti makes
+// the --import fail and the process exit 0 BEFORE the test runs (false pass). An
+// absolute path is cwd-independent. Falls back to the bare specifier.
+function resolveJitiRegister(): string {
+	try {
+		const req = createRequire(import.meta.url);
+		return req.resolve("jiti/register");
+	} catch {
+		return "jiti/register";
+	}
+}
+const JITI_REGISTER = resolveJitiRegister();
 
 export interface RevalidationOutcome {
 	proposalId: number;
@@ -49,10 +69,22 @@ function runCommand(
 ): Promise<{ exitCode: number | null; stderr: string }> {
 	return new Promise((res) => {
 		const [cmd, ...args] = argv;
+		// Strip the parent's test-runner context so a spawned `node --test` exits
+		// with its OWN status instead of reporting into our TAP stream (which would
+		// make a failing re-run exit 0 → false "still passing").
+		const childEnv = { ...process.env } as Record<string, string | undefined>;
+		delete childEnv.NODE_TEST_CONTEXT;
+		delete childEnv.NODE_OPTIONS;
 		const child = spawn(cmd, args, {
 			cwd,
 			stdio: ["ignore", "pipe", "pipe"],
-			env: { ...process.env, CI: "true" },
+			env: {
+				...childEnv,
+				CI: "true",
+				NODE_PATH: [SELF_NODE_MODULES, process.env.NODE_PATH]
+					.filter(Boolean)
+					.join(delimiter),
+			},
 		});
 		let stderr = "";
 		child.stderr?.on("data", (d: Buffer) => {
@@ -111,7 +143,7 @@ export async function revalidateProposalAcs(
 		if (category === "behavioral/test" && details?.test_file) {
 			outcome.checked++;
 			const result = await runCommand(
-				["node", "--import", "jiti/register", "--test", String(details.test_file)],
+				["node", "--import", JITI_REGISTER, "--test", String(details.test_file)],
 				repoRoot,
 				timeoutMs,
 			);

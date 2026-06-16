@@ -70,14 +70,21 @@ export async function isInvariantEnabled(): Promise<boolean> {
 	}
 }
 
-/** Resolve the verifier's agency_id from agent_registry (NULL if unresolved). */
+/**
+ * Resolve the verifier's agency TEXT identity (NULL if unresolved).
+ * agent_registry.agency_id is a BIGINT self-reference to the agency's own
+ * registry row, so we self-join to get the agency's text agent_identity, which
+ * is what squad_dispatch.agency_identity stores.
+ */
 async function resolveVerifierAgency(verifier: string): Promise<string | null> {
-	const { rows } = await query<{ agency_id: string | null }>(
-		`SELECT agency_id FROM roadmap_workforce.agent_registry
-		  WHERE agent_identity = $1 LIMIT 1`,
+	const { rows } = await query<{ agency_identity: string | null }>(
+		`SELECT ag.agent_identity AS agency_identity
+		   FROM roadmap_workforce.agent_registry vr
+		   JOIN roadmap_workforce.agent_registry ag ON ag.id = vr.agency_id
+		  WHERE vr.agent_identity = $1 LIMIT 1`,
 		[verifier],
 	);
-	return rows[0]?.agency_id ?? null;
+	return rows[0]?.agency_identity ?? null;
 }
 
 /** Resolve the proposal's builder agencies (build-role dispatch). */

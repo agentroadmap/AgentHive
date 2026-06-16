@@ -138,12 +138,19 @@ COMMENT ON FUNCTION roadmap_proposal.fn_gate_ac_invariant_enabled() IS
 -- ===========================================================================
 -- STEP 1: verifier-independence resolver view (additive, no enforcement)
 -- ===========================================================================
--- Per AC PASS: resolve the verifier's agency (agent_registry.agency_id) and the
--- proposal's builder agencies (squad_dispatch.agency_identity where
--- dispatch_role in build roles). verifier_is_independent = the verifier's agency
--- is NOT among the builder agencies AND is resolvable. When the verifier agency
--- cannot be resolved (NULL), verifier_is_independent is NULL (unknown) — callers
--- must treat NULL as "cannot prove independence", never as "independent".
+-- IMPORTANT data-shape note (verified live 2026-06-16):
+--   agent_registry.agency_id is a BIGINT self-reference to another
+--   agent_registry row (the agency's own registry row) — NOT a text identity.
+--   To compare against squad_dispatch.agency_identity (TEXT), we resolve the
+--   verifier's agency to its TEXT identity via the self-join
+--     verifier.agency_id  →  agency_row.id  →  agency_row.agent_identity.
+--
+-- Per AC PASS: resolve the verifier's agency text-identity and the proposal's
+-- builder agencies (squad_dispatch.agency_identity where dispatch_role in build
+-- roles). verifier_is_independent = verifier agency is resolvable AND NOT among
+-- the builder agencies. When the verifier agency cannot be resolved, the result
+-- is NULL (unknown) — callers must treat NULL as "cannot prove independence",
+-- never as "independent".
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE VIEW roadmap_proposal.v_ac_verifier_independence AS
 WITH builder_agencies AS (
@@ -158,7 +165,7 @@ SELECT
     ac.item_number,
     ac.status,
     ac.verified_by,
-    vr.agency_id                        AS verifier_agency_id,
+    ag.agent_identity                   AS verifier_agency_identity,
     -- builder agencies for this proposal as an array (may be empty)
     COALESCE(
         (SELECT array_agg(ba.agency_identity)
@@ -168,22 +175,25 @@ SELECT
     )                                    AS builder_agencies,
     CASE
         -- verifier agency unresolved → independence UNKNOWN (NULL).
-        WHEN vr.agency_id IS NULL THEN NULL
+        WHEN ag.agent_identity IS NULL THEN NULL
         -- verifier agency is one of the proposal's builder agencies → NOT independent.
         WHEN EXISTS (
             SELECT 1 FROM builder_agencies ba
              WHERE ba.proposal_id = ac.proposal_id
-               AND ba.agency_identity = vr.agency_id
+               AND ba.agency_identity = ag.agent_identity
         ) THEN false
         ELSE true
     END                                  AS verifier_is_independent
 FROM roadmap_proposal.proposal_acceptance_criteria ac
 LEFT JOIN roadmap_workforce.agent_registry vr
        ON vr.agent_identity = ac.verified_by
+LEFT JOIN roadmap_workforce.agent_registry ag
+       ON ag.id = vr.agency_id
 WHERE ac.status = 'pass';
 
 COMMENT ON VIEW roadmap_proposal.v_ac_verifier_independence IS
-  'P3563 Step 1: per AC-pass, resolves verifier agency vs proposal builder agencies. '
+  'P3563 Step 1: per AC-pass, resolves verifier agency (via agent_registry.agency_id '
+  'bigint self-join → agency text identity) vs proposal builder agencies. '
   'verifier_is_independent: true=independent, false=builder-agency self-cert, '
   'NULL=verifier agency unresolvable (treat as "cannot prove independence"). '
   'builder agencies = squad_dispatch.agency_identity WHERE dispatch_role IN '
@@ -208,9 +218,11 @@ COMMENT ON VIEW roadmap_proposal.v_ac_verifier_independence IS
 --
 -- The mapping below is keyed on the verifier being self-present as an agency in
 -- squad_dispatch (NOT a string-suffix rule), so it is data-driven and safe.
+-- agent_registry.agency_id is a BIGINT self-reference, so an agency's agency is
+-- ITSELF: we set agency_id = the row's own id for these self-agency identities.
 -- ---------------------------------------------------------------------------
 UPDATE roadmap_workforce.agent_registry ar
-   SET agency_id = ar.agent_identity
+   SET agency_id = ar.id
  WHERE ar.agency_id IS NULL
    AND EXISTS (
        SELECT 1 FROM roadmap_workforce.squad_dispatch sd
@@ -525,14 +537,14 @@ BEGIN
             'P3563/P3565: master switch for the gate acceptance-criteria invariant on terminal gates. Default OFF.',
             'did:agenthive:system', 'did:agenthive:system'
         )
-        ON CONFLICT (flag_name, scope) DO NOTHING;
+        ON CONFLICT (flag_name) DO NOTHING;
     ELSE
         INSERT INTO core.runtime_flag (flag_name, scope, value_jsonb, description)
         VALUES (
             'AGENTHIVE_GATE_AC_INVARIANT_ENABLED', 'global', 'false'::jsonb,
             'P3563/P3565: master switch for the gate acceptance-criteria invariant on terminal gates. Default OFF.'
         )
-        ON CONFLICT (flag_name, scope) DO NOTHING;
+        ON CONFLICT (flag_name) DO NOTHING;
     END IF;
 END $seed$;
 
