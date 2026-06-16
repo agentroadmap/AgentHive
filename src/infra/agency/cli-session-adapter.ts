@@ -104,6 +104,14 @@ export interface CliAdapterConfig {
     /** CLI kind identifier stored in agent_registry.agent_cli. */
     cliKind: CliKind;
     /**
+     * AC-1 hook event name (session-start / registration).
+     * Claude Code: "SessionStart"
+     * Codex: "SessionStart" (hooks.json)
+     * Gemini: "session_start" (conceptual)
+     * Hook script: scripts/hooks/p1456-session-start.sh
+     */
+    sessionStartHookEvent: string;
+    /**
      * AC-8 hook event name (ambient-receive).
      * Claude Code: "UserPromptSubmit"
      * Codex: "UserPromptSubmit"
@@ -134,6 +142,7 @@ export interface CliAdapterConfig {
 export const CLI_ADAPTER_CONFIGS: Record<CliKind, CliAdapterConfig> = {
     "claude-code": {
         cliKind: "claude-code",
+        sessionStartHookEvent: "SessionStart",
         ambientReceiveHookEvent: "UserPromptSubmit",
         solicitedWakeHookEvent: "Stop",
         injectionMode: "stdin-prepend",
@@ -141,6 +150,7 @@ export const CLI_ADAPTER_CONFIGS: Record<CliKind, CliAdapterConfig> = {
     },
     codex: {
         cliKind: "codex",
+        sessionStartHookEvent: "SessionStart",
         ambientReceiveHookEvent: "UserPromptSubmit",
         solicitedWakeHookEvent: "AfterAgent",
         injectionMode: "stdin-prepend",
@@ -148,6 +158,7 @@ export const CLI_ADAPTER_CONFIGS: Record<CliKind, CliAdapterConfig> = {
     },
     gemini: {
         cliKind: "gemini",
+        sessionStartHookEvent: "session_start",
         ambientReceiveHookEvent: "input_received",
         solicitedWakeHookEvent: "turn_complete",
         injectionMode: "stdin-prepend",
