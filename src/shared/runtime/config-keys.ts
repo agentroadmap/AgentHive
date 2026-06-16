@@ -10,7 +10,9 @@
  * This is the single source of truth for all configuration keys used in AgentHive.
  */
 
-import type { ConfigKey } from "./config";
+import type { ConfigKey, ConfigKeyCategory } from "./config";
+
+export type { ConfigKeyCategory };
 
 /**
  * Secret keys: env only, never from yaml/DB. PGPASSWORD, OAUTH_CLIENT_SECRET, etc.
@@ -685,6 +687,7 @@ export const FlagKeys = {
 	USE_OFFER_DISPATCH: {
 		name: "USE_OFFER_DISPATCH",
 		class: "flag" as const,
+		category: "orchestration" as ConfigKeyCategory,
 		parse: (v: string) => {
 			// Parse JSON or boolean string from JSONB value_jsonb
 			try {
@@ -703,6 +706,7 @@ export const FlagKeys = {
 	ENABLE_MULTI_TENANT: {
 		name: "ENABLE_MULTI_TENANT",
 		class: "flag" as const,
+		category: "feature_flag" as ConfigKeyCategory,
 		parse: (v: string) => {
 			try {
 				return JSON.parse(v) === true;
@@ -720,6 +724,7 @@ export const FlagKeys = {
 	ENABLE_AUDIT_LOG: {
 		name: "ENABLE_AUDIT_LOG",
 		class: "flag" as const,
+		category: "feature_flag" as ConfigKeyCategory,
 		parse: (v: string) => {
 			try {
 				return JSON.parse(v) === true;
@@ -743,6 +748,7 @@ export const FlagKeys = {
 	A2A_HOST_LISTEN_REFRESH_MS: {
 		name: "A2A_HOST_LISTEN_REFRESH_MS",
 		class: "flag" as const,
+		category: "a2a" as ConfigKeyCategory,
 		parse: (v: string) => {
 			const parsed = Number(JSON.parse(v));
 			if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -760,6 +766,7 @@ export const FlagKeys = {
 	A2A_HOST_PG_RECONNECT_MS: {
 		name: "A2A_HOST_PG_RECONNECT_MS",
 		class: "flag" as const,
+		category: "a2a" as ConfigKeyCategory,
 		parse: (v: string) => {
 			const parsed = Number(JSON.parse(v));
 			if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -777,6 +784,7 @@ export const FlagKeys = {
 	A2A_HOST_SHUTDOWN_TIMEOUT_MS: {
 		name: "A2A_HOST_SHUTDOWN_TIMEOUT_MS",
 		class: "flag" as const,
+		category: "a2a" as ConfigKeyCategory,
 		parse: (v: string) => {
 			const parsed = Number(JSON.parse(v));
 			if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -794,6 +802,7 @@ export const FlagKeys = {
 	A2A_HOST_PRESENCE_REFRESH_MS: {
 		name: "A2A_HOST_PRESENCE_REFRESH_MS",
 		class: "flag" as const,
+		category: "a2a" as ConfigKeyCategory,
 		parse: (v: string) => {
 			const parsed = Number(JSON.parse(v));
 			if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -816,6 +825,7 @@ export const FlagKeys = {
 	LIAISON_CONTEXT_REFRESH_MS: {
 		name: "LIAISON_CONTEXT_REFRESH_MS",
 		class: "flag" as const,
+		category: "a2a" as ConfigKeyCategory,
 		parse: (v: string) => {
 			const parsed = Number(JSON.parse(v));
 			if (!Number.isFinite(parsed) || parsed < 1000 || parsed > 600_000) {
@@ -836,6 +846,7 @@ export const FlagKeys = {
 	ORCHESTRATOR_SCAN_BATCH_LIMIT: {
 		name: "ORCHESTRATOR_SCAN_BATCH_LIMIT",
 		class: "flag" as const,
+		category: "orchestration" as ConfigKeyCategory,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n)) throw new Error("invalid number");
@@ -852,6 +863,7 @@ export const FlagKeys = {
 	ORCHESTRATOR_STALL_THRESHOLD_HOURS: {
 		name: "ORCHESTRATOR_STALL_THRESHOLD_HOURS",
 		class: "flag" as const,
+		category: "orchestration" as ConfigKeyCategory,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n)) throw new Error("invalid number");
@@ -868,6 +880,7 @@ export const FlagKeys = {
 	ORCHESTRATOR_STALL_BATCH_LIMIT: {
 		name: "ORCHESTRATOR_STALL_BATCH_LIMIT",
 		class: "flag" as const,
+		category: "orchestration" as ConfigKeyCategory,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n)) throw new Error("invalid number");
@@ -884,6 +897,7 @@ export const FlagKeys = {
 	ORCHESTRATOR_OFFER_REAP_MS: {
 		name: "ORCHESTRATOR_OFFER_REAP_MS",
 		class: "flag" as const,
+		category: "orchestration" as ConfigKeyCategory,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n)) throw new Error("invalid number");
@@ -900,6 +914,7 @@ export const FlagKeys = {
 	ORCHESTRATOR_POKE_IDLE_MIN: {
 		name: "ORCHESTRATOR_POKE_IDLE_MIN",
 		class: "flag" as const,
+		category: "orchestration" as ConfigKeyCategory,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n)) throw new Error("invalid number");
@@ -916,6 +931,7 @@ export const FlagKeys = {
 	ORCHESTRATOR_POKE_STORM_CAP: {
 		name: "ORCHESTRATOR_POKE_STORM_CAP",
 		class: "flag" as const,
+		category: "orchestration" as ConfigKeyCategory,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n)) throw new Error("invalid number");
@@ -938,6 +954,7 @@ export const FlagKeys = {
 	ORCHESTRATOR_MAX_INFLIGHT_OFFERS: {
 		name: "ORCHESTRATOR_MAX_INFLIGHT_OFFERS",
 		class: "flag" as const,
+		category: "orchestration" as ConfigKeyCategory,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n)) throw new Error("invalid number");
@@ -954,6 +971,7 @@ export const FlagKeys = {
 	ORCHESTRATOR_SHUTDOWN_DRAIN_MS: {
 		name: "ORCHESTRATOR_SHUTDOWN_DRAIN_MS",
 		class: "flag" as const,
+		category: "orchestration" as ConfigKeyCategory,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n)) throw new Error("invalid number");
@@ -970,6 +988,7 @@ export const FlagKeys = {
 	ORCHESTRATOR_IMPLICIT_GATE_POLL_MS: {
 		name: "ORCHESTRATOR_IMPLICIT_GATE_POLL_MS",
 		class: "flag" as const,
+		category: "orchestration" as ConfigKeyCategory,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n)) throw new Error("invalid number");
@@ -986,6 +1005,7 @@ export const FlagKeys = {
 	ORCHESTRATOR_ENHANCER_REVISE_MS: {
 		name: "ORCHESTRATOR_ENHANCER_REVISE_MS",
 		class: "flag" as const,
+		category: "orchestration" as ConfigKeyCategory,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n)) throw new Error("invalid number");
@@ -1002,6 +1022,7 @@ export const FlagKeys = {
 	ORCHESTRATOR_RECONCILER_MS: {
 		name: "ORCHESTRATOR_RECONCILER_MS",
 		class: "flag" as const,
+		category: "orchestration" as ConfigKeyCategory,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n)) throw new Error("invalid number");
@@ -1018,6 +1039,7 @@ export const FlagKeys = {
 	ORCHESTRATOR_STALE_ROW_REAPER_MS: {
 		name: "ORCHESTRATOR_STALE_ROW_REAPER_MS",
 		class: "flag" as const,
+		category: "orchestration" as ConfigKeyCategory,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n)) throw new Error("invalid number");
@@ -1034,6 +1056,7 @@ export const FlagKeys = {
 	ORCHESTRATOR_STUCK_WORKER_MS: {
 		name: "ORCHESTRATOR_STUCK_WORKER_MS",
 		class: "flag" as const,
+		category: "orchestration" as ConfigKeyCategory,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n)) throw new Error("invalid number");
@@ -1050,6 +1073,7 @@ export const FlagKeys = {
 	ORCHESTRATOR_HEARTBEAT_MS: {
 		name: "ORCHESTRATOR_HEARTBEAT_MS",
 		class: "flag" as const,
+		category: "orchestration" as ConfigKeyCategory,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n)) throw new Error("invalid number");
@@ -1066,6 +1090,7 @@ export const FlagKeys = {
 	ORCHESTRATOR_OFFER_CLAIM_ENABLED: {
 		name: "ORCHESTRATOR_OFFER_CLAIM_ENABLED",
 		class: "flag" as const,
+		category: "orchestration" as ConfigKeyCategory,
 		parse: (v: string) => {
 			try {
 				return JSON.parse(v) === true;
@@ -1087,6 +1112,7 @@ export const FlagKeys = {
 	AGENCY_OFFER_CLAIM_ENABLED: {
 		name: "AGENCY_OFFER_CLAIM_ENABLED",
 		class: "flag" as const,
+		category: "agency" as ConfigKeyCategory,
 		parse: (v: string) => {
 			try {
 				return JSON.parse(v) === true;
@@ -1109,6 +1135,7 @@ export const FlagKeys = {
 	PAUSE_FAILURE_THRESHOLD: {
 		name: "PAUSE_FAILURE_THRESHOLD",
 		class: "flag" as const,
+		category: "orchestration" as ConfigKeyCategory,
 		parse: (v: string) => {
 			const parsed = Number(JSON.parse(v));
 			if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -1126,6 +1153,7 @@ export const FlagKeys = {
 	PAUSE_BASE_BACKOFF_MS: {
 		name: "PAUSE_BASE_BACKOFF_MS",
 		class: "flag" as const,
+		category: "orchestration" as ConfigKeyCategory,
 		parse: (v: string) => {
 			const parsed = Number(JSON.parse(v));
 			if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -1143,6 +1171,7 @@ export const FlagKeys = {
 	PAUSE_BACKOFF_MULTIPLIER: {
 		name: "PAUSE_BACKOFF_MULTIPLIER",
 		class: "flag" as const,
+		category: "orchestration" as ConfigKeyCategory,
 		parse: (v: string) => {
 			const parsed = Number(JSON.parse(v));
 			if (!Number.isFinite(parsed) || parsed < 1) {
@@ -1160,6 +1189,7 @@ export const FlagKeys = {
 	PAUSE_MAX_BACKOFF_MS: {
 		name: "PAUSE_MAX_BACKOFF_MS",
 		class: "flag" as const,
+		category: "orchestration" as ConfigKeyCategory,
 		parse: (v: string) => {
 			const parsed = Number(JSON.parse(v));
 			if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -1179,6 +1209,7 @@ export const FlagKeys = {
 	SPAWN_PROVIDER_MAX_ATTEMPTS: {
 		name: "SPAWN_PROVIDER_MAX_ATTEMPTS",
 		class: "flag" as const,
+		category: "agency" as ConfigKeyCategory,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n) || n <= 0) {
@@ -1203,6 +1234,7 @@ export const FlagKeys = {
 	TUI_COCKPIT_LAYOUT: {
 		name: "AGENTHIVE_COCKPIT_LAYOUT",
 		class: "flag" as const,
+		category: "ui" as ConfigKeyCategory,
 		parse: (v: string) => {
 			// Accept JSON-encoded string from the DB ("\"stacked\"") and a
 			// bare env value (stacked). JSON.parse handles both.

@@ -35,11 +35,30 @@ export type ConfigClass =
 	| "flag"
 	| "tenant_dsn";
 
+/**
+ * Closed taxonomy for grouping runtime flags by subsystem.
+ * Mirrors the CHECK constraint on core.runtime_flag.category.
+ */
+export type ConfigKeyCategory =
+	| "orchestration"
+	| "a2a"
+	| "agency"
+	| "feature_flag"
+	| "budget"
+	| "billing"
+	| "ui"
+	| "security"
+	| "model_routing"
+	| "system"
+	| "uncategorized";
+
 export interface ConfigKey<T> {
 	name: string;
 	class: ConfigClass;
 	parse: (raw: string) => T;
 	required: boolean;
+	/** Subsystem category for grouping in TUI/web UI. Required for 'flag' keys. */
+	category?: ConfigKeyCategory;
 	description?: string;
 	yamlPath?: string;
 	/**

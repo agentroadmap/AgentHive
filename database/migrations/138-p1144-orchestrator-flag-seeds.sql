@@ -21,6 +21,6 @@ VALUES
     ('ORCHESTRATOR_STUCK_WORKER_MS',      '60000',  'global', 'active', 'Stuck-worker watchdog interval (ms)'),
     ('ORCHESTRATOR_HEARTBEAT_MS',         '60000',  'global', 'active', 'Orchestrator heartbeat interval (ms)'),
     ('ORCHESTRATOR_OFFER_CLAIM_ENABLED',  'true',   'global', 'active', 'Kill switch: false disables offer-claim loop')
-ON CONFLICT (flag_name) DO NOTHING;
+ON CONFLICT (flag_name, scope) DO NOTHING;
 
 COMMIT;
