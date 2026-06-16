@@ -1427,6 +1427,11 @@ export async function recordGateDecision(args: {
 	authority_agent?: string;
 	agent_run_id?: string;
 	ac_verification?: Record<string, unknown>;
+	// P1391: operator token for the ELEVATED reject verdict (human-operator path,
+	// verified via P3508 authorizeOperatorByToken). Ignored when the flag is OFF.
+	operator_token?: string;
+	// P1391 AC-8: optional project scope for the operator-token check (P3508 AC-5).
+	target_project_id?: number;
 }): Promise<CallToolResult> {
 	// Resolve the canonical identifier from any of the three alias forms.
 	const rawIdentifier = args.id ?? args.proposal_id ?? args.display_id;
@@ -1438,10 +1443,20 @@ export async function recordGateDecision(args: {
 			}],
 		};
 	}
-	const VALID_DECISIONS = ["advance", "hold", "reject", "waive", "escalate"];
+	// P1391 (AC-V3, A6): vocab is flag-gated. Flag OFF reproduces the legacy
+	// acceptance EXACTLY (so merging is safe pre-enable); flag ON restricts NEW
+	// writes to the canonical three-verdict vocabulary.
+	const { isGateAuthorityEnabled } = await import("../../../../core/gate/gate-authority.ts");
+	const gateAuthorityOn = await isGateAuthorityEnabled().catch(() => false);
+	const LEGACY_DECISIONS = ["advance", "hold", "reject", "waive", "escalate"];
+	const V3_DECISIONS = ["advance", "request_for_change", "reject"];
+	const VALID_DECISIONS = gateAuthorityOn ? V3_DECISIONS : LEGACY_DECISIONS;
 	if (!VALID_DECISIONS.includes(args.decision)) {
 		return errorResult(
-			`Invalid decision '${args.decision}'. Must be one of: ${VALID_DECISIONS.join(", ")}`,
+			`Invalid decision '${args.decision}'. Must be one of: ${VALID_DECISIONS.join(", ")}` +
+				(gateAuthorityOn
+					? ` (P1391 three-verdict vocab; flag AGENTHIVE_GATE_AUTHORITY_ENABLED is ON).`
+					: ``),
 			"decision_invalid",
 		);
 	}
@@ -1466,6 +1481,29 @@ export async function recordGateDecision(args: {
 			return { content: [{ type: "text", text: `Proposal ${rawIdentifier} not found.` }] };
 		}
 		const { status: fromState, maturity, workflow_name: proposalWorkflow } = propRows[0];
+
+		// P1391 (AC-A1/A4/A9/A10/A11/A13): the `reject` verdict is a TERMINAL
+		// closure (→ obsolete) and is ELEVATED. Authorize BEFORE writing the
+		// gate_decision_log row, so an unauthorized reject leaves NO trace of a
+		// destructive intent and fails closed. Only runs when the flag is ON;
+		// when OFF, reject is a legacy no-op verdict (no maturity effect — the
+		// destructive path is unreachable without the guard).
+		const decidedByActor = args.decided_by ?? "mcp";
+		if (gateAuthorityOn && args.decision === "reject") {
+			const { authorizeRejectOrObsolete } = await import(
+				"../../../../core/gate/gate-authority.ts"
+			);
+			const authz = await authorizeRejectOrObsolete({
+				action: "gate.reject",
+				numericProposalId: proposalId,
+				actor: decidedByActor,
+				operatorToken: args.operator_token ?? null,
+				targetProjectId: args.target_project_id,
+			});
+			if (!authz.allowed) {
+				return errorResult(authz.reason ?? "reject not authorized", authz.code ?? "reject_unauthorized");
+			}
+		}
 
 		// Resolve the forward gate target so the fn_apply_gate_advance trigger
 		// actually advances status on an 'advance' decision.
@@ -1629,6 +1667,32 @@ export async function recordGateDecision(args: {
 			],
 		);
 
+		// P1391 (AC-V1/V2): when the flag is ON, the non-advance verdicts carry a
+		// maturity effect that mirrors the release-trigger CASE (migration 290):
+		//   request_for_change → 'new'      (send back for ENHANCEMENT; status unchanged)
+		//   reject             → 'obsolete' (terminal close; status unchanged)
+		// We set maturity directly here — the canonical mapping ALSO lives in the
+		// release trigger so a lease release with the matching reason lands the same
+		// way. The reject path was already authorized above (fail-closed).
+		let verdictNote = "";
+		if (gateAuthorityOn && args.decision === "request_for_change") {
+			await query(
+				`UPDATE roadmap_proposal.proposal
+				    SET maturity = 'new'
+				  WHERE id = $1 AND maturity <> 'obsolete'`,
+				[proposalId],
+			);
+			verdictNote = ` → maturity set to 'new' (sent back for enhancement; status unchanged).`;
+		} else if (gateAuthorityOn && args.decision === "reject") {
+			await query(
+				`UPDATE roadmap_proposal.proposal
+				    SET maturity = 'obsolete'
+				  WHERE id = $1`,
+				[proposalId],
+			);
+			verdictNote = ` → maturity set to 'obsolete' (REJECTED; status unchanged). [authorized]`;
+		}
+
 		// The fn_apply_gate_advance trigger fired AFTER INSERT in the same
 		// transaction; re-read the status so the message reflects reality (the
 		// trigger no-ops on state drift, so toState is the request, not a promise).
@@ -1654,7 +1718,7 @@ export async function recordGateDecision(args: {
 		return {
 			content: [{
 				type: "text",
-				text: `✅ Gate decision recorded: id=${rows[0].id} proposal=${rawIdentifier} gate=${args.gate} decision=${args.decision}${advanceNote}`,
+				text: `✅ Gate decision recorded: id=${rows[0].id} proposal=${rawIdentifier} gate=${args.gate} decision=${args.decision}${advanceNote}${verdictNote}`,
 			}],
 		};
 	} catch (err) {

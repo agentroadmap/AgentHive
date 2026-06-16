@@ -739,7 +739,14 @@ export class PgProposalHandlers {
 		display_id?: string;
 		maturity: string;
 		agent?: string;
+		author?: string;
+		actor?: string;
 		reason?: string;
+		// P1391 (AC-A2): operator token for the ELEVATED obsolete maturity
+		// (human-operator path; verified via P3508 authorizeOperatorByToken).
+		// Ignored when AGENTHIVE_GATE_AUTHORITY_ENABLED is OFF.
+		operator_token?: string;
+		target_project_id?: number;
 	}): Promise<CallToolResult> {
 		try {
 			const idArg = args.id ?? args.proposal_id ?? args.display_id;
@@ -868,6 +875,42 @@ export class PgProposalHandlers {
 						},
 					],
 				};
+			}
+
+			// P1391 (AC-A2/A4/A11/A13): setting maturity='obsolete' is the symmetric
+			// terminal closure of the `reject` gate verdict and is ELEVATED. Gate it
+			// with the SAME authority module — a human operator_token (exempt) or an
+			// active authority_grant (frontier + structured-reference bars). Only
+			// when the flag is ON; when OFF this path is unchanged (no guard), but the
+			// gate `reject` verdict cannot reach obsolete either, so no NEW destructive
+			// close happens through the flag-OFF code.
+			const { isGateAuthorityEnabled } = await import(
+				"../../../../core/gate/gate-authority.ts"
+			);
+			if (
+				args.maturity === Maturity.OBSOLETE &&
+				(await isGateAuthorityEnabled().catch(() => false))
+			) {
+				const { authorizeRejectOrObsolete } = await import(
+					"../../../../core/gate/gate-authority.ts"
+				);
+				const authz = await authorizeRejectOrObsolete({
+					action: "proposal.obsolete",
+					numericProposalId: id,
+					actor: maturityActor,
+					operatorToken: args.operator_token ?? null,
+					targetProjectId: args.target_project_id,
+				});
+				if (!authz.allowed) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `❌ ${authz.reason ?? "obsolete not authorized"}`,
+							},
+						],
+					};
+				}
 			}
 
 			const updated = await pg.setMaturity(
