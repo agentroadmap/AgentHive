@@ -180,3 +180,118 @@ export async function checkPillar3Origination(
 			`originate a content pass.`,
 	};
 }
+
+// ─── P3563 AC-7 (Pillar-4): waiver authority ────────────────────────────────
+
+/** Result of a waiver-authority check at verify_ac time. */
+export interface WaiverAuthorityResult {
+	/** true ⇒ refuse the waive. */
+	blocked: boolean;
+	/** Human-readable reason (when blocked). */
+	reason?: string;
+	/** Programmatic code for callers/tests. */
+	code?:
+		| "WAIVE_REASON_REQUIRED"
+		| "WAIVE_AUTHORITY_REQUIRED"
+		| "WAIVE_TOKEN_NOT_AUTHORIZED";
+	/** operator_token id when the waive was authorized (audit linkage). */
+	tokenId?: number | null;
+}
+
+/**
+ * P3563 AC-7 / Pillar-4 — waiver, not silent skip.
+ *
+ * Setting an AC to status='waived' must NOT be a silent skip. When the invariant
+ * flag is ON, a waive is refused unless BOTH hold:
+ *   (a) a non-empty reason is supplied (verification_notes / waive_reason), AND
+ *   (b) the actor is an AUTHORIZED operator, proven via the SAME genuine,
+ *       audited operator-token path P3508/P3565 use for elevated gate actions
+ *       (authorizeOperatorByToken). We deliberately do NOT trust
+ *       agent_registry.trust_tier='authority' or the impersonable
+ *       app.agent_identity GUC here — a self-registered "authority" session must
+ *       not be able to wave away an AC. One authorization model, fail-closed.
+ *
+ * Returns {blocked:false} only when the flag is OFF (pre-P3563 behavior — any
+ * waive allowed) or when both (a) and (b) are satisfied. Any unknown /
+ * unauthorized actor or missing reason is refused.
+ *
+ * @param reason         the supplied waive reason (verification_notes/waive_reason)
+ * @param operatorToken  the operator token string (MCP arg), if any
+ * @param proposalId     resolved numeric proposal id (audit target)
+ * @param itemNumber     AC item number (audit summary)
+ * @param verifier       verified_by identity (audit summary)
+ */
+export async function checkWaiverAuthority(args: {
+	reason: string | null | undefined;
+	operatorToken: string | null | undefined;
+	proposalId: number;
+	itemNumber: number;
+	verifier: string;
+}): Promise<WaiverAuthorityResult> {
+	// Flag OFF → no-op (allow any waive), preserving pre-P3563 behavior.
+	if (!(await isInvariantEnabled())) {
+		return { blocked: false };
+	}
+
+	// (a) Non-empty reason required.
+	const reason = (args.reason ?? "").trim();
+	if (reason.length === 0) {
+		return {
+			blocked: true,
+			code: "WAIVE_REASON_REQUIRED",
+			reason:
+				`Waiving AC #${args.itemNumber} requires a non-empty reason. Supply ` +
+				`verification_notes (or waive_reason) explaining why this acceptance ` +
+				`criterion is being waived (P3563 AC-7 / Pillar-4: waiver, not silent skip).`,
+		};
+	}
+
+	// (b) Authorized actor required — genuine operator token only.
+	if (!args.operatorToken) {
+		return {
+			blocked: true,
+			code: "WAIVE_AUTHORITY_REQUIRED",
+			reason:
+				`Waiving AC #${args.itemNumber} requires an AUTHORIZED operator. No ` +
+				`operator_token supplied. A waive is an operator-approved skip — pass a ` +
+				`valid operator_token (the same P3508 token path used for elevated gate ` +
+				`actions). Self-asserted agency 'authority' is NOT sufficient ` +
+				`(P3563 AC-7 / Pillar-4, fail-closed).`,
+		};
+	}
+
+	const { authorizeOperatorByToken } = await import(
+		"../../apps/server/operator-auth.ts"
+	);
+	const outcome = await authorizeOperatorByToken(args.operatorToken, {
+		action: "verify_ac_waive",
+		targetKind: "proposal",
+		targetIdentity: String(args.proposalId),
+		requestSummary: {
+			item_number: args.itemNumber,
+			verifier: args.verifier,
+			reason,
+		},
+	}).catch((err) => ({
+		decision: "deny" as const,
+		operatorName: null,
+		tokenId: null,
+		failureReason: (err as Error)?.message ?? "authorize error",
+		httpStatus: 500,
+	}));
+
+	if (outcome.decision !== "allow") {
+		return {
+			blocked: true,
+			code: "WAIVE_TOKEN_NOT_AUTHORIZED",
+			tokenId: outcome.tokenId ?? null,
+			reason:
+				`Waiving AC #${args.itemNumber} refused: operator_token not authorized ` +
+				`(decision='${outcome.decision}'${outcome.failureReason ? `, ${outcome.failureReason}` : ""}). ` +
+				`The token must be a valid, unrevoked operator_token whose allowed_actions ` +
+				`permit 'verify_ac_waive' (P3563 AC-7 / Pillar-4, fail-closed).`,
+		};
+	}
+
+	return { blocked: false, tokenId: outcome.tokenId ?? null };
+}
