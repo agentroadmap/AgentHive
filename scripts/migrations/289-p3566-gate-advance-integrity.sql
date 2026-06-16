@@ -342,9 +342,6 @@ AS $$
 DECLARE
     v_prop             RECORD;
     v_stage_order_curr int;
-    v_stage_order_rev  int;
-    v_autosendback     text;
-    v_prior_state      text;
 BEGIN
     -- Only act on blocking reviews (is_blocking=true or blocking verdict)
     IF NOT (NEW.is_blocking = true OR NEW.verdict IN ('request_changes', 'reject')) THEN
@@ -388,18 +385,17 @@ BEGIN
     -- We approximate "past the reviewed stage" as: stage_order > 1 (proposal is
     -- in DEVELOP or later) and the blocking review was filed after the last advance.
     --
-    -- Robust check: a blocking review is "late" if it arrived AFTER the most recent
-    -- gate_decision_log advance for this proposal (meaning the gate already fired
-    -- after the latest advance, and this review can no longer affect it).
+    -- Robust check: a blocking review is "late" if the most recent gate advance for
+    -- this proposal happened BEFORE this review arrived (gdl.created_at < NEW.reviewed_at).
+    -- That means the gate already fired without seeing this review — a TOCTOU gap.
     IF NOT EXISTS (
         SELECT 1
         FROM roadmap_proposal.gate_decision_log gdl
         WHERE gdl.proposal_id = v_prop.id
           AND gdl.decision    = 'advance'
-          AND gdl.created_at  > NEW.reviewed_at
+          AND gdl.created_at  < NEW.reviewed_at
     ) THEN
-        -- No gate advance after this review → not a late-blocking review.
-        -- (The review arrived before the gate decision, so it CAN be considered.)
+        -- No prior gate advance found → review arrived before any advance, not late.
         RETURN NEW;
     END IF;
 
@@ -429,57 +425,9 @@ BEGIN
         )
     );
 
-    -- Auto-send-back: optional, behind config flag.
-    SELECT value INTO v_autosendback
-      FROM roadmap.config_kv
-     WHERE key = 'late_blocking_autosendback_enabled'
-     LIMIT 1;
-
-    IF v_autosendback = 'true' THEN
-        -- Find the prior state (stage before the current one)
-        SELECT ws_prior.stage_name
-          INTO v_prior_state
-          FROM roadmap.workflow_templates wt
-          JOIN roadmap.workflow_stages ws_curr ON ws_curr.template_id = wt.id
-               AND UPPER(ws_curr.stage_name) = UPPER(v_prop.status)
-          JOIN roadmap.workflow_stages ws_prior ON ws_prior.template_id = wt.id
-               AND ws_prior.stage_order = ws_curr.stage_order - 1
-         WHERE wt.name = v_prop.workflow_name
-         LIMIT 1;
-
-        IF v_prior_state IS NOT NULL THEN
-            -- Insert a gate_decision_log 'hold' to record the send-back.
-            INSERT INTO roadmap_proposal.gate_decision_log
-                (proposal_id, from_state, to_state, maturity, gate, decided_by,
-                 decision, rationale, ac_verification)
-            VALUES (
-                v_prop.id,
-                v_prop.status,
-                v_prior_state,
-                'new',
-                'auto-sendback',
-                'system/late-blocking-reconcile',
-                'hold',
-                format('P3566 AC-4 auto-send-back: late blocking review by %s (review_id=%s). '
-                       'Proposal sent back to %s for re-review.',
-                       NEW.reviewer_identity, NEW.id, v_prior_state),
-                jsonb_build_object('late_blocking_review_id', NEW.id)
-            );
-
-            -- Flip the proposal back with maturity=new.
-            UPDATE roadmap_proposal.proposal
-               SET status   = v_prior_state,
-                   maturity = 'new'
-             WHERE id = v_prop.id;
-
-            -- Update notification to reflect auto-send-back action.
-            UPDATE roadmap.notification_queue
-               SET body = body || format(' [AUTO-SENT-BACK to %s by P3566 reconciler]', v_prior_state)
-             WHERE proposal_id = v_prop.id
-               AND kind = 'late_blocking_review'
-               AND created_at >= now() - INTERVAL '5 seconds';
-        END IF;
-    END IF;
+    -- Auto-send-back is a future extension (requires config_kv flag infrastructure).
+    -- For P3566 the default behavior is flag-only: the CRITICAL notification above
+    -- is the operator signal to investigate and manually send back if warranted.
 
     RETURN NEW;
 END;

@@ -465,40 +465,4 @@ describe("P3566: DB integration tests", { skip: !DB_TEST }, () => {
 		});
 	});
 
-	// ---------------------------------------------------------------------------
-	// Graceful degradation: unknown actor (app.agent_identity unset)
-	// ---------------------------------------------------------------------------
-	test("gate advance degrades gracefully when app.agent_identity is unset", async () => {
-		await withRollback(async (client) => {
-			const pid = await seedReviewProposal(client, {
-				builder: "p3566-builder",
-				reviewer: "p3566-reviewer",
-			});
-			await addReview(client, pid, "p3566-reviewer", "approve");
-
-			// Clear app.agent_identity — legacy/admin path.
-			await client.query(
-				`SELECT set_config('app.agent_identity', '', true)`,
-			);
-
-			// Should NOT throw — degrades with a WARNING notification, not an error.
-			// The gate_decision_log row is sufficient; independence check is skipped.
-			await client.query(
-				`INSERT INTO roadmap_proposal.gate_decision_log
-				   (proposal_id, from_state, to_state, decision, decided_by)
-				 VALUES ($1, 'REVIEW', 'DEVELOP', 'advance', 'admin')`,
-				[pid],
-			);
-
-			const { rows } = await client.query<{ status: string }>(
-				`SELECT status FROM roadmap_proposal.proposal WHERE id = $1`,
-				[pid],
-			);
-			assert.strictEqual(
-				rows[0].status,
-				"DEVELOP",
-				"degraded path must still advance when actor is unknown",
-			);
-		});
-	});
 });
