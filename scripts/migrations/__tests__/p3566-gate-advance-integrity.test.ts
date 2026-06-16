@@ -167,8 +167,13 @@ describe("P3566: DB integration tests", { skip: !DB_TEST }, () => {
 		await client.connect();
 		try {
 			await client.query("BEGIN");
-			// Apply migration 289 inside the transaction (always rolled back)
-			await client.query(readFileSync(MIGRATION_289, "utf8"));
+			// NOTE: Migration 289 is already applied to the live DB (idempotent ledger check
+			// above confirms this). We do NOT re-apply it here because the migration SQL
+			// contains its own BEGIN/COMMIT which would commit our outer BEGIN, exit the
+			// transaction, and cause set_config(is_local=true) calls to lose their value
+			// before the next query (each query becomes its own auto-commit transaction).
+			// The functions under test (fn_guard_gate_advance, fn_actor_is_independent,
+			// fn_flag_late_blocking_review) are already live in the DB.
 			await fn(client);
 		} finally {
 			await client.query("ROLLBACK").catch(() => {});
@@ -314,7 +319,7 @@ describe("P3566: DB integration tests", { skip: !DB_TEST }, () => {
 	// ---------------------------------------------------------------------------
 	// AC-1: Independent approver required for non-terminal gates
 	// ---------------------------------------------------------------------------
-	test("AC-1: gate advance fails when only self-approve exists", async () => {
+	test("AC-1: gate advance is blocked when only self-approve exists", async () => {
 		await withRollback(async (client) => {
 			const pid = await seedReviewProposal(client, {
 				builder: "p3566-builder",
@@ -323,10 +328,33 @@ describe("P3566: DB integration tests", { skip: !DB_TEST }, () => {
 			// Builder approved their own proposal, no independent reviewer.
 			await addReview(client, pid, "p3566-builder", "approve");
 
-			await assert.rejects(
-				() => gateAdvance(client, pid, "REVIEW", "DEVELOP", "p3566-builder"),
-				/INDEPENDENT|independent/i,
-				"AC-1: gate advance must fail when no independent approver exists",
+			// fn_apply_gate_advance returns NULL silently (no exception) when AC-1 blocks;
+			// it inserts a discussion note and does NOT update proposal status.
+			await gateAdvance(client, pid, "REVIEW", "DEVELOP", "p3566-builder");
+
+			// Status must still be REVIEW — the advance was blocked.
+			const { rows: statusRows } = await client.query<{ status: string }>(
+				`SELECT status FROM roadmap_proposal.proposal WHERE id = $1`,
+				[pid],
+			);
+			assert.strictEqual(
+				statusRows[0].status,
+				"REVIEW",
+				"AC-1: proposal status must remain REVIEW when only self-approve exists",
+			);
+
+			// A gate-auth-violation discussion note must have been written.
+			const { rows: noteRows } = await client.query<{ body: string }>(
+				`SELECT body FROM roadmap_proposal.proposal_discussions
+				  WHERE proposal_id = $1
+				    AND context_prefix = 'gate-auth-violation:'
+				  ORDER BY created_at DESC LIMIT 1`,
+				[pid],
+			);
+			assert.ok(noteRows.length > 0, "AC-1: a gate-auth-violation discussion note must be written");
+			assert.ok(
+				/BLOCKED.*AC-1|AC-1.*BLOCKED|independent/i.test(noteRows[0].body),
+				"AC-1: discussion note must reference AC-1 or independent approve requirement",
 			);
 		});
 	});
@@ -358,28 +386,63 @@ describe("P3566: DB integration tests", { skip: !DB_TEST }, () => {
 	// ---------------------------------------------------------------------------
 	// AC-2: Unresolved blocking review blocks advance
 	// ---------------------------------------------------------------------------
-	test("AC-2: gate advance fails when blocking review newer than latest independent approve", async () => {
+	test("AC-2: gate advance is blocked when blocking review newer than latest independent approve", async () => {
 		await withRollback(async (client) => {
 			const pid = await seedReviewProposal(client, {
 				builder: "p3566-builder",
 				reviewer: "p3566-reviewer",
 			});
-			// Independent approve first...
-			await addReview(client, pid, "p3566-reviewer", "approve");
-
-			// ...then a blocking review AFTER the approve — filed by a third party.
 			await client.query(
 				`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type)
 				 VALUES ('p3566-blocker', 'llm') ON CONFLICT (agent_identity) DO NOTHING`,
 			);
-			// Ensure reviewed_at is strictly after the approve by advancing clock slightly.
-			await client.query(`SELECT pg_sleep(0.01)`);
-			await addReview(client, pid, "p3566-blocker", "request_changes", true);
 
-			await assert.rejects(
-				() => gateAdvance(client, pid, "REVIEW", "DEVELOP", "p3566-builder"),
-				/blocking review|unresolved/i,
-				"AC-2: gate advance must fail when an unresolved blocking review exists",
+			// Seed: independent approve with a past timestamp so blocking review's now() is after it.
+			await client.query(
+				`INSERT INTO roadmap_proposal.proposal_reviews
+				   (proposal_id, reviewer_identity, verdict, is_blocking, reviewed_at)
+				 VALUES ($1, 'p3566-reviewer', 'approve', false, now() - interval '2 seconds')
+				 ON CONFLICT (proposal_id, reviewer_identity) DO UPDATE
+				   SET verdict = 'approve', reviewed_at = now() - interval '2 seconds'`,
+				[pid],
+			);
+
+			// Blocking review with current now() — strictly after the approve.
+			await client.query(
+				`INSERT INTO roadmap_proposal.proposal_reviews
+				   (proposal_id, reviewer_identity, verdict, is_blocking, reviewed_at)
+				 VALUES ($1, 'p3566-blocker', 'request_changes', true, now())
+				 ON CONFLICT (proposal_id, reviewer_identity) DO UPDATE
+				   SET verdict = 'request_changes', is_blocking = true, reviewed_at = now()`,
+				[pid],
+			);
+
+			// fn_apply_gate_advance returns NULL silently (no exception) when AC-2 blocks.
+			await gateAdvance(client, pid, "REVIEW", "DEVELOP", "p3566-builder");
+
+			// Status must still be REVIEW — the advance was blocked.
+			const { rows: statusRows } = await client.query<{ status: string }>(
+				`SELECT status FROM roadmap_proposal.proposal WHERE id = $1`,
+				[pid],
+			);
+			assert.strictEqual(
+				statusRows[0].status,
+				"REVIEW",
+				"AC-2: proposal status must remain REVIEW when unresolved blocking review exists",
+			);
+
+			// A gate-auth-violation note must have been written.
+			const { rows: noteRows } = await client.query<{ body: string }>(
+				`SELECT body FROM roadmap_proposal.proposal_discussions
+				  WHERE proposal_id = $1
+				    AND context_prefix = 'gate-auth-violation:'
+				  ORDER BY created_at DESC LIMIT 1`,
+				[pid],
+			);
+			assert.ok(noteRows.length > 0, "AC-2: a gate-auth-violation discussion note must be written");
+			assert.ok(
+				/BLOCKED.*AC-2|AC-2.*BLOCKED|blocking review|unresolved/i.test(noteRows[0].body),
+				"AC-2: discussion note must reference AC-2 or blocking review",
 			);
 		});
 	});
@@ -432,17 +495,36 @@ describe("P3566: DB integration tests", { skip: !DB_TEST }, () => {
 				 VALUES ('p3566-late-reviewer', 'llm') ON CONFLICT (agent_identity) DO NOTHING`,
 			);
 
-			// Advance the proposal first.
-			await addReview(client, pid, "p3566-reviewer", "approve");
-			await gateAdvance(client, pid, "REVIEW", "DEVELOP", "p3566-builder");
+			// Simulate an advance that happened 2 seconds ago: insert a past-dated
+			// gate_decision_log row. Within a single transaction, now() is fixed, so
+			// we use now() - interval '2 seconds' to establish a strict before-timestamp.
+			// Then update proposal status directly (using gate_bypass to skip the guard).
+			await client.query(
+				`INSERT INTO roadmap_proposal.gate_decision_log
+				   (proposal_id, from_state, to_state, decision, decided_by, created_at)
+				 VALUES ($1, 'REVIEW', 'DEVELOP', 'advance', 'p3566-builder',
+				         now() - interval '2 seconds')`,
+				[pid],
+			);
+			// fn_apply_gate_advance fires on INSERT, but since there's no independent
+			// approve yet, it blocks. Force the status update directly to simulate
+			// a completed advance (testing the "what if advance already happened" path).
+			await client.query(`SET LOCAL app.gate_bypass = 'true'`);
+			await client.query(
+				`UPDATE roadmap_proposal.proposal SET status = 'DEVELOP' WHERE id = $1`,
+				[pid],
+			);
+			await client.query(`RESET app.gate_bypass`);
 
-			// Now a blocking review arrives AFTER the advance.
-			await addReview(
-				client,
-				pid,
-				"p3566-late-reviewer",
-				"request_changes",
-				true,
+			// Now a blocking review arrives AFTER the advance (reviewed_at = now() which
+			// is strictly AFTER now() - 2 seconds used for the gate_decision_log row).
+			await client.query(
+				`INSERT INTO roadmap_proposal.proposal_reviews
+				   (proposal_id, reviewer_identity, verdict, is_blocking, reviewed_at)
+				 VALUES ($1, 'p3566-late-reviewer', 'request_changes', true, now())
+				 ON CONFLICT (proposal_id, reviewer_identity) DO UPDATE
+				   SET verdict = 'request_changes', is_blocking = true, reviewed_at = now()`,
+				[pid],
 			);
 
 			// Notification queue should have a CRITICAL late_blocking_review entry.
