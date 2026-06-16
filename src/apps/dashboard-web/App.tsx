@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Route, Switch } from "wouter";
+import { Redirect, Route, Switch } from "wouter";
 import type {
 	Proposal,
 	Agent as SharedAgent,
@@ -33,6 +33,7 @@ import SettingsPage from "./components/SettingsPage";
 import StatisticsPage from "./components/StatisticsPage";
 import TeamsPage from "./components/TeamsPage";
 import { useBoardColumns } from "./hooks/useBoardColumns";
+import { DEFAULT_PROJECT_ID, useProject } from "./hooks/useProject";
 import {
 	useWebSocket,
 	type Agent as WebSocketAgent,
@@ -130,6 +131,97 @@ function toSharedChannel(channel: WebSocketChannel): SharedChannel {
 	};
 }
 
+/**
+ * Props the project-scoped workspace pages need. Hoisted out of App() so the
+ * nested project Switch can be rendered both at `/project/:projectId/*` and
+ * (transitionally) reused without prop duplication.
+ */
+interface ProjectWorkspaceProps {
+	proposals: WebSocketProposal[];
+	sharedProposals: Proposal[];
+	sharedAgents: SharedAgent[];
+	sharedChannels: SharedChannel[];
+	agents: WebSocketAgent[];
+	channels: WebSocketChannel[];
+	connected: boolean;
+	statuses: string[];
+	activeWorkflow: string;
+	columnDwell: Record<string, number | null>;
+	onWorkflowChange: (workflow: string) => void;
+	onProposalClick: (proposal: Proposal) => void;
+}
+
+/**
+ * P477 AC-7: project-namespaced workspace. Mounted under `/project/:projectId`
+ * (nested). Calling useProject() here derives the numeric projectId from the
+ * URL and syncs it into the shared project-scope storage, so every data fetch
+ * inside these pages carries the matching `X-Project-Id` header. Paths are
+ * relative to the `/project/:projectId` base because of wouter `nest`.
+ */
+function ProjectWorkspace({
+	proposals,
+	sharedProposals,
+	sharedAgents,
+	sharedChannels,
+	agents,
+	channels,
+	connected,
+	statuses,
+	activeWorkflow,
+	columnDwell,
+	onWorkflowChange,
+	onProposalClick,
+}: ProjectWorkspaceProps) {
+	// Side effect: derive + sync projectId from the URL into project-scope storage.
+	useProject();
+	return (
+		<Switch>
+			<Route path="/board">
+				<BoardPage
+					proposals={proposals}
+					statuses={statuses}
+					activeWorkflow={activeWorkflow}
+					onWorkflowChange={onWorkflowChange}
+					onProposalClick={(p) => onProposalClick(p as unknown as Proposal)}
+					columnDwell={columnDwell}
+				/>
+			</Route>
+			<Route path="/proposals">
+				<ProposalsPage
+					proposals={sharedProposals}
+					onProposalClick={(p) => onProposalClick(p as Proposal)}
+				/>
+			</Route>
+			<Route path="/directives">
+				<DirectivesPage proposals={sharedProposals} />
+			</Route>
+			<Route path="/agents">
+				<AgentsPage agents={sharedAgents} />
+			</Route>
+			<Route path="/dispatches">
+				<DispatchPage />
+			</Route>
+			<Route path="/settings">
+				<SettingsPage />
+			</Route>
+			{/* Default: bare /project/:projectId lands on the board. */}
+			<Route path="/">
+				<BoardPage
+					proposals={proposals}
+					statuses={statuses}
+					activeWorkflow={activeWorkflow}
+					onWorkflowChange={onWorkflowChange}
+					onProposalClick={(p) => onProposalClick(p as unknown as Proposal)}
+					columnDwell={columnDwell}
+				/>
+			</Route>
+			<Route path="*">
+				<NotFoundPage />
+			</Route>
+		</Switch>
+	);
+}
+
 export default function App() {
 	const {
 		connected,
@@ -213,6 +305,7 @@ export default function App() {
 				<AppNav />
 				<main className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden">
 					<Switch>
+						{/* ── Control-plane root (P3507) — cross-project, NOT namespaced ── */}
 						<Route path="/">
 							<PortfolioHome />
 						</Route>
@@ -228,30 +321,46 @@ export default function App() {
 						<Route path="/platform">
 							<PlatformView />
 						</Route>
-						<Route path="/board">
-							<BoardPage
+
+						{/* ── P477 AC-7: project-namespaced workspace ── */}
+						<Route path="/project/:projectId" nest>
+							<ProjectWorkspace
 								proposals={proposals}
+								sharedProposals={sharedProposals}
+								sharedAgents={sharedAgents}
+								sharedChannels={sharedChannels}
+								agents={agents}
+								channels={channels}
+								connected={connected}
 								statuses={statuses}
 								activeWorkflow={activeWorkflow}
-								onWorkflowChange={handleWorkflowChange}
-								onProposalClick={(p) =>
-									handleProposalClick(p as unknown as Proposal)
-								}
 								columnDwell={columnDwell}
+								onWorkflowChange={handleWorkflowChange}
+								onProposalClick={handleProposalClick}
 							/>
+						</Route>
+
+						{/* ── P477 AC-7: legacy flat routes 302→ /project/1/* (back-compat) ── */}
+						<Route path="/board">
+							<Redirect to={`/project/${DEFAULT_PROJECT_ID}/board`} replace />
 						</Route>
 						<Route path="/proposals">
-							<ProposalsPage
-								proposals={sharedProposals}
-								onProposalClick={(p) => handleProposalClick(p as Proposal)}
-							/>
+							<Redirect to={`/project/${DEFAULT_PROJECT_ID}/proposals`} replace />
 						</Route>
 						<Route path="/directives">
-							<DirectivesPage proposals={sharedProposals} />
+							<Redirect to={`/project/${DEFAULT_PROJECT_ID}/directives`} replace />
 						</Route>
 						<Route path="/agents">
-							<AgentsPage agents={sharedAgents} />
+							<Redirect to={`/project/${DEFAULT_PROJECT_ID}/agents`} replace />
 						</Route>
+						<Route path="/dispatches">
+							<Redirect to={`/project/${DEFAULT_PROJECT_ID}/dispatches`} replace />
+						</Route>
+						<Route path="/settings">
+							<Redirect to={`/project/${DEFAULT_PROJECT_ID}/settings`} replace />
+						</Route>
+
+						{/* ── Cross-project utility pages (kept flat for now) ── */}
 						<Route path="/teams">
 							<TeamsPage />
 						</Route>
@@ -273,9 +382,6 @@ export default function App() {
 							<div className="h-full p-4 sm:p-6">
 								<ActivityFeed />
 							</div>
-						</Route>
-						<Route path="/dispatches">
-							<DispatchPage />
 						</Route>
 						<Route path="/control">
 							<ControlPage />
@@ -300,9 +406,6 @@ export default function App() {
 						</Route>
 						<Route path="/achievements">
 							<AchievementsView proposals={sharedProposals} />
-						</Route>
-						<Route path="/settings">
-							<SettingsPage />
 						</Route>
 						<Route path="*">
 							<NotFoundPage />
