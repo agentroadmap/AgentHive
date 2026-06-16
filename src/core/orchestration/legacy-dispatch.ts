@@ -1347,6 +1347,15 @@ export async function handleStateChange(proposalId: string, newState: string) {
 	// at a mature proposal, claiming a lease that flips maturity to 'active'
 	// and starves the gate scanner — producing the dispatch loop seen on
 	// P689/P704 (8h of triage-agent runs with no advancement).
+	//
+	// P3535 AC-11 (reviewed, retained as defense-in-depth): with sticky-mature
+	// in place, the underlying flap this guarded against can no longer occur —
+	// roadmap_proposal.fn_lease_set_maturity_active only does new→active
+	// (mig 288), so a NOTIFY-path claim can no longer flip mature→active. This
+	// early-return is now redundant but kept as a cheap, harmless guard that
+	// also short-circuits the dispatch bookkeeping for mature proposals and
+	// keeps gate ownership unambiguous (the implicit-gate scanner dispatches a
+	// gate exactly once via dispatchImplicitGate's active_dispatch_id check).
 	const { rows: maturityRows } = await query<{ maturity: string | null; status: string | null }>(
 		`SELECT maturity, status FROM roadmap_proposal.proposal WHERE id = $1`,
 		[proposalId],
