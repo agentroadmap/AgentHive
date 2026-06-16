@@ -121,6 +121,32 @@ test("AC-18: registerSession rejects session identity that would overflow channe
     );
 });
 
+// ─── AC-2: non-dispatchable routing guard ────────────────────────────────────
+
+test("AC-2: post-work-offer pre-flight excludes role=interactive-session", () => {
+    // The preflight SQL in src/core/pipeline/post-work-offer.ts must contain
+    // the explicit role guard so session rows can't be matched even if someone
+    // accidentally creates a provider_registry row for a session identity.
+    const src = readSrc("src/core/pipeline/post-work-offer.ts");
+    assert.ok(
+        src.includes("ar.role <> 'interactive-session'"),
+        "post-work-offer.ts must explicitly exclude role='interactive-session' from dispatch pre-flight",
+    );
+});
+
+test("AC-2: session-registration.ts does not insert into provider_registry", () => {
+    const src = readSrc("src/infra/agency/session-registration.ts");
+    const insertMatches = src.match(/INSERT INTO.*provider_registry/g) ?? [];
+    assert.equal(insertMatches.length, 0, "session-registration.ts must not INSERT INTO provider_registry (keeps sessions non-dispatchable)");
+});
+
+test("AC-2: session-registration.ts does not insert into roadmap.agency", () => {
+    const src = readSrc("src/infra/agency/session-registration.ts");
+    // The only tolerated mention would be reading agency.id, not inserting
+    const insertAgencyMatches = src.match(/INSERT INTO roadmap\.agency/g) ?? [];
+    assert.equal(insertAgencyMatches.length, 0, "session-registration.ts must not INSERT into roadmap.agency");
+});
+
 // ─── shortSessionId helper ──────────────────────────────────────────────────
 
 test("shortSessionId truncates hex uuid to 12 chars", () => {

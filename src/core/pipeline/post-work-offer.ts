@@ -799,6 +799,7 @@ async function postWorkOfferImpl(
 			  WHERE pr.status NOT IN ('offline', 'retired')
 			    AND ar.status = 'active'
 			    AND ar.agent_type <> 'coordinator'
+			    AND ar.role <> 'interactive-session'
 			    AND ar.agent_identity NOT LIKE 'test/%'
 			    AND (pr.capabilities->'jobs') ?| $1::text[]`,
 			[checkCaps],
