@@ -35,12 +35,26 @@ export type ConfigClass =
 	| "flag"
 	| "tenant_dsn";
 
+export type ConfigKeyCategory =
+	| "orchestration"
+	| "a2a"
+	| "agency"
+	| "feature_flag"
+	| "budget"
+	| "billing"
+	| "ui"
+	| "security"
+	| "model_routing"
+	| "system"
+	| "uncategorized";
+
 export interface ConfigKey<T> {
 	name: string;
 	class: ConfigClass;
 	parse: (raw: string) => T;
 	required: boolean;
 	description?: string;
+	category?: ConfigKeyCategory;
 	yamlPath?: string;
 	/**
 	 * Optional yaml-assembly function for keys whose value is derived from
