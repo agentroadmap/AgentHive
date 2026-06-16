@@ -700,6 +700,31 @@ export const FlagKeys = {
 		envOverride: false,
 	} satisfies ConfigKey<boolean>,
 
+	// P3563/P3565: master switch for the gate acceptance-criteria invariant on
+	// TERMINAL gates (DEVELOP→MERGE, MERGE→COMPLETE). Default OFF. When OFF,
+	// fn_guard_gate_advance reproduces P3566 (migration 289) behavior exactly.
+	// The TS layer (verify_ac Pillar-3 origination + the diff-risk advance check)
+	// and the DB trigger (fn_gate_ac_invariant_enabled) both read this key so the
+	// env>DB>default cascade is consistent across SQL and TS.
+	GATE_AC_INVARIANT_ENABLED: {
+		name: "AGENTHIVE_GATE_AC_INVARIANT_ENABLED",
+		class: "flag" as const,
+		parse: (v: string) => {
+			try {
+				return JSON.parse(v) === true;
+			} catch {
+				return v.toLowerCase() === "true" || v === "1";
+			}
+		},
+		required: false,
+		defaultValue: false,
+		description:
+			"P3563/P3565: enforce gate acceptance-criteria invariant (Pillars 1-3 + diff-risk) on terminal gates. Default OFF.",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies ConfigKey<boolean>,
+
 	ENABLE_MULTI_TENANT: {
 		name: "ENABLE_MULTI_TENANT",
 		class: "flag" as const,

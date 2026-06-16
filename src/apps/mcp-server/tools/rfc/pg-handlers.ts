@@ -25,6 +25,7 @@ import {
 	validateAcEvidence,
 	AC_SCHEMA_VERSION,
 } from "../../schema/ac-evidence.ts";
+import { checkPillar3Origination } from "../../../../core/gate/verifier-independence.ts";
 
 // Batch-advance guard: tracks recent verify_ac timestamps per proposal (P707).
 // More than 2 calls within a 5-second window returns 429 BATCH_GUARD_TRIGGERED.
@@ -614,6 +615,37 @@ export async function verifyAC(args: {
 		}
 
 		const ac = acRows[0];
+
+		// P3563 Pillar-3 (origination): refuse a CONTENT pass self-certified by a
+		// builder-agency verifier (flag-gated; no-op when the invariant is OFF).
+		// Category is taken from args.category or details.category.
+		if (args.status === "pass") {
+			const category =
+				args.category ??
+				(args.details && typeof args.details === "object"
+					? (args.details as Record<string, unknown>)["category"] as
+							| string
+							| undefined
+					: undefined);
+			const indep = await checkPillar3Origination(
+				proposalId,
+				args.verified_by,
+				category,
+			).catch(() => ({ blocked: false }) as Awaited<
+				ReturnType<typeof checkPillar3Origination>
+			>);
+			if (indep.blocked) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `❌ [VERIFIER_NOT_INDEPENDENT] ${indep.reason} ` +
+								`(verifier agency: ${indep.verifierAgency}; builder agencies: ${(indep.builderAgencies ?? []).join(", ")}).`,
+						},
+					],
+				};
+			}
+		}
 
 		await query(
 			`UPDATE roadmap_proposal.proposal_acceptance_criteria
@@ -1427,6 +1459,13 @@ export async function recordGateDecision(args: {
 	authority_agent?: string;
 	agent_run_id?: string;
 	ac_verification?: Record<string, unknown>;
+	// P3565 diff-risk: optional operator token + diff signal sources. The token
+	// is verified via the P3508 authorizeOperatorByToken path (NOT the
+	// impersonable app.agent_identity GUC) to authorize a high-risk merge.
+	operator_token?: string;
+	changed_files?: string[];
+	branch_ref?: string;
+	base_ref?: string;
 }): Promise<CallToolResult> {
 	// Resolve the canonical identifier from any of the three alias forms.
 	const rawIdentifier = args.id ?? args.proposal_id ?? args.display_id;
@@ -1608,6 +1647,70 @@ export async function recordGateDecision(args: {
 
 		const acVerification: Record<string, unknown> = { ...(args.ac_verification ?? {}) };
 		if (args.agent_run_id) acVerification.agent_run_id = args.agent_run_id;
+
+		// P3565 diff-risk clause: at DEVELOP→MERGE advance, compute blast-radius
+		// risk from the real diff and, when high-risk, require a GENUINE operator
+		// authorization (P3508 token). The resulting diff_risk fact is embedded in
+		// ac_verification; the DB trigger (migration 291) enforces the invariant.
+		// Flag-gated — no-op when AGENTHIVE_GATE_AC_INVARIANT_ENABLED is OFF.
+		if (
+			args.decision === "advance" &&
+			fromState.toUpperCase() === "DEVELOP" &&
+			toState.toUpperCase() === "MERGE"
+		) {
+			const { isInvariantEnabled } = await import(
+				"../../../../core/gate/verifier-independence.ts"
+			);
+			if (await isInvariantEnabled().catch(() => false)) {
+				const { computeDiffRisk, buildDiffRiskMetadata } = await import(
+					"../../../../core/gate/diff-risk.ts"
+				);
+				const { rows: verRows } = await query<{ diff_summary: string | null }>(
+					`SELECT diff_summary FROM roadmap_proposal.proposal_versions
+					  WHERE proposal_id = $1 ORDER BY version_number DESC LIMIT 1`,
+					[proposalId],
+				).catch(() => ({ rows: [] as { diff_summary: string | null }[] }));
+				const risk = await computeDiffRisk({
+					changedFiles: args.changed_files,
+					branchRef: args.branch_ref,
+					baseRef: args.base_ref,
+					diffSummary: verRows[0]?.diff_summary ?? undefined,
+				});
+
+				let operator: { authorized: boolean; tokenId?: number | null } = {
+					authorized: false,
+				};
+				if (risk.high && args.operator_token) {
+					const { authorizeOperatorByToken } = await import(
+						"../../../server/operator-auth.ts"
+					);
+					const outcome = await authorizeOperatorByToken(args.operator_token, {
+						action: "gate_decision_high_risk_merge",
+						targetKind: "proposal",
+						targetIdentity: String(proposalId),
+						requestSummary: { from: fromState, to: toState, matched: risk.matched },
+					});
+					operator = {
+						authorized: outcome.decision === "allow",
+						tokenId: outcome.tokenId,
+					};
+				}
+
+				Object.assign(acVerification, buildDiffRiskMetadata(risk, operator));
+
+				// Friendly pre-check: refuse here rather than letting the trigger fire a
+				// raw check_violation. (Defense-in-depth: the trigger still enforces it.)
+				if (risk.high && !operator.authorized) {
+					return errorResult(
+						`Gate advance DEVELOP→MERGE on proposal ${rawIdentifier} touches HIGH-RISK paths ` +
+						`(${risk.matched.join(", ")}) and requires operator authorization. Pass a valid ` +
+						`operator_token (P3508) with this gate_decision; the app.agent_identity GUC is not ` +
+						`sufficient (P3565 diff-risk clause).`,
+						"diff_risk_unauthorized",
+					);
+				}
+			}
+		}
 
 		const { rows } = await query(
 			`INSERT INTO roadmap_proposal.gate_decision_log

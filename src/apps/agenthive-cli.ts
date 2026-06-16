@@ -614,6 +614,28 @@ program
 	.argument("[target]", "postgres | pgbouncer | all", "all")
 	.action(cmdDbPing);
 
+// P3563 Step 3: async AC re-execution validator (wires AcTestExecutor logic).
+program
+	.command("revalidate-ac")
+	.description(
+		"Re-run test/artifact evidence for a proposal's PASSED ACs; flip failing ones to fail (P3563 Step 3)",
+	)
+	.requiredOption("--proposal <id>", "Numeric proposal id")
+	.option("--worktree <name>", "Worktree dir under /data/code/worktree")
+	.action(async (opts: { proposal: string; worktree?: string }) => {
+		const { revalidateProposalAcs } = await import(
+			"../core/gate/ac-revalidator.ts"
+		);
+		const pid = Number(opts.proposal);
+		if (!Number.isFinite(pid)) {
+			console.error("--proposal must be numeric");
+			process.exit(2);
+		}
+		const out = await revalidateProposalAcs(pid, { worktree: opts.worktree });
+		console.log(JSON.stringify(out, null, 2));
+		process.exit(out.flippedToFail > 0 ? 1 : 0);
+	});
+
 // P828 AC-38: audited runtime config mutation from the CLI.
 const configCmd = program
 	.command("config")
