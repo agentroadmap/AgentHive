@@ -700,6 +700,39 @@ export const FlagKeys = {
 		envOverride: false,
 	} satisfies ConfigKey<boolean>,
 
+	// P1391 (verdict-semantics + gate-authority slice): master switch for the
+	// three-verdict gate vocabulary (advance / request_for_change / reject) and
+	// the elevated authorization guard on reject → obsolete. Default OFF.
+	//
+	// Flag OFF  ⇒ EXACT pre-P1391 behavior: the legacy verdict vocab
+	//   {advance,hold,reject,waive,escalate} is accepted, only 'advance' acts,
+	//   and reject → obsolete is UNREACHABLE (no destructive close without the
+	//   guard). Safe to merge before enabling.
+	// Flag ON   ⇒ new vocab restricted to {advance,request_for_change,reject};
+	//   request_for_change → maturity 'new' (send back for ENHANCEMENT), reject
+	//   is authority-gated and → maturity 'obsolete' with
+	//   release_reason='proposal_rejected'. Atomic: whole new behavior or none.
+	//
+	// Read via env>DB>default by core/gate/gate-authority.ts:isGateAuthorityEnabled.
+	GATE_AUTHORITY_ENABLED: {
+		name: "AGENTHIVE_GATE_AUTHORITY_ENABLED",
+		class: "flag" as const,
+		parse: (v: string) => {
+			try {
+				return JSON.parse(v) === true;
+			} catch {
+				return v.toLowerCase() === "true" || v === "1";
+			}
+		},
+		required: false,
+		defaultValue: false,
+		description:
+			"P1391: enable three-verdict gate vocabulary (advance/request_for_change/reject) + elevated reject→obsolete authority guard. Default OFF.",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies ConfigKey<boolean>,
+
 	ENABLE_MULTI_TENANT: {
 		name: "ENABLE_MULTI_TENANT",
 		class: "flag" as const,
