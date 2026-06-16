@@ -124,6 +124,7 @@ export async function resolveAgency(
 		 WHERE pr.status NOT IN ('offline', 'retired')
 		   AND (a.status IS NULL OR a.status <> 'retired')
 		   AND ar.agent_type <> 'coordinator'
+		   AND ar.role <> 'interactive-session'
 		   AND ar.agent_identity NOT LIKE 'test/%'
 		   AND (pr.project_id IS NULL OR pr.project_id = $1)
 		   AND COALESCE(inf.in_flight_count, 0) < pr.max_in_flight

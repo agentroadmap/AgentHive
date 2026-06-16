@@ -168,7 +168,7 @@ export function registerMessageTools(server: McpServer): void {
 		{
 			name: "msg_read",
 			description:
-				"Read messages from the Postgres message_ledger. With agent + wait_ms, blocks on pg_notify channel `msg_{agent}` until a new message arrives or timeout expires (migration 096). Trust-filtered: restricted/blocked senders are excluded.",
+				"Read messages from the Postgres message_ledger. With agent + wait_ms, blocks on pg_notify channel `msg_{agent}` until a new message arrives or timeout expires (migration 096, updated channel prefix per P1103). Trust-filtered: restricted/blocked senders are excluded.",
 			inputSchema: {
 				type: "object",
 				properties: {
