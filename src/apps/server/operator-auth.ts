@@ -38,7 +38,6 @@ export interface OperatorAuthContext {
 	action: string;
 	targetKind?: string;
 	targetIdentity?: string;
-	targetProjectId?: number;
 	requestSummary?: Record<string, unknown>;
 	// P3508 AC-5: when set, the token's scoped_project_id (if non-NULL) must match.
 	targetProjectId?: number;

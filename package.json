@@ -82,6 +82,7 @@
     "operator:issue": "node --import jiti/register scripts/operator-token.ts issue",
     "operator:list": "node --import jiti/register scripts/operator-token.ts list",
     "operator:revoke": "node --import jiti/register scripts/operator-token.ts revoke",
+    "authority:grant": "node --import jiti/register scripts/authority-grant.ts",
     "build": "npm run build:css && node scripts/build-dist.cjs && node scripts/build-agenthive.cjs && npm run build:web -- --js-only",
     "cli": "npm run build:css && node --import jiti/register src/apps/cli.ts",
     "hive": "node --import jiti/register src/apps/hive-cli/index.ts",
