@@ -2024,17 +2024,19 @@ export async function handleGateCompletion(dispatchId: number): Promise<void> {
 		// AC-8 step 4: Compare current state against gate_to_stage
 		if (currentStatus === normalizedGateToStage) {
 			// State matches — gate completed successfully
-			// AC-8 step 5: set maturity='new' and release with 'gate_review_complete'
+			// P3535 AC-6: release FIRST so the trigger fires while maturity=mature
+			// (gate_review_complete is not in the send-back bucket → trigger
+			// preserves mature). Then set maturity='new' with no active lease.
 			const orchestratorId = "agenthive/orchestrator";
+			if (leaseId) {
+				await releaseDispatchLease(dispatchId, "gate_review_complete");
+			}
 			await setProposalMaturity(
 				proposalId,
 				"new",
 				orchestratorId,
 				"gate_review_complete",
 			);
-			if (leaseId) {
-				await releaseDispatchLease(dispatchId, "gate_review_complete");
-			}
 			logger.log(
 				`Gate completion for P${proposalId}: state matches ${normalizedGateToStage}, maturity set to 'new'`,
 			);
