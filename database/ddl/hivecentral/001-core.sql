@@ -154,6 +154,7 @@ CREATE TABLE IF NOT EXISTS core.runtime_flag (
   scope             TEXT         NOT NULL              -- 'global' | 'host:<id>' | 'agency:<id>' | 'project:<slug>'
                                 CHECK (scope = 'global' OR scope ~ '^(host|agency|project):.+$'),
   value_jsonb       JSONB        NOT NULL,
+  category          TEXT         NOT NULL DEFAULT 'general',  -- P3782: grouping for TUI/web UI/audit
   description       TEXT,
   modified_at       TIMESTAMPTZ  NOT NULL DEFAULT now(),
   modified_by_did   TEXT         NOT NULL,

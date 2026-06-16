@@ -48,6 +48,8 @@ export interface ConfigKey<T> {
 	parse: (raw: string) => T;
 	required: boolean;
 	description?: string;
+	/** P3782: grouping category for TUI / web UI display and audit filtering. */
+	category?: string;
 	yamlPath?: string;
 	/**
 	 * Optional yaml-assembly function for keys whose value is derived from

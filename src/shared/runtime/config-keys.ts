@@ -13,6 +13,21 @@
 import type { ConfigKey } from "./config";
 
 /**
+ * P3782: Canonical taxonomy for runtime flag categories.
+ * Matches the comment-delineated groupings in FlagKeys.
+ * Used by TUI, web UI, and audit tooling for display and filtering.
+ */
+export type ConfigKeyCategory =
+	| "orchestrator"
+	| "a2a"
+	| "pause"
+	| "spawn"
+	| "matcher"
+	| "tui"
+	| "feature"
+	| "general";
+
+/**
  * Secret keys: env only, never from yaml/DB. PGPASSWORD, OAUTH_CLIENT_SECRET, etc.
  */
 export const SecretKeys = {
@@ -694,6 +709,7 @@ export const FlagKeys = {
 			}
 		},
 		required: false,
+		category: "feature" as ConfigKeyCategory,
 		description: "Enable offer-dispatch workflow",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -711,6 +727,7 @@ export const FlagKeys = {
 			}
 		},
 		required: false,
+		category: "feature" as ConfigKeyCategory,
 		description: "Enable multi-tenant mode",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -728,6 +745,7 @@ export const FlagKeys = {
 			}
 		},
 		required: false,
+		category: "feature" as ConfigKeyCategory,
 		description: "Enable audit logging",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -751,6 +769,7 @@ export const FlagKeys = {
 			return parsed;
 		},
 		required: true,
+		category: "a2a" as ConfigKeyCategory,
 		description: "How often A2A re-reads agent_registry for newly-registered local agencies (ms)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -768,6 +787,7 @@ export const FlagKeys = {
 			return parsed;
 		},
 		required: true,
+		category: "a2a" as ConfigKeyCategory,
 		description: "Backoff on PG connection loss before exit(1) (ms)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -785,6 +805,7 @@ export const FlagKeys = {
 			return parsed;
 		},
 		required: true,
+		category: "a2a" as ConfigKeyCategory,
 		description: "Bounded wait for fn_pulse(offline) calls during SIGTERM (ms)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -802,6 +823,7 @@ export const FlagKeys = {
 			return parsed;
 		},
 		required: true,
+		category: "a2a" as ConfigKeyCategory,
 		description: "How often A2A calls fn_pulse('online') per child to keep last_heartbeat_at fresh for existing dispatchability/maintenance consumers (ms)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -825,6 +847,7 @@ export const FlagKeys = {
 		},
 		required: false,
 		defaultValue: 60_000,
+		category: "a2a" as ConfigKeyCategory,
 		description: "Liaison context re-hydration interval (ms). Valid range: 1000-600000 (1s-10m)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -843,6 +866,7 @@ export const FlagKeys = {
 		},
 		required: false,
 		defaultValue: 20,
+		category: "orchestrator" as ConfigKeyCategory,
 		description: "scanQueues batch size per tick",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -859,6 +883,7 @@ export const FlagKeys = {
 		},
 		required: false,
 		defaultValue: 4,
+		category: "orchestrator" as ConfigKeyCategory,
 		description: "Hours before mature proposal escalated",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -875,6 +900,7 @@ export const FlagKeys = {
 		},
 		required: false,
 		defaultValue: 5,
+		category: "orchestrator" as ConfigKeyCategory,
 		description: "Max stalls processed per tick",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -891,6 +917,7 @@ export const FlagKeys = {
 		},
 		required: false,
 		defaultValue: 60_000,
+		category: "orchestrator" as ConfigKeyCategory,
 		description: "Offer reap interval (ms)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -907,6 +934,7 @@ export const FlagKeys = {
 		},
 		required: false,
 		defaultValue: 5,
+		category: "orchestrator" as ConfigKeyCategory,
 		description: "Minutes idle before poke",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -923,6 +951,7 @@ export const FlagKeys = {
 		},
 		required: false,
 		defaultValue: 10,
+		category: "orchestrator" as ConfigKeyCategory,
 		description: "Max pokes per cycle",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -945,6 +974,7 @@ export const FlagKeys = {
 		},
 		required: false,
 		defaultValue: 20,
+		category: "orchestrator" as ConfigKeyCategory,
 		description: "Max global in-flight work offers (backpressure cap); 0=disabled",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -961,6 +991,7 @@ export const FlagKeys = {
 		},
 		required: false,
 		defaultValue: 240_000,
+		category: "orchestrator" as ConfigKeyCategory,
 		description: "Bounded wait for drain on SIGTERM (ms)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -977,6 +1008,7 @@ export const FlagKeys = {
 		},
 		required: false,
 		defaultValue: 30_000,
+		category: "orchestrator" as ConfigKeyCategory,
 		description: "Implicit gate poll interval (ms)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -993,6 +1025,7 @@ export const FlagKeys = {
 		},
 		required: false,
 		defaultValue: 90_000,
+		category: "orchestrator" as ConfigKeyCategory,
 		description: "Enhancer-revise loop interval (ms)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -1009,6 +1042,7 @@ export const FlagKeys = {
 		},
 		required: false,
 		defaultValue: 30_000,
+		category: "orchestrator" as ConfigKeyCategory,
 		description: "Reconciler loop interval (ms)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -1025,6 +1059,7 @@ export const FlagKeys = {
 		},
 		required: false,
 		defaultValue: 300_000,
+		category: "orchestrator" as ConfigKeyCategory,
 		description: "Stale-row reaper interval (ms)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -1041,6 +1076,7 @@ export const FlagKeys = {
 		},
 		required: false,
 		defaultValue: 60_000,
+		category: "orchestrator" as ConfigKeyCategory,
 		description: "Stuck-worker watchdog interval (ms)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -1059,6 +1095,7 @@ export const FlagKeys = {
 		},
 		required: false,
 		defaultValue: 300,
+		category: "orchestrator" as ConfigKeyCategory,
 		description:
 			"State-monitor grace period (sec) after a gate hold/reject before maturity auto-advance is allowed (P2709)",
 		dbTable: "core.runtime_flag",
@@ -1076,6 +1113,7 @@ export const FlagKeys = {
 		},
 		required: false,
 		defaultValue: 60_000,
+		category: "orchestrator" as ConfigKeyCategory,
 		description: "Orchestrator heartbeat interval (ms)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -1094,6 +1132,7 @@ export const FlagKeys = {
 		},
 		required: false,
 		defaultValue: true,
+		category: "orchestrator" as ConfigKeyCategory,
 		description: "Kill switch: false disables offer-claim loop",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -1121,6 +1160,7 @@ export const FlagKeys = {
 		},
 		required: false,
 		defaultValue: false,
+		category: "orchestrator" as ConfigKeyCategory,
 		description:
 			"V3-C6 AC-14: when true, re-enables the legacy heartbeat-derived offer_dispatch downlink push (default false = pure open-pool dispatch)",
 		dbTable: "core.runtime_flag",
@@ -1143,6 +1183,7 @@ export const FlagKeys = {
 		},
 		required: false,
 		defaultValue: false,
+		category: "a2a" as ConfigKeyCategory,
 		description: "V3-C6: true makes each agency liaison self-claim work offers",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -1164,6 +1205,7 @@ export const FlagKeys = {
 			return parsed;
 		},
 		required: true,
+		category: "pause" as ConfigKeyCategory,
 		description: "Number of consecutive no-eligible-agency failures before first pause (P1291)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -1181,6 +1223,7 @@ export const FlagKeys = {
 			return parsed;
 		},
 		required: true,
+		category: "pause" as ConfigKeyCategory,
 		description: "Base backoff duration in milliseconds for first pause cycle (default 1800000 = 30min)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -1198,6 +1241,7 @@ export const FlagKeys = {
 			return parsed;
 		},
 		required: true,
+		category: "pause" as ConfigKeyCategory,
 		description: "Exponential backoff multiplier for each pause cycle (default 2)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -1215,6 +1259,7 @@ export const FlagKeys = {
 			return parsed;
 		},
 		required: true,
+		category: "pause" as ConfigKeyCategory,
 		description: "Hard cap on pause duration in milliseconds (default 86400000 = 24h)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -1235,6 +1280,7 @@ export const FlagKeys = {
 		},
 		required: false,
 		defaultValue: 3,
+		category: "spawn" as ConfigKeyCategory,
 		description: "Max retry attempts when spawn hits provider-specific quota (P1359)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -1257,6 +1303,7 @@ export const FlagKeys = {
 		},
 		required: false,
 		defaultValue: false,
+		category: "matcher" as ConfigKeyCategory,
 		description:
 			"P3312: when false (default), matchWorkToRoute runs in shadow mode only — logs matcher_choice vs legacy_choice without changing dispatch behavior. Flip true once P3310+P3311 are COMPLETE.",
 		dbTable: "core.runtime_flag",
@@ -1293,6 +1340,7 @@ export const FlagKeys = {
 		},
 		required: false,
 		defaultValue: "grid" as "grid" | "stacked",
+		category: "tui" as ConfigKeyCategory,
 		description:
 			"TUI cockpit panel layout: 'grid' (2x2) or 'stacked' (single column).",
 		dbTable: "core.runtime_flag",
