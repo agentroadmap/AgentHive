@@ -608,7 +608,7 @@ mcp_project action=project_route_list project_id=42
 - **P918 (Agency Liaison Registration):** `docs/operations/agency-deployment.md` — How to register a liaison for a new project.
 - **P484 (Budget & Route Allowlist):** `docs/operations/project-lifecycle.md` (Phase 2) — How to set budget caps and route allowlists.
 - **P893 (Tenant Lifecycle State Machine):** `docs/architecture/control-plane/tenant-lifecycle.md` — Underlying state machine (provisioning, archived, retiring, retired).
-- **P482 (Multi-Project Registry):** `docs/design/P482-multi-project-registry.md` — Project registry design and data model.
+- **P483 (Project Lifecycle Operations):** Successor to the now-obsolete P482 project-registry proposal. P483 defines `roadmap.project` schema, project slug resolution, and the M0 bridge for first non-agenthive tenant onboarding.
 
 ---
 

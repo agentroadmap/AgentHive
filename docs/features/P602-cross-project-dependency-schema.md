@@ -1,7 +1,7 @@
 # P602 — Cross-Project Dependency Graph Schema
 
 **Status:** COMPLETE  
-**Depends on:** P482 (project registry — `roadmap.project` FK target), P820 (arch umbrella — held schema review)
+**Depends on:** P483 (project lifecycle ops / project registry — `roadmap.project` FK target; P483 supersedes the now-obsolete P482), P820 (arch umbrella — held schema review)
 
 ---
 
@@ -188,7 +188,7 @@ GRANT USAGE ON SEQUENCE dependency.cross_project_dependency_edge_id_seq TO roadm
 
 | Proposal | Relationship |
 |---|---|
-| P482 | Phase 1 project registry — creates `roadmap.project(project_id)`, the FK target for both project columns |
+| P483 | Phase 1 project registry — creates `roadmap.project(project_id)`, the FK target for both project columns (successor to now-obsolete P482) |
 | P820 | Arch umbrella under which P602 schema was held for review |
 | P474 | Multi-project bootstrap — project slug resolution; orphan detection deferred full resolution to P474 |
 | P604 | Observability schema occupying migration slot 059 (codex-three branch) |

@@ -9,7 +9,7 @@ This is a design note paired with MCP proposal P436. The MCP/Postgres record is 
 The current migration set has schema drift around multi-project and agency/provider tables. Examples:
 
 - `provider_registry.project_id` appears as `TEXT` in one migration and is treated as project `BIGINT` elsewhere.
-- P300 design says `squad_dispatch`, leases, model routes, host policy, agent registry, provider registry, and projects are central, while older text suggests proposals or workflow state may move to project databases.
+- The early multi-project registry design (now superseded by P429/P483) said `squad_dispatch`, leases, model routes, host policy, agent registry, provider registry, and projects are central, while older text suggests proposals or workflow state may move to project databases.
 - Some offer inserts still omit `project_id`.
 - Multiple DDL roots make it unclear which migration line is authoritative.
 

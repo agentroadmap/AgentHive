@@ -296,7 +296,7 @@ Table `roadmap.model_metadata`. Catalog of available models with provider, prici
 Table `roadmap.model_routes`. Active routing configuration: model_name, route_provider, agent_provider, agent_cli, api_spec, base_url, cost columns. Extended with agent_cli (v4 DDL 009). **P235: Platform-Aware Model Constraints** — agent_provider column enforces which provider can use which model. resolveModelRoute() queries `WHERE model_name=$1 AND agent_provider=$2 AND is_enabled=true`; cross-platform hints (e.g. claude model on hermes provider) are rejected. Also drives dynamic escalation ladder (ordered by cost ASC). Related: Host Model Policy, fn_check_spawn_policy.
 
 **Multi-Agency**
-Architecture (P282) for multiple AgentHive agencies collaborating across hosts and instances. Each agency has its own agents, configuration, and identity but shares proposals and governance through federation. Currently 0 connected hosts; blocked by missing cryptographic agent identity (P080/P159). Related: multi-project (P300), one orchestrator serving N projects.
+Architecture (P282) for multiple AgentHive agencies collaborating across hosts and instances. Each agency has its own agents, configuration, and identity but shares proposals and governance through federation. Currently 0 connected hosts; blocked by missing cryptographic agent identity (P080/P159). Related: multi-project (P429/P483 — the earlier P300 design has been superseded), one orchestrator serving N projects.
 
 ---
 

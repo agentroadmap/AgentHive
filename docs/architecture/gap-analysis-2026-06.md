@@ -61,7 +61,7 @@ AgentHive has a 96.3% proposal completion rate (547/568) but significant gaps re
 
 ### GAP-2.2: P1024 — Web and Operator Experience (4/9 ACs blocked) 🟠 High
 
-- AC-3 (TUI keyboard navigation) blocked on P674 (obsolete)
+- AC-3 (TUI keyboard navigation) was blocked on the notification-router proposal (now obsolete)
 - AC-5 (activity feed within 5s) blocked on notification infrastructure
 - AC-7 (operator-as-gate-agent proxy) blocked on P923
 - AC-9 (E2E integration) blocked on downstream dependencies
@@ -181,10 +181,9 @@ AgentHive has a 96.3% proposal completion rate (547/568) but significant gaps re
 
 ### GAP-6.1: Stale proposal references in docs 🟡 Medium
 
-- `docs/pillars/1-proposal/product-roadmap.md` dated 2026-04-05, references 71 proposals
-- Current count: 568 proposals — doc is 497 proposals behind
-- Multiple docs reference obsolete proposals (P300, P674, P482)
-- **Fix proposal:** P3798 (DEVELOP/mature)
+- `docs/pillars/1-proposal/product-roadmap.md` — regenerated 2026-06-17, current count 574 proposals ✅
+- Several primary docs contained cross-references to now-obsolete proposals (multi-project registry, notification-router) — annotated/corrected in P3846 sweep ✅
+- **Fix proposal:** P3846 (COMPLETE)
 
 ### GAP-6.2: V2 architecture docs incomplete 🟡 Medium
 

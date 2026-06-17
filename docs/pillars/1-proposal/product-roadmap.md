@@ -2,6 +2,41 @@
 
 > Generated: 2026-06-17 05:01 UTC | Source: Postgres `agenthive` | 574 proposals (excluding obsolete)
 
+## Status Summary
+
+| State | Count |
+|-------|-------|
+| COMPLETE | 544 |
+| DEVELOP | 18 |
+| DRAFT | 10 |
+| MERGE | 1 |
+| REVIEW | 1 |
+| **Total (non-obsolete)** | **574** |
+
+Proposals marked `obsolete` maturity are excluded from this count. To include them, remove the `maturity != 'obsolete'` filter from the regeneration query.
+
+**Note on formerly-referenced proposals now obsolete:**
+- **P300** (Multi-Project Registry v1) — superseded by P429/P483/P495. Do not depend on P300; use P483 and the hiveCentral tenant-DB design.
+- **P482** (Project Registry) — superseded by P483 (project lifecycle operations) and P495 (per-project tenant DB). References in older docs should point to P483.
+- **P674** (Notification Router) — obsolete. The notification architecture was absorbed into the A2A messaging layer (P907/P1132).
+
+## Active High-Priority Proposals
+
+The following proposals are the most impactful currently in-flight work:
+
+| ID | State | Title |
+|----|-------|-------|
+| P3796 | DEVELOP | Monolith decomposition: roadmap.ts (6 191 lines) / server/index.ts (6 761 lines) |
+| P3566 | DEVELOP | Gate-advance authorization integrity (reviewer independence) |
+| P3535 | DEVELOP | Decouple maturity lifecycle from lease occupancy |
+| P1391 | DEVELOP | Lease lifecycle as TTL + first-class hold/reject verdict wiring |
+| P3781 | DEVELOP | Configuration Management: runtime_flag categorization + web UI |
+| P3840 | DEVELOP | Unified orchestrator job-posting pool |
+| P3793 | DEVELOP | Codebase Gap Analysis (see `docs/architecture/gap-analysis-2026-06.md`) |
+| P3563 | DRAFT | Acceptance loop ground-truth: independent, evidenced, non-vacuous AC verification |
+
+For a full gap assessment, see `docs/architecture/gap-analysis-2026-06.md` (P3793). That analysis identified documentation drift, config-management layer gaps, and CLI migration status as priority areas.
+
 ## COMPLETE (544)
 | ID | Title | AC |
 |----|-------|----|
