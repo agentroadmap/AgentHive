@@ -141,6 +141,7 @@ const EMPTY_EXTRAS_BUNDLE: ProposalExtrasBundle = {
 // the per-process pg-Pool was contended).
 async function fetchProposalExtrasFromPg(
 	proposalId: string,
+	attempt = 1,
 ): Promise<ProposalExtrasBundle> {
 	const idNum = parseInt(proposalId.replace(/^[A-Za-z-]+/, ""), 10);
 	if (Number.isNaN(idNum)) return EMPTY_EXTRAS_BUNDLE;
@@ -216,8 +217,23 @@ async function fetchProposalExtrasFromPg(
 			activityLog: r.activity_log ?? [],
 		};
 	} catch (err) {
+		const msg = (err as Error).message ?? String(err);
+		// P3564: a stale pooled socket (e.g. after a Postgres/pgbouncer bounce)
+		// fails the FIRST checkout with a transient connection error, then the
+		// pool opens a fresh one. Retry those so a momentary blip doesn't render
+		// as "no acceptance criteria / no reviews". SQL/shape errors are NOT
+		// transient — fall through to the empty bundle immediately.
+		const MAX_ATTEMPTS = 3;
+		const transient =
+			/connection terminated|connection timeout|timeout expired|ECONNRESET|EPIPE|connection closed|terminating connection|server closed the connection/i.test(
+				msg,
+			);
+		if (transient && attempt < MAX_ATTEMPTS) {
+			await new Promise((r) => setTimeout(r, 150 * attempt));
+			return fetchProposalExtrasFromPg(proposalId, attempt + 1);
+		}
 		console.error(
-			`[popup] pg fetch for ${proposalId} failed: ${(err as Error).message}`,
+			`[popup] pg fetch for ${proposalId} failed${attempt > 1 ? ` after ${attempt} attempts` : ""}: ${msg}`,
 		);
 		return EMPTY_EXTRAS_BUNDLE;
 	}

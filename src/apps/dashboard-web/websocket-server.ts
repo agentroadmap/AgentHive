@@ -7,15 +7,50 @@
 
 import { createServer } from "node:http";
 import { WebSocket, WebSocketServer } from "ws";
+import type { Pool, PoolClient } from "pg";
 import {
 	getPool,
 	query,
 	setPoolLifecycleMode,
 	startPoolPoisonWatchdog,
 } from "../../infra/postgres/pool.ts";
+import { ConfigResolver } from "../../shared/runtime/config.ts";
 
 let wss: WebSocketServer | null = null;
 const clients = new Set<WebSocket>();
+
+// P3564: LISTEN cannot run on PgBouncer transaction-mode, so using the shared
+// query pool for LISTEN pins it to direct 5432 and forces every 6432 query
+// caller onto the signature-refusal path (the dual-signature WARN spam) while
+// also stopping the query pool from surviving a Postgres restart via PgBouncer.
+// Give LISTEN its OWN dedicated direct-5432 pool (P827 pattern, max:1) so the
+// shared query pool stays on PgBouncer 6432. Falls back to the shared pool when
+// PGPORT_DIRECT is not configured (preserves legacy behaviour).
+let directListenPool: Pool | null = null;
+
+async function connectListenClient(): Promise<PoolClient> {
+	const directPortEnv = process.env.PGPORT_DIRECT;
+	const directPort = Number(directPortEnv);
+	if (
+		directPortEnv &&
+		Number.isFinite(directPort) &&
+		directPort > 0 &&
+		directPort <= 65535
+	) {
+		if (!directListenPool) {
+			const { Pool } = await import("pg");
+			const poolOptions = (getPool() as unknown as { options?: Record<string, unknown> }).options ?? {};
+			directListenPool = new Pool(
+				ConfigResolver.buildDirectListenPoolConfig(poolOptions, directPort),
+			);
+			directListenPool.on("error", (err) => {
+				console.error("[WS] direct LISTEN pool error:", err.message);
+			});
+		}
+		return directListenPool.connect();
+	}
+	return getPool().connect();
+}
 
 // ─── Phase 4: Runtime probe for notification_inbox table ─────────────────────
 
@@ -438,8 +473,7 @@ export function startWebSocketServer(port = 3001): void {
 	// LISTEN client errors out after the fact (idle disconnects, PG restart).
 	void (async () => {
 		const setupListener = async (): Promise<void> => {
-			const pool = getPool();
-			const pgClient = await pool.connect();
+			const pgClient = await connectListenClient();
 			pgClient.on("error", (err) => {
 				console.error("[WS] pg_notify client error, will reconnect:", err.message);
 				try { pgClient.release(true); } catch { /* already released */ }

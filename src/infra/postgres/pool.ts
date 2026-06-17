@@ -192,6 +192,10 @@ type ResolvedPoolConfig = {
 	queryTimeoutMillis: number;
 	statementTimeoutMillis: number;
 	max: number;
+	// P3564: prune idle sockets so a checkout after a Postgres/pgbouncer
+	// restart doesn't return a dead socket ("Connection terminated due to
+	// connection timeout").
+	idleTimeoutMillis: number;
 };
 
 type ParsedDatabaseUrl = {
@@ -372,6 +376,14 @@ function resolvePoolConfig(config?: AgentHivePoolConfig): ResolvedPoolConfig {
 			(config as PoolConfig | undefined)?.max ?? process.env.PG_POOL_MAX,
 			30,
 		),
+		// P3564: 30s idle reap. Long enough to keep warm connections for an
+		// interactive TUI / busy service, short enough that sockets killed by a
+		// DB bounce are pruned before the next checkout. Override with any
+		// positive value via PG_POOL_IDLE_TIMEOUT_MS.
+		idleTimeoutMillis: parsePositiveInteger(
+			process.env.PG_POOL_IDLE_TIMEOUT_MS,
+			30_000,
+		),
 	};
 }
 
@@ -431,6 +443,13 @@ export function getPool(config?: AgentHivePoolConfig): Pool {
 			statement_timeout: resolvedConfig.statementTimeoutMillis,
 			max: resolvedConfig.max,
 			allowExitOnIdle: true,
+			// P3564: TCP keepalive surfaces a dead peer (e.g. after a Postgres
+			// restart) instead of blocking until connectionTimeoutMillis, and
+			// idleTimeoutMillis reaps idle clients so the next checkout opens a
+			// fresh socket rather than returning a stale one.
+			keepAlive: true,
+			keepAliveInitialDelayMillis: 10_000,
+			idleTimeoutMillis: resolvedConfig.idleTimeoutMillis,
 		});
 		installPoolEndGuard(pool);
 		poolSignature = nextSignature;
