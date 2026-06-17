@@ -13,6 +13,8 @@
  */
 
 import type { Client, Pool } from "pg";
+import * as runtimeConfig from "../../shared/runtime/config.ts";
+import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 
 import type { NotificationChannel, OutboundMessage } from "../messaging/gateway/adapter.ts";
 import { moveToDlq } from "../messaging/gateway/dlq.ts";
@@ -32,6 +34,16 @@ const BACKOFF_MS = [1_000, 4_000, 12_000, 32_000]; // index = attempts already m
 const POLL_INTERVAL_MS = 30_000;
 const BATCH_SIZE = 25;
 const ERROR_TRUNCATE = 4_000;
+
+async function resolveNotificationPollMs(): Promise<number> {
+	try { return await runtimeConfig.get(FlagKeys.NOTIFICATION_POLL_MS); }
+	catch { return POLL_INTERVAL_MS; }
+}
+
+async function resolveNotificationBatchSize(): Promise<number> {
+	try { return await runtimeConfig.get(FlagKeys.NOTIFICATION_BATCH_SIZE); }
+	catch { return BATCH_SIZE; }
+}
 
 export interface RouterDeps {
 	pool: Pool;
@@ -98,9 +110,10 @@ export class NotificationRouter {
 			this.errorLog(`[notification-router] LISTEN error: ${err.message}`);
 		});
 
+		const pollIntervalMs = await resolveNotificationPollMs();
 		this.pollTimer = setInterval(() => {
 			void this.scheduleDrain();
-		}, POLL_INTERVAL_MS);
+		}, pollIntervalMs);
 		this.pollTimer.unref?.();
 
 		// Initial drain in case anything was waiting before we attached.
@@ -162,6 +175,7 @@ export class NotificationRouter {
 		// `payload`, `dispatched_at`, and `next_attempt_at` columns. Pending-row
 		// detection uses `status='pending'` (live CHECK constraint). payload is
 		// materialized as NULL so QueueRow stays shape-compatible.
+		const batchSize = await resolveNotificationBatchSize();
 		const { rows } = await this.deps.pool.query<QueueRow>(
 			`SELECT id, severity, kind, channel, proposal_id,
 			        title, body, NULL::jsonb AS payload, metadata, created_at, dispatch_attempts
@@ -178,7 +192,7 @@ export class NotificationRouter {
 			    created_at ASC
 			  LIMIT $1
 			  FOR UPDATE SKIP LOCKED`,
-			[BATCH_SIZE],
+			[batchSize],
 		);
 		return rows;
 	}

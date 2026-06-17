@@ -26,6 +26,8 @@
 import * as crypto from "node:crypto";
 import { EventEmitter } from "node:events";
 import { query } from "../../infra/postgres/pool.ts";
+import * as runtimeConfig from "../../shared/runtime/config.ts";
+import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -61,6 +63,21 @@ const DEFAULT_POLL_INTERVAL_MS = 30_000;
 const HEALTH_FAIL_QUARANTINE_THRESHOLD = 3;
 const STALE_SYNC_THRESHOLD_MS = 60 * 60 * 1000; // 1 hour
 const PING_TIMEOUT_MS = 5_000;
+
+export async function resolveFederationSyncPollMs(): Promise<number> {
+	try { return await runtimeConfig.get(FlagKeys.FEDERATION_SYNC_POLL_MS); }
+	catch { return DEFAULT_POLL_INTERVAL_MS; }
+}
+
+async function resolveFederationQuarantineThreshold(): Promise<number> {
+	try { return await runtimeConfig.get(FlagKeys.FEDERATION_QUARANTINE_THRESHOLD); }
+	catch { return HEALTH_FAIL_QUARANTINE_THRESHOLD; }
+}
+
+async function resolveFederationPingTimeoutMs(): Promise<number> {
+	try { return await runtimeConfig.get(FlagKeys.FEDERATION_PING_TIMEOUT_MS); }
+	catch { return PING_TIMEOUT_MS; }
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -371,7 +388,8 @@ export class FederationSync extends EventEmitter {
 		}
 
 		const start = Date.now();
-		const result = await this.signedFetch(peer, "GET", "/health", undefined, PING_TIMEOUT_MS);
+		const pingTimeoutMs = await resolveFederationPingTimeoutMs();
+		const result = await this.signedFetch(peer, "GET", "/health", undefined, pingTimeoutMs);
 		const latencyMs = Date.now() - start;
 
 		if (!result.ok) {
@@ -415,8 +433,9 @@ export class FederationSync extends EventEmitter {
 				[peer.peer_uuid],
 			);
 			const failCount = rows[0]?.health_fail_count ?? 0;
+			const quarantineThreshold = await resolveFederationQuarantineThreshold();
 
-			if (failCount >= HEALTH_FAIL_QUARANTINE_THRESHOLD) {
+			if (failCount >= quarantineThreshold) {
 				await this.db(
 					`UPDATE roadmap.federation_peers
                         SET status = 'quarantined', updated_at = now()
