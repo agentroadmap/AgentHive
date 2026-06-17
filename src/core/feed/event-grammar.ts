@@ -90,14 +90,26 @@ export const RUN_EMOJI = {
 // ─── Agent identity normalization ───────────────────────────────────────────
 
 /**
- * Normalize a raw agent identity for display. Collapses the worker spawn form
- * "worker-12 (claude)@host" → "host/claude"; otherwise returns the trimmed
- * identity (or "agent" when empty).
+ * Normalize a raw agent identity for display. Two collapses, so the same
+ * logical actor is spoken with one name across the Discord + TUI feeds:
+ *
+ *   1. Worker spawn form "worker-12 (claude)@host" → "host/claude".
+ *   2. Agency-liaison suffix "<agency>.a" → "<agency>". Per the operator
+ *      identity model, `claude-bot-gary` is the AGENCY and `claude-bot-gary.a`
+ *      is its liaison (the dispatcher session); a lease the liaison claims on
+ *      the agency's behalf reads as the agency. Without this, the feed shows
+ *      both names for what is one actor and looks inconsistent. Only a trailing
+ *      ".a" (the documented liaison form) is stripped — hyphenated identities
+ *      like `claude-bot-gary-a` (a distinct LLM route) are left untouched.
+ *
+ * Otherwise returns the trimmed identity (or "agent" when empty).
  */
 export function normalizeAgent(raw: string | null | undefined): string {
 	const s = (raw ?? "").trim();
 	if (!s) return "agent";
 	const m = /^worker-\d+\s+\(([^)]+)\)@(.+)$/i.exec(s);
 	if (m) return `${m[2]}/${m[1]}`;
+	const liaison = /^(.+)\.a$/.exec(s);
+	if (liaison) return liaison[1];
 	return s;
 }
