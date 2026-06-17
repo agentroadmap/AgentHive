@@ -43,8 +43,20 @@ export interface ServerContext {
 	setProjectName: (name: string) => void;
 	/** Notify all SSE-connected dashboard clients that proposal data has changed. */
 	broadcastProposalsUpdated: () => void;
+	/** Broadcast a single proposal insert/update/delete to subscribed clients. */
+	broadcastProposalUpdate: (
+		type: "proposal_update" | "proposal_insert" | "proposal_delete",
+		data: unknown,
+	) => void;
 	/** Resolve the project scope for an incoming request (header/query/default). */
 	resolveProjectScope: (req: Request) => Promise<ProjectScope>;
 	/** Convert an unexpected error into a 500 Response (with logging). */
 	handleError: (error: Error) => Response;
+	/** Resolve (and ensure ready) the content store backing search/indexing. */
+	getContentStore: () => Promise<ContentStore>;
+	/**
+	 * Resolve a directive input (id/alias/title) to a canonical directive id.
+	 * Mirrors `RoadmapServer.resolveDirectiveInput`.
+	 */
+	resolveDirectiveInput: (directive: string) => Promise<string>;
 }
