@@ -88,20 +88,32 @@ describe("P3784 configList core", () => {
 		}
 	});
 
-	// ── AC-10: category is null pre-P3782 ──────────────────────────────────
+	// ── AC-10: category is string | null; filter by real/fake category works ──
 
-	it("AC-10: all category fields are null (P3782 not landed)", async () => {
+	it("AC-10: category fields are string or null (P3782 landed — categories populated for flag keys)", async () => {
 		const result = await configList();
 		for (const d of result.keys) {
-			expect(d.category).toBeNull();
+			expect(d.category === null || typeof d.category === "string").toBe(true);
 		}
+		// At least some keys now have a non-null category (P3782 merged)
+		const withCategory = result.keys.filter((k) => k.category !== null);
+		expect(withCategory.length).toBeGreaterThan(0);
 	});
 
-	it("AC-10: category filter with non-null value returns empty list", async () => {
+	it("AC-10: category filter with non-existent category returns empty list", async () => {
 		const result = await configList({ category: "infra" });
 		expect(result.keys).toHaveLength(0);
 		expect(result.count).toBe(0);
 		expect(result.category_filter).toBe("infra");
+	});
+
+	it("AC-10: category filter with real category returns only matching keys", async () => {
+		const result = await configList({ category: "dispatch" });
+		expect(result.keys.length).toBeGreaterThan(0);
+		for (const d of result.keys) {
+			expect(d.category).toBe("dispatch");
+		}
+		expect(result.category_filter).toBe("dispatch");
 	});
 
 	// ── AC-11: editability by class ────────────────────────────────────────
