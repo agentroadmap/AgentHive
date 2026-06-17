@@ -26,6 +26,16 @@ secret-scan:
     - gitleaks detect --source . --verbose
   allow_failure: true
 
+scan-secrets:
+  stage: security
+  script:
+    - npm ci
+    - npm run scan:secrets
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
+
 dependency-audit:
   stage: security
   script:

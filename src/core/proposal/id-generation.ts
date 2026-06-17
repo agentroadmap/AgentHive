@@ -81,6 +81,10 @@ export function filterProposalsByProposalSnapshots(
 	});
 }
 
+/**
+ * Extract IDs from proposal map where latest proposal is "proposal" or "completed" (not "archived" or "draft")
+ * Used for ID generation to determine which IDs are in use.
+ */
 export function getActiveAndCompletedIdsFromProposalMap(
 	latestProposal: Map<string, BranchProposalProposalEntry>,
 ): string[] {

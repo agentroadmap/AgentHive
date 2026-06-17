@@ -1,17 +1,17 @@
 import type { AcceptanceCriterion, Proposal } from "../../types/index.ts";
 
-export interface AcceptanceCriteriaDeps {
+export interface CriteriaStorage {
 	loadProposal(id: string): Promise<Proposal | null>;
 	updateProposal(proposal: Proposal, autoCommit?: boolean): Promise<void>;
 }
 
 export async function addAcceptanceCriteria(
-	deps: AcceptanceCriteriaDeps,
+	ctx: CriteriaStorage,
 	proposalId: string,
 	criteria: string[],
 	autoCommit?: boolean,
 ): Promise<void> {
-	const proposal = await deps.loadProposal(proposalId);
+	const proposal = await ctx.loadProposal(proposalId);
 	if (!proposal) {
 		throw new Error(`Proposal not found: ${proposalId}`);
 	}
@@ -30,16 +30,16 @@ export async function addAcceptanceCriteria(
 	}));
 	proposal.acceptanceCriteriaItems = [...current, ...newCriteria];
 
-	await deps.updateProposal(proposal, autoCommit);
+	await ctx.updateProposal(proposal, autoCommit);
 }
 
 export async function removeAcceptanceCriteria(
-	deps: AcceptanceCriteriaDeps,
+	ctx: CriteriaStorage,
 	proposalId: string,
 	indices: number[],
 	autoCommit?: boolean,
 ): Promise<number[]> {
-	const proposal = await deps.loadProposal(proposalId);
+	const proposal = await ctx.loadProposal(proposalId);
 	if (!proposal) {
 		throw new Error(`Proposal not found: ${proposalId}`);
 	}
@@ -68,19 +68,19 @@ export async function removeAcceptanceCriteria(
 	list = list.map((c, i) => ({ ...c, index: i + 1 }));
 	proposal.acceptanceCriteriaItems = list;
 
-	await deps.updateProposal(proposal, autoCommit);
+	await ctx.updateProposal(proposal, autoCommit);
 
 	return removed.sort((a, b) => a - b);
 }
 
 export async function checkAcceptanceCriteria(
-	deps: AcceptanceCriteriaDeps,
+	ctx: CriteriaStorage,
 	proposalId: string,
 	indices: number[],
 	checked: boolean,
 	autoCommit?: boolean,
 ): Promise<number[]> {
-	const proposal = await deps.loadProposal(proposalId);
+	const proposal = await ctx.loadProposal(proposalId);
 	if (!proposal) {
 		throw new Error(`Proposal not found: ${proposalId}`);
 	}
@@ -108,16 +108,16 @@ export async function checkAcceptanceCriteria(
 
 	proposal.acceptanceCriteriaItems = list;
 
-	await deps.updateProposal(proposal, autoCommit);
+	await ctx.updateProposal(proposal, autoCommit);
 
 	return updated.sort((a, b) => a - b);
 }
 
 export async function listAcceptanceCriteria(
-	deps: AcceptanceCriteriaDeps,
+	ctx: CriteriaStorage,
 	proposalId: string,
 ): Promise<AcceptanceCriterion[]> {
-	const proposal = await deps.loadProposal(proposalId);
+	const proposal = await ctx.loadProposal(proposalId);
 	if (!proposal) {
 		throw new Error(`Proposal not found: ${proposalId}`);
 	}

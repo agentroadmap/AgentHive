@@ -289,6 +289,13 @@ class ConfigResolver {
 	/** Dedicated Pool used for LISTEN when PGPORT_DIRECT bypasses PgBouncer. */
 	private directListenPool: Pool | null = null;
 
+	constructor(opts?: { pool?: Pool }) {
+		if (opts?.pool) {
+			this.pool = opts.pool;
+			void this.setupNotifyListener();
+		}
+	}
+
 	// Parse ~/.pgpass for a matching password entry (hostname:port:database:username:password)
 	static parsePgpassFile(
 		pgpassPath: string,
