@@ -170,8 +170,15 @@ export async function getBoardLiveFeed(limit = 100): Promise<StreamEvent[]> {
 					EXTRACT(EPOCH FROM ml.created_at) * 1000 AS timestamp_ms,
 					p.display_id AS proposal_id,
 					ml.from_agent AS agent_id,
-					COALESCE(ml.from_agent, 'agent') || ' -> ' || COALESCE(ml.to_agent, ml.channel, 'broadcast') || ': ' ||
-						left(regexp_replace(COALESCE(ml.message_content, ''), E'[\\n\\r]+', ' ', 'g'), 120)
+					CASE
+						-- System feed rows have from == to (e.g.
+						-- 'system:proposal-feed -> system:proposal-feed:'); that prefix
+						-- is pure noise, so show just the content for self-addressed rows.
+						WHEN COALESCE(ml.from_agent, 'agent') = COALESCE(ml.to_agent, ml.channel, 'broadcast')
+							THEN left(regexp_replace(COALESCE(ml.message_content, ''), E'[\\n\\r]+', ' ', 'g'), 120)
+						ELSE COALESCE(ml.from_agent, 'agent') || ' -> ' || COALESCE(ml.to_agent, ml.channel, 'broadcast') || ': ' ||
+							left(regexp_replace(COALESCE(ml.message_content, ''), E'[\\n\\r]+', ' ', 'g'), 120)
+					END
 						|| COALESCE(' — ' || left(p.title, 48), '') AS message
 				FROM roadmap.message_ledger ml
 				LEFT JOIN roadmap_proposal.proposal p ON p.id = ml.proposal_id
