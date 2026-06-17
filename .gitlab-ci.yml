@@ -16,6 +16,16 @@ secret-scan:
     - gitleaks detect --source . --verbose
   allow_failure: true
 
+scan-secrets:
+  stage: security
+  script:
+    - npm ci
+    - npm run scan:secrets
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
+
 dependency-audit:
   stage: security
   script:
@@ -74,6 +84,26 @@ workflow-states-check:
   script:
     - npm ci
     - npm run scan:workflow-states
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
+
+scan-multi-tenant:
+  stage: check
+  script:
+    - npm ci
+    - npm run scan:multi-tenant
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
+
+scan-agenthive:
+  stage: check
+  script:
+    - npm ci
+    - npm run scan:agenthive
   cache:
     key: ${CI_COMMIT_REF_SLUG}
     paths:

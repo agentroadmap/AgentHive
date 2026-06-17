@@ -1,0 +1,2 @@
+{"rule":"paths.agenthive-project-root","file":"/data/code/worktree/claude2/scripts/run-schema-drift-monitor.ts","line":14,"col":47,"severity":"critical","confidence":"high","proposal":"P448"}
+{"rule":"paths.agenthive-project-root","file":"/data/code/worktree/claude2/src/infra/agency/offer-dispatch-handler.ts","line":1247,"col":27,"severity":"critical","confidence":"high","proposal":"P448"}
