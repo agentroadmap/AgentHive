@@ -7,6 +7,7 @@
 
 import { createServer } from "node:http";
 import { WebSocket, WebSocketServer } from "ws";
+import { Client } from "pg";
 import {
 	getPool,
 	query,
@@ -421,11 +422,21 @@ export function startWebSocketServer(port = 3001): void {
 	// LISTEN client errors out after the fact (idle disconnects, PG restart).
 	void (async () => {
 		const setupListener = async (): Promise<void> => {
-			const pool = getPool();
-			const pgClient = await pool.connect();
+			// P3564: LISTEN must use a dedicated direct (5432) connection — LISTEN is
+			// incompatible with pgbouncer transaction-mode pooling. Using the shared
+			// getPool() here was pinning that pool to 5432 and triggering the
+			// dual-signature guard for every 6432 query caller.
+			const pgClient = new Client({
+				host: process.env.PGHOST ?? "127.0.0.1",
+				port: Number(process.env.PGPORT_DIRECT ?? process.env.PGPORT ?? 5432),
+				user: process.env.PGUSER ?? "xiaomi",
+				database: process.env.PGDATABASE ?? "agenthive",
+				keepAlive: true,
+			});
+			await pgClient.connect();
 			pgClient.on("error", (err) => {
 				console.error("[WS] pg_notify client error, will reconnect:", err.message);
-				try { pgClient.release(true); } catch { /* already released */ }
+				void pgClient.end().catch(() => {});
 				scheduleRetry();
 			});
 			// P753: transition_queued was retired; proposal_maturity_changed +

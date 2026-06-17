@@ -431,6 +431,8 @@ export function getPool(config?: AgentHivePoolConfig): Pool {
 			statement_timeout: resolvedConfig.statementTimeoutMillis,
 			max: resolvedConfig.max,
 			allowExitOnIdle: true,
+			keepAlive: true,
+			idleTimeoutMillis: 30_000,
 		});
 		installPoolEndGuard(pool);
 		poolSignature = nextSignature;
