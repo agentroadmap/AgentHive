@@ -839,6 +839,52 @@ export const FlagKeys = {
 		envOverride: true,
 	} satisfies FlagConfigKey<number>,
 
+	// ─── Liaison LLM timeout (P3781/AC-2) ──────────────────────────────────────
+
+	LIAISON_LLM_TIMEOUT_MS: {
+		name: "LIAISON_LLM_TIMEOUT_MS",
+		class: "flag" as const,
+		category: "liaison" as const,
+		parse: (v: string) => {
+			const parsed = Number(JSON.parse(v));
+			if (!Number.isFinite(parsed) || parsed < 1000 || parsed > 600_000) {
+				throw new Error(`Invalid LIAISON_LLM_TIMEOUT_MS: ${v}. Must be between 1000 and 600000 ms`);
+			}
+			return parsed;
+		},
+		required: false,
+		defaultValue: 30_000,
+		description: "Default LLM call timeout for liaison agents (ms). Per-provider env AGENTHIVE_LIAISON_LLM_TIMEOUT_MS_<PROVIDER> takes precedence. Valid range: 1000-600000.",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies FlagConfigKey<number>,
+
+	// ─── Self-claim agency allowlist (P3781/AC-2) ───────────────────────────────
+
+	SELF_CLAIM_AGENCIES: {
+		name: "SELF_CLAIM_AGENCIES",
+		class: "flag" as const,
+		category: "dispatch" as const,
+		parse: (v: string) => {
+			// Stored as JSON string in DB; may arrive raw from envOverride
+			let raw: string;
+			try {
+				const decoded = JSON.parse(v);
+				raw = typeof decoded === "string" ? decoded : v;
+			} catch {
+				raw = v;
+			}
+			return raw;
+		},
+		required: false,
+		defaultValue: "",
+		description: "Comma-separated agency identities allowed to self-claim work offers (V3-C6 canary). Empty = all agencies allowed.",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies FlagConfigKey<string>,
+
 	// ─── Orchestrator runtime-tunable flags (P1144) ───────────────────────────
 
 	ORCHESTRATOR_SCAN_BATCH_LIMIT: {

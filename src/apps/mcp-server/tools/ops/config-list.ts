@@ -52,8 +52,8 @@ export async function configList(
 		const editable = key.class === "registry" || key.class === "flag";
 		const masked = isSecret;
 
-		// AC-10: category is absent pre-P3782 → null, no throw
-		const category = (key as Record<string, unknown>).category as string | null ?? null;
+		// AC-10: category added by P3782; keys without it (non-flag) emit null
+		const category = key.category ?? null;
 
 		// Apply category filter
 		if (categoryFilter !== null && category !== categoryFilter) {
