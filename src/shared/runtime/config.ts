@@ -31,6 +31,7 @@ import {
 	agentContextStorage,
 	type VerifiedPrincipal,
 } from "../identity/agent-context.ts";
+import type { ConfigKeyCategory } from "./config-keys.ts";
 
 /** The principal kinds carried in agentContextStorage. */
 type VerifiedPrincipalKind = VerifiedPrincipal["principal_kind"];
@@ -49,7 +50,7 @@ export interface ConfigKey<T> {
 	required: boolean;
 	description?: string;
 	/** P3782: grouping category for TUI / web UI display and audit filtering. */
-	category?: string;
+	category?: ConfigKeyCategory;
 	yamlPath?: string;
 	/**
 	 * Optional yaml-assembly function for keys whose value is derived from

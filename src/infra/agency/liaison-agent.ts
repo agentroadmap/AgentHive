@@ -191,7 +191,9 @@ export async function runLiaisonAgent(
 	// agencies even when the global flag is on — enabling a single-agency canary.
 	// Empty allowlist = all agencies (backward-compatible with the pre-allowlist
 	// behavior). Parsed per-call so it composes with the global flag.
-	const selfClaimAllowlist = (process.env.AGENTHIVE_SELF_CLAIM_AGENCIES ?? "")
+	const selfClaimAllowlist = (
+		(await runtimeConfig.getOptional(FlagKeys.AGENTHIVE_SELF_CLAIM_AGENCIES)) ?? ""
+	)
 		.split(",")
 		.map((s) => s.trim())
 		.filter(Boolean);
@@ -429,7 +431,7 @@ export async function runLiaisonAgent(
 			const prompt = `${systemContext}\n\n---\nIncoming message:\n${msg.message_content}`;
 
 			replyContent = await invokeCliHandler(handler, prompt, {
-				timeoutMs: resolveLiaisonLlmTimeoutMs(provider),
+				timeoutMs: await resolveLiaisonLlmTimeoutMs(provider),
 			});
 		} catch (err) {
 			const errMsg = err instanceof Error ? err.message : String(err);

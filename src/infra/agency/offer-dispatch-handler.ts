@@ -48,6 +48,8 @@ import { classifyExit } from "../../core/orchestration/agent-spawner.ts";
 import { incrementSpawnFailure, THROTTLE_THRESHOLD } from "../../core/orchestration/resolvers/agency-resolver.ts";
 import { validateProposal } from "../../core/orchestration/d4-validator.ts";
 import { verifyDeliverables } from "../../core/orchestration/deliverable-verifier.ts";
+import * as config from "../../shared/runtime/config.ts";
+import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 
 const obs = new ObservabilityWriter("agency:offer-dispatch-handler");
 
@@ -903,9 +905,8 @@ async function runSpawn(args: {
 	if (!succeeded && result) {
 		const exitClass = classifyExit(result.stdout, result.stderr, result.exitCode);
 		if (exitClass.outcome === "rate_limited" && exitClass.resetAt && exitClass.quotaErrorProvider) {
-			const HOLD_WINDOW_MAX_SEC = Number(
-				process.env.AGENTHIVE_HOLD_WINDOW_MAX_SEC ?? 1800,
-			); // default 30min
+			const HOLD_WINDOW_MAX_SEC =
+				(await config.getOptional(FlagKeys.AGENTHIVE_HOLD_WINDOW_MAX_SEC)) ?? 1800;
 			const deltaMs = exitClass.resetAt.getTime() - Date.now();
 			const deltaSec = Math.ceil(deltaMs / 1000);
 

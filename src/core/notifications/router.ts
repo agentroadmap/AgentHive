@@ -14,6 +14,8 @@
 
 import type { Client, Pool } from "pg";
 
+import * as runtimeConfig from "../../shared/runtime/config.ts";
+import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 import type { NotificationChannel, OutboundMessage } from "../messaging/gateway/adapter.ts";
 import { moveToDlq } from "../messaging/gateway/dlq.ts";
 import { TransportWakeTimeoutError } from "../messaging/gateway/errors.ts";
@@ -27,11 +29,8 @@ import {
 	TransportError,
 } from "./types.ts";
 
-const MAX_ATTEMPTS = 5;
-const BACKOFF_MS = [1_000, 4_000, 12_000, 32_000]; // index = attempts already made
-const POLL_INTERVAL_MS = 30_000;
-const BATCH_SIZE = 25;
-const ERROR_TRUNCATE = 4_000;
+const BACKOFF_MS = [1_000, 4_000, 12_000, 32_000]; // index = attempts already made — array, not promoted
+const ERROR_TRUNCATE = 4_000; // internal formatting constant, not operator-tunable
 
 export interface RouterDeps {
 	pool: Pool;
@@ -73,6 +72,8 @@ export class NotificationRouter {
 	private draining = false;
 	private stopped = false;
 	private wakePending = false;
+	private batchSize = 25;
+	private maxAttempts = 5;
 
 	private readonly deps: RouterDeps;
 	private readonly log: (m: string) => void;
@@ -87,6 +88,13 @@ export class NotificationRouter {
 	}
 
 	async run(): Promise<void> {
+		// Resolve tunables once at startup; live-reload not needed for poll interval.
+		[this.batchSize, this.maxAttempts] = await Promise.all([
+			runtimeConfig.get(FlagKeys.NOTIFICATION_ROUTER_BATCH_SIZE).catch(() => 25),
+			runtimeConfig.get(FlagKeys.NOTIFICATION_ROUTER_MAX_ATTEMPTS).catch(() => 5),
+		]);
+		const pollIntervalMs = await runtimeConfig.get(FlagKeys.NOTIFICATION_ROUTER_POLL_MS).catch(() => 30_000);
+
 		this.listener = await this.deps.listenerFactory();
 		await this.listener.query("LISTEN notification_enqueued");
 		this.listener.on("notification", (msg) => {
@@ -100,7 +108,7 @@ export class NotificationRouter {
 
 		this.pollTimer = setInterval(() => {
 			void this.scheduleDrain();
-		}, POLL_INTERVAL_MS);
+		}, pollIntervalMs);
 		this.pollTimer.unref?.();
 
 		// Initial drain in case anything was waiting before we attached.
@@ -178,7 +186,7 @@ export class NotificationRouter {
 			    created_at ASC
 			  LIMIT $1
 			  FOR UPDATE SKIP LOCKED`,
-			[BATCH_SIZE],
+			[this.batchSize],
 		);
 		return rows;
 	}
@@ -209,7 +217,7 @@ export class NotificationRouter {
 						} catch (err) {
 							if (err instanceof TransportWakeTimeoutError) {
 								const newAttempts = row.dispatch_attempts + 1;
-								if (newAttempts >= MAX_ATTEMPTS) {
+								if (newAttempts >= this.maxAttempts) {
 									await this.markFailed(envelope.queueId, newAttempts, err.message);
 									await this.moveToDlqRow(envelope, newAttempts, effectiveChannel, "WAKE_TIMEOUT");
 									return;
@@ -252,7 +260,7 @@ export class NotificationRouter {
 		const newAttempts = row.dispatch_attempts + 1;
 		const lastError = errors.join("; ").slice(0, ERROR_TRUNCATE);
 
-		if (newAttempts >= MAX_ATTEMPTS) {
+		if (newAttempts >= this.maxAttempts) {
 			await this.markFailed(envelope.queueId, newAttempts, lastError);
 			const effectiveChannel = row.channel
 				?? transportNameToChannel(routes[0]?.transport ?? "")
