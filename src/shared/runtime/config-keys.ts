@@ -758,6 +758,40 @@ export const FlagKeys = {
 		envOverride: true,
 	} satisfies ConfigKey<boolean>,
 
+	// P3840 Part 2: master switch for the deliberate D1–D4 gate-offer pipeline.
+	// Default OFF.
+	//
+	// Flag OFF ⇒ EXACTLY today's behavior: getRolesForQueue FILTERS OUT any role
+	//   whose required_capabilities include 'gate_review' (the deliberate
+	//   gate-review rows seeded by migration 295), so mature proposals resolve to
+	//   an empty mature role set and the orchestrator posts no gate offers. Safe
+	//   to merge + apply migration 295 before enabling: nothing dispatches.
+	// Flag ON  ⇒ the gate-review rows are resolved as the (only) mature role; the
+	//   orchestrator posts an OPEN gate-review offer (required_capabilities
+	//   ['gate_review']) that the worker liaison can NOT auto-claim (it advertises
+	//   no gate_review job) and that is NEVER auto-decided. A qualified gater
+	//   claims it and calls gate_decision deliberately.
+	//
+	// Read via env>DB>default by role-resolver.ts:isDeliberateGateOffersEnabled.
+	DELIBERATE_GATE_OFFERS_ENABLED: {
+		name: "AGENTHIVE_DELIBERATE_GATE_OFFERS_ENABLED",
+		class: "flag" as const,
+		parse: (v: string) => {
+			try {
+				return JSON.parse(v) === true;
+			} catch {
+				return v.toLowerCase() === "true" || v === "1";
+			}
+		},
+		required: false,
+		defaultValue: false,
+		description:
+			"P3840: enable the deliberate D1–D4 gate-offer pipeline (gate-review roles for mature proposals). Default OFF — gate-review roles are filtered out of role resolution.",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies ConfigKey<boolean>,
+
 	ENABLE_MULTI_TENANT: {
 		name: "ENABLE_MULTI_TENANT",
 		class: "flag" as const,

@@ -18,11 +18,51 @@
  */
 
 import { query as defaultQuery } from "../../infra/postgres/pool.ts";
+import * as runtimeConfig from "../../shared/runtime/config.ts";
+import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 
 type QueryFn = (
 	sql: string,
 	params?: unknown[],
 ) => Promise<{ rows: Record<string, unknown>[] }>;
+
+/**
+ * P3840 Part 2: the capability that marks a role as a DELIBERATE gate-review
+ * offer (vs. a build/work role). Roles carrying this capability are only
+ * resolvable when AGENTHIVE_DELIBERATE_GATE_OFFERS_ENABLED is ON; otherwise
+ * getRolesForQueue filters them out so behavior is exactly pre-P3840.
+ *
+ * Exported so the gate-offer pipeline, the gate-desk capability seed, and tests
+ * all reference the single source of truth for the job name.
+ */
+export const GATE_REVIEW_CAPABILITY = "gate_review";
+
+/** Injectable flag resolver — async predicate returning the master flag. */
+export type FlagFn = () => Promise<boolean>;
+
+/**
+ * Resolve the P3840 deliberate-gate-offers master flag with the standard
+ * env>DB>default cascade. Fails to OFF on any error so role resolution never
+ * wedges (mirrors isGateAuthorityEnabled in gate-authority.ts).
+ */
+export async function isDeliberateGateOffersEnabled(): Promise<boolean> {
+	const env = process.env.AGENTHIVE_DELIBERATE_GATE_OFFERS_ENABLED;
+	if (env !== undefined) {
+		return env === "1" || env.toLowerCase() === "true";
+	}
+	try {
+		return (
+			(await runtimeConfig.get(FlagKeys.DELIBERATE_GATE_OFFERS_ENABLED)) === true
+		);
+	} catch {
+		return false; // default OFF
+	}
+}
+
+/** True when a role profile is a deliberate gate-review role (P3840). */
+function isGateReviewRole(p: RoleProfile): boolean {
+	return (p.requiredCapabilities ?? []).includes(GATE_REVIEW_CAPABILITY);
+}
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -135,8 +175,26 @@ ORDER BY priority ASC
 export async function getRolesForQueue(
 	key: QueueKey,
 	queryFn: QueryFn = defaultQuery,
+	flagFn: FlagFn = isDeliberateGateOffersEnabled,
 ): Promise<RoleProfile[]> {
 	const { workflowTemplateId, stage, maturity, projectId = null } = key;
+
+	// P3840 Part 2: resolve the deliberate-gate-offers master flag once. When OFF
+	// (default), gate-review roles are filtered out below so behavior is exactly
+	// pre-P3840 (no gate offers post). Fails to OFF on error.
+	let deliberateGateEnabled = false;
+	try {
+		deliberateGateEnabled = await flagFn();
+	} catch {
+		deliberateGateEnabled = false;
+	}
+
+	// Drop gate-review roles unless the flag is ON. Always applied (DB + fallback)
+	// so the dormant-by-default contract holds regardless of resolution source.
+	const applyGateFilter = (profiles: RoleProfile[]): RoleProfile[] =>
+		deliberateGateEnabled
+			? profiles
+			: profiles.filter((p) => !isGateReviewRole(p));
 
 	try {
 		const { rows } = await queryFn(SQL_ROLES, [
@@ -147,7 +205,7 @@ export async function getRolesForQueue(
 		]);
 
 		if (rows.length > 0) {
-			return rows.map((r) => ({
+			const mapped = rows.map((r) => ({
 				id: r.id == null ? null : Number(r.id),
 				role: String(r.role),
 				requiredCapabilities: (r.required_capabilities as string[]) ?? [],
@@ -159,6 +217,7 @@ export async function getRolesForQueue(
 				priority: Number(r.priority),
 				source: "db" as const,
 			}));
+			return applyGateFilter(mapped);
 		}
 	} catch (err) {
 		console.warn(
@@ -167,7 +226,7 @@ export async function getRolesForQueue(
 		);
 	}
 
-	return builtinFallback(stage, maturity);
+	return applyGateFilter(builtinFallback(stage, maturity));
 }
 
 /**
