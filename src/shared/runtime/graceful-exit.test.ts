@@ -102,17 +102,17 @@ const ENTRYPOINTS: Entrypoint[] = [
 	{
 		name: "orchestrator",
 		script: "scripts/orchestrator.ts",
-		readyMarker: "Orchestrator started",
+		readyMarker: "[orchestrator-shim] running",
 	},
 	{
 		name: "a2a-host",
 		script: "scripts/start-a2a-host.ts",
-		readyMarker: "A2A host listening",
+		readyMarker: "[a2a-host] boot complete",
 	},
 	{
 		name: "mcp",
 		script: "scripts/mcp-sse-server.js",
-		readyMarker: "AgentHive MCP server",
+		readyMarker: "[MCP] AgentHive MCP server",
 	},
 ];
 
