@@ -1086,21 +1086,23 @@ hive dispatch list --proposal P123 --state new
 
 ## 8. Implementation Roadmap (Sketch)
 
-| Phase | Duration | Deliverables | Depends On |
-| --- | --- | --- | --- |
-| **Phase 1: Core Scaffolding** | 1 week | Domain module template, context resolution, formatters, mcp-client wrapper, control-plane-client | — |
-| **Phase 2: Proposal Domain** | 2 weeks | proposal create/get/list/search/edit/claim/release/transition/maturity (without MCP integration, mock first) | Phase 1 |
-| **Phase 3: Workflow + State** | 1 week | workflow list/show, state next/history (read from control plane) | Phase 1, P453 (state-names) |
-| **Phase 4: Provider + Route + Budget** | 1.5 weeks | provider/model/route/budget list/show/toggle (read from control DB) | Phase 1, control-plane DDL (P411) |
-| **Phase 5: Dispatch + Queue** | 1 week | dispatch list/show, offer list, queue show, stop dispatch|proposal|agency|host|worker|route | Phase 1, Phase 2 (for proposal context) |
-| **Phase 6: Service + System Ops** | 1 week | service list/status/restart/logs, mcp ping/smoke/health, db migrate/check, cubic list/clean/repair | Phase 1 |
-| **Phase 7: Audit + Observability** | 1 week | audit feed/events, metrics show, report run | Phase 1, control-plane audit schema (P410) |
-| **Phase 8: Scan + Lint** | 1 week | scan hardcoding/secrets/performance, lint eslint/tsc (P454 hardcoding scanner) | Phase 1, P454 scanner impl |
-| **Phase 9: Knowledge + Doctor** | 1 week | kb add/search, memory show/set/delete, doctor readiness suite | Phase 1, P446 doctor spec |
-| **Phase 10: Board + UI Launchers** | 1.5 weeks | board (tmux TUI), web (dev server launch), tui alias | Phase 1, existing board code |
-| **Phase 11: Help + Completion + Version** | 0.5 weeks | hierarchical help, shell completion, version command | Phase 1–10 (all domains) |
-| **Phase 12: Migration + Docs** | 1 week | roadmap compat shim, deprecation guide, ADR docs, help recipes | Phase 1–11 |
-| **Phase 13: Testing + Polish** | 2 weeks | E2E tests (against mock control plane), performance tuning, UX refinement | Phase 1–12 |
+> **Status as of 2026-06-17:** `bin/hive` shim and `jiti` runtime are present. No prebuilt `dist/hive-cli.cjs.js` bundle exists yet. Dependency proposals P453, P410, P411, P446, P454 are all COMPLETE.
+
+| Phase | Duration | Deliverables | Depends On | Status |
+| --- | --- | --- | --- | --- |
+| **Phase 1: Core Scaffolding** | 1 week | Domain module template, context resolution, formatters, mcp-client wrapper, control-plane-client | — | ✅ COMPLETE |
+| **Phase 2: Proposal Domain** | 2 weeks | proposal create/get/list/search/edit/claim/release/transition/maturity (without MCP integration, mock first) | Phase 1 | 🔨 PARTIAL |
+| **Phase 3: Workflow + State** | 1 week | workflow list/show, state next/history (read from control plane) | Phase 1, P453 (state-names) | 🔨 PARTIAL |
+| **Phase 4: Provider + Route + Budget** | 1.5 weeks | provider/model/route/budget list/show/toggle (read from control DB) | Phase 1, control-plane DDL (P411) | 🔨 PARTIAL |
+| **Phase 5: Dispatch + Queue** | 1 week | dispatch list/show, offer list, queue show, stop dispatch\|proposal\|agency\|host\|worker\|route | Phase 1, Phase 2 (for proposal context) | 🔨 PARTIAL |
+| **Phase 6: Service + System Ops** | 1 week | service list/status/restart/logs, mcp ping/smoke/health, db migrate/check, cubic list/clean/repair | Phase 1 | 🔨 PARTIAL |
+| **Phase 7: Audit + Observability** | 1 week | audit feed/events, metrics show, report run | Phase 1, control-plane audit schema (P410) | 🔨 PARTIAL |
+| **Phase 8: Scan + Lint** | 1 week | scan hardcoding/secrets/performance, lint eslint/tsc (P454 hardcoding scanner) | Phase 1, P454 scanner impl | 🔨 PARTIAL |
+| **Phase 9: Knowledge + Doctor** | 1 week | kb add/search, memory show/set/delete, doctor readiness suite | Phase 1, P446 doctor spec | 🔨 PARTIAL |
+| **Phase 10: Board + UI Launchers** | 1.5 weeks | board (tmux TUI), web (dev server launch), tui alias | Phase 1, existing board code | ⬜ NOT STARTED |
+| **Phase 11: Help + Completion + Version** | 0.5 weeks | hierarchical help, shell completion, version command | Phase 1–10 (all domains) | ⬜ NOT STARTED |
+| **Phase 12: Migration + Docs** | 1 week | roadmap compat shim, deprecation guide, ADR docs, help recipes | Phase 1–11 | ⬜ NOT STARTED |
+| **Phase 13: Testing + Polish** | 2 weeks | E2E tests (against mock control plane), performance tuning, UX refinement | Phase 1–12 | ⬜ NOT STARTED |
 
 **Total estimate**: 15–16 weeks for full feature parity with legacy `roadmap` CLI + new control-plane-aware commands.
 
