@@ -1,3 +1,6 @@
+import { FlagKeys } from "../../shared/runtime/config-keys.ts";
+import * as runtimeConfig from "../../shared/runtime/config.ts";
+
 export type HealthStatus = "ok" | "timeout" | "error";
 
 export interface HealthEntry {
@@ -7,6 +10,17 @@ export interface HealthEntry {
 }
 
 export const DEFAULT_PROVIDER_HEALTH_TTL_MS = 30_000;
+
+// Resolver for callers that need a live-reloadable TTL.
+// Note: the module-level defaultCache singleton uses the literal above;
+// a restart is required for defaultCache TTL to take effect.
+export async function resolveProviderHealthCacheTtlMs(): Promise<number> {
+	try {
+		return await runtimeConfig.get(FlagKeys.PROVIDER_HEALTH_CACHE_TTL_MS);
+	} catch {
+		return DEFAULT_PROVIDER_HEALTH_TTL_MS;
+	}
+}
 
 type Clock = () => number;
 

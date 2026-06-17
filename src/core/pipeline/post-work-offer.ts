@@ -38,10 +38,6 @@ export type QueryFn = typeof defaultQuery;
  * reaping) for the same (proposal_id, role-or-stage) over the last hour.
  * Above the threshold, refuse the post and pause the proposal.
  */
-const DISPATCH_LOOP_THRESHOLD_PER_HOUR = Number(
-	process.env.AGENTHIVE_DISPATCH_LOOP_THRESHOLD ?? "6",
-);
-
 /**
  * P1729: Cumulative gate convergence guard. Complements the per-hour breaker
  * by tracking accumulated blocking reviews and per-role dispatch attempts
@@ -50,13 +46,6 @@ const DISPATCH_LOOP_THRESHOLD_PER_HOUR = Number(
  * When blocking-review count >= K or per-role run count >= N, the proposal
  * is paused. Resets on state/maturity transition.
  */
-const GATE_CONVERGENCE_MAX_BLOCKING = Number(
-	process.env.AGENTHIVE_GATE_CONVERGENCE_MAX_BLOCKING ?? "3",
-);
-
-const GATE_CONVERGENCE_MAX_RUNS_PER_ROLE = Number(
-	process.env.AGENTHIVE_GATE_CONVERGENCE_MAX_RUNS_PER_ROLE ?? "8",
-);
 
 /**
  * Global cap on alive offers (open or claimed-but-not-completed) across the
@@ -90,14 +79,45 @@ async function resolveMaxGlobalInflightOffers(): Promise<number> {
 	}
 }
 
+async function resolveDispatchLoopThreshold(): Promise<number> {
+	try {
+		return await runtimeConfig.get(FlagKeys.DISPATCH_LOOP_THRESHOLD_PER_HOUR);
+	} catch {
+		const env = process.env.AGENTHIVE_DISPATCH_LOOP_THRESHOLD;
+		const n = env !== undefined ? Number(env) : 6;
+		return Number.isFinite(n) ? n : 6;
+	}
+}
+
+async function resolveGateConvergenceMaxBlocking(): Promise<number> {
+	try {
+		return await runtimeConfig.get(FlagKeys.GATE_CONVERGENCE_MAX_BLOCKING);
+	} catch {
+		const env = process.env.AGENTHIVE_GATE_CONVERGENCE_MAX_BLOCKING;
+		const n = env !== undefined ? Number(env) : 3;
+		return Number.isFinite(n) ? n : 3;
+	}
+}
+
+async function resolveGateConvergenceMaxRunsPerRole(): Promise<number> {
+	try {
+		return await runtimeConfig.get(FlagKeys.GATE_CONVERGENCE_MAX_RUNS_PER_ROLE);
+	} catch {
+		const env = process.env.AGENTHIVE_GATE_CONVERGENCE_MAX_RUNS_PER_ROLE;
+		const n = env !== undefined ? Number(env) : 8;
+		return Number.isFinite(n) ? n : 8;
+	}
+}
+
 export class DispatchLoopError extends Error {
 	constructor(
 		readonly proposalId: number,
 		readonly role: string,
 		readonly recentRuns: number,
+		readonly threshold: number,
 	) {
 		super(
-			`postWorkOffer: circuit breaker tripped for proposal ${proposalId} role=${role} (${recentRuns} runs in last hour > threshold ${DISPATCH_LOOP_THRESHOLD_PER_HOUR}). gate_scanner_paused=true.`,
+			`postWorkOffer: circuit breaker tripped for proposal ${proposalId} role=${role} (${recentRuns} runs in last hour > threshold ${threshold}). gate_scanner_paused=true.`,
 		);
 		this.name = "DispatchLoopError";
 	}
@@ -292,7 +312,11 @@ let postSerializationChain: Promise<unknown> = Promise.resolve();
 async function checkConvergenceGuard(
 	proposalId: number,
 	queryFn: QueryFn = defaultQuery,
+	maxBlocking?: number,
+	maxRunsPerRole?: number,
 ): Promise<{ blockingCount: number; runsCount: number }> {
+	const thresholdBlocking = maxBlocking ?? await resolveGateConvergenceMaxBlocking();
+	const thresholdRunsPerRole = maxRunsPerRole ?? await resolveGateConvergenceMaxRunsPerRole();
 	// Fetch state_changed_at to define the window
 	const { rows: stateRows } = await queryFn<{ state_changed_at: string }>(
 		`SELECT state_changed_at::text
@@ -328,7 +352,7 @@ async function checkConvergenceGuard(
 	const runsCount = runsRows[0]?.count ?? 0;
 
 	// Check thresholds
-	if (blockingCount >= GATE_CONVERGENCE_MAX_BLOCKING || runsCount >= GATE_CONVERGENCE_MAX_RUNS_PER_ROLE) {
+	if (blockingCount >= thresholdBlocking || runsCount >= thresholdRunsPerRole) {
 		// Pause the proposal
 		await queryFn(
 			`UPDATE roadmap_proposal.proposal
@@ -342,11 +366,11 @@ async function checkConvergenceGuard(
 				JSON.stringify({
 					blocking_review_count: blockingCount,
 					per_role_run_count: runsCount,
-					threshold_blocking: GATE_CONVERGENCE_MAX_BLOCKING,
-					threshold_runs_per_role: GATE_CONVERGENCE_MAX_RUNS_PER_ROLE,
-					paused_reason: blockingCount >= GATE_CONVERGENCE_MAX_BLOCKING
-						? `blocking reviews (${blockingCount} >= ${GATE_CONVERGENCE_MAX_BLOCKING})`
-						: `per-role runs (${runsCount} >= ${GATE_CONVERGENCE_MAX_RUNS_PER_ROLE})`,
+					threshold_blocking: thresholdBlocking,
+					threshold_runs_per_role: thresholdRunsPerRole,
+					paused_reason: blockingCount >= thresholdBlocking
+						? `blocking reviews (${blockingCount} >= ${thresholdBlocking})`
+						: `per-role runs (${runsCount} >= ${thresholdRunsPerRole})`,
 				}),
 			],
 		);
@@ -359,23 +383,23 @@ async function checkConvergenceGuard(
 			[
 				proposalId,
 				`Convergence guard triggered for proposal ${proposalId}`,
-				`postWorkOffer refused: Proposal appears stuck — blocking reviews: ${blockingCount} (threshold ${GATE_CONVERGENCE_MAX_BLOCKING}), per-role runs: ${runsCount} (threshold ${GATE_CONVERGENCE_MAX_RUNS_PER_ROLE}) since last state/maturity transition. gate_scanner_paused=true. Investigate blocking feedback or stale acceptance criteria.`,
+				`postWorkOffer refused: Proposal appears stuck — blocking reviews: ${blockingCount} (threshold ${thresholdBlocking}), per-role runs: ${runsCount} (threshold ${thresholdRunsPerRole}) since last state/maturity transition. gate_scanner_paused=true. Investigate blocking feedback or stale acceptance criteria.`,
 				JSON.stringify({
 					proposal_id: proposalId,
 					blocking_count: blockingCount,
 					runs_count: runsCount,
-					threshold_blocking: GATE_CONVERGENCE_MAX_BLOCKING,
-					threshold_runs_per_role: GATE_CONVERGENCE_MAX_RUNS_PER_ROLE,
+					threshold_blocking: thresholdBlocking,
+					threshold_runs_per_role: thresholdRunsPerRole,
 				}),
 			],
 		);
 
 		throw new ConvergenceGuardError(
 			proposalId,
-			blockingCount >= GATE_CONVERGENCE_MAX_BLOCKING ? blockingCount : null,
-			runsCount >= GATE_CONVERGENCE_MAX_RUNS_PER_ROLE ? runsCount : null,
-			GATE_CONVERGENCE_MAX_BLOCKING,
-			GATE_CONVERGENCE_MAX_RUNS_PER_ROLE,
+			blockingCount >= thresholdBlocking ? blockingCount : null,
+			runsCount >= thresholdRunsPerRole ? runsCount : null,
+			thresholdBlocking,
+			thresholdRunsPerRole,
 		);
 	}
 
@@ -547,11 +571,10 @@ async function postWorkOfferImpl(
 			throw err;
 		}
 		// Swallow other errors to avoid blocking dispatch on guard check failures
-		obs.log({
-			level: "warn",
-			message: `convergence guard check failed for P${input.proposalId}`,
-			error: err instanceof Error ? err.message : String(err),
-		});
+		console.warn(
+			`[post-work-offer] convergence guard check failed for P${input.proposalId}:`,
+			err instanceof Error ? err.message : String(err),
+		);
 	}
 
 	// P721: skip dispatch if the target route is currently throttled due to
@@ -600,7 +623,8 @@ async function postWorkOfferImpl(
 		[input.proposalId, input.role],
 	);
 	const recentRuns = loopRows[0]?.recent_runs ?? 0;
-	if (recentRuns > DISPATCH_LOOP_THRESHOLD_PER_HOUR) {
+	const loopThreshold = await resolveDispatchLoopThreshold();
+	if (recentRuns > loopThreshold) {
 		await queryFn(
 			`UPDATE roadmap_proposal.proposal
 			    SET gate_scanner_paused = true,
@@ -616,18 +640,18 @@ async function postWorkOfferImpl(
 			[
 				input.proposalId,
 				`Dispatch loop detected for proposal ${input.proposalId} (${input.role})`,
-				`postWorkOffer refused: ${recentRuns} completed/failed runs for role "${input.role}" in last 1h (threshold ${DISPATCH_LOOP_THRESHOLD_PER_HOUR}). gate_scanner_paused=true. Investigate why the runs are not advancing state/maturity.`,
+				`postWorkOffer refused: ${recentRuns} completed/failed runs for role "${input.role}" in last 1h (threshold ${loopThreshold}). gate_scanner_paused=true. Investigate why the runs are not advancing state/maturity.`,
 				JSON.stringify({
 					proposal_id: input.proposalId,
 					role: input.role,
 					recent_runs: recentRuns,
-					threshold: DISPATCH_LOOP_THRESHOLD_PER_HOUR,
+					threshold: loopThreshold,
 					proposal_status: ctx.status,
 					proposal_maturity: ctx.maturity,
 				}),
 			],
 		);
-		throw new DispatchLoopError(input.proposalId, input.role, recentRuns);
+		throw new DispatchLoopError(input.proposalId, input.role, recentRuns, loopThreshold);
 	}
 
 	// P1289 AC-3 + P1290 AC-1: Pre-flight dispatchability check. Throw

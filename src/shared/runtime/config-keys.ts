@@ -1261,6 +1261,282 @@ export const FlagKeys = {
 		dbColumn: "value_jsonb",
 		envOverride: true,
 	} satisfies ConfigKey<"grid" | "stacked">,
+
+	// ─── P3787: First-wave hardcoded-constant migration ──────────────────────
+
+	DISPATCH_LOOP_THRESHOLD_PER_HOUR: {
+		name: "DISPATCH_LOOP_THRESHOLD_PER_HOUR",
+		class: "flag" as const,
+		category: "orchestration" as ConfigKeyCategory,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1 || n > 1000) throw new Error("must be integer 1–1000");
+			return n;
+		},
+		required: false,
+		defaultValue: 6,
+		description: "Max dispatch runs per (proposal, role) per hour before circuit-breaker pauses the proposal",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	GATE_CONVERGENCE_MAX_BLOCKING: {
+		name: "GATE_CONVERGENCE_MAX_BLOCKING",
+		class: "flag" as const,
+		category: "orchestration" as ConfigKeyCategory,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1 || n > 100) throw new Error("must be integer 1–100");
+			return n;
+		},
+		required: false,
+		defaultValue: 3,
+		description: "Max cumulative blocking reviews since last state/maturity transition before proposal is paused",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	GATE_CONVERGENCE_MAX_RUNS_PER_ROLE: {
+		name: "GATE_CONVERGENCE_MAX_RUNS_PER_ROLE",
+		class: "flag" as const,
+		category: "orchestration" as ConfigKeyCategory,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1 || n > 200) throw new Error("must be integer 1–200");
+			return n;
+		},
+		required: false,
+		defaultValue: 8,
+		description: "Max dispatch runs per role since last state/maturity transition before proposal is paused",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	FEDERATION_SYNC_POLL_INTERVAL_MS: {
+		name: "FEDERATION_SYNC_POLL_INTERVAL_MS",
+		class: "flag" as const,
+		category: "system" as ConfigKeyCategory,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1_000 || n > 3_600_000) throw new Error("must be integer 1000–3600000");
+			return n;
+		},
+		required: false,
+		defaultValue: 30_000,
+		description: "Interval (ms) between federation peer sync polls",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	FEDERATION_HEALTH_QUARANTINE_THRESHOLD: {
+		name: "FEDERATION_HEALTH_QUARANTINE_THRESHOLD",
+		class: "flag" as const,
+		category: "system" as ConfigKeyCategory,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1 || n > 100) throw new Error("must be integer 1–100");
+			return n;
+		},
+		required: false,
+		defaultValue: 3,
+		description: "Consecutive health-check failures before a peer is quarantined",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	FEDERATION_PING_TIMEOUT_MS: {
+		name: "FEDERATION_PING_TIMEOUT_MS",
+		class: "flag" as const,
+		category: "system" as ConfigKeyCategory,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 500 || n > 60_000) throw new Error("must be integer 500–60000");
+			return n;
+		},
+		required: false,
+		defaultValue: 5_000,
+		description: "Timeout (ms) for federation peer ping/health-check HTTP request",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	SAGA_REPAIR_INTERVAL_MS: {
+		name: "SAGA_REPAIR_INTERVAL_MS",
+		class: "flag" as const,
+		category: "system" as ConfigKeyCategory,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 5_000 || n > 3_600_000) throw new Error("must be integer 5000–3600000");
+			return n;
+		},
+		required: false,
+		defaultValue: 60_000,
+		description: "Interval (ms) between saga repair-worker cycles",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	SAGA_REPAIR_MAX_ATTEMPTS: {
+		name: "SAGA_REPAIR_MAX_ATTEMPTS",
+		class: "flag" as const,
+		category: "system" as ConfigKeyCategory,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1 || n > 100) throw new Error("must be integer 1–100");
+			return n;
+		},
+		required: false,
+		defaultValue: 10,
+		description: "Max retry attempts for a failed saga item before escalation",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	SAGA_REPAIR_MAX_BACKOFF_HOURS: {
+		name: "SAGA_REPAIR_MAX_BACKOFF_HOURS",
+		class: "flag" as const,
+		category: "system" as ConfigKeyCategory,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1 || n > 168) throw new Error("must be integer 1–168");
+			return n;
+		},
+		required: false,
+		defaultValue: 24,
+		description: "Maximum backoff cap (hours) for saga repair exponential-backoff",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	NOTIFICATION_POLL_INTERVAL_MS: {
+		name: "NOTIFICATION_POLL_INTERVAL_MS",
+		class: "flag" as const,
+		category: "system" as ConfigKeyCategory,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1_000 || n > 600_000) throw new Error("must be integer 1000–600000");
+			return n;
+		},
+		required: false,
+		defaultValue: 30_000,
+		description: "Backstop polling interval (ms) for the notification-queue drain loop",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	NOTIFICATION_BATCH_SIZE: {
+		name: "NOTIFICATION_BATCH_SIZE",
+		class: "flag" as const,
+		category: "system" as ConfigKeyCategory,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1 || n > 500) throw new Error("must be integer 1–500");
+			return n;
+		},
+		required: false,
+		defaultValue: 25,
+		description: "Max notification rows claimed per drain-loop batch",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	PROVIDER_HEALTH_CACHE_TTL_MS: {
+		name: "PROVIDER_HEALTH_CACHE_TTL_MS",
+		class: "flag" as const,
+		category: "model_routing" as ConfigKeyCategory,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1_000 || n > 3_600_000) throw new Error("must be integer 1000–3600000");
+			return n;
+		},
+		required: false,
+		defaultValue: 30_000,
+		description: "TTL (ms) for provider-health cache entries; stale entries are re-probed",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	AGENT_PROPOSAL_LEASE_TTL_MS: {
+		name: "AGENT_PROPOSAL_LEASE_TTL_MS",
+		class: "flag" as const,
+		category: "orchestration" as ConfigKeyCategory,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 60_000 || n > 86_400_000) throw new Error("must be integer 60000–86400000");
+			return n;
+		},
+		required: false,
+		defaultValue: 1_800_000,
+		description: "Default lease TTL (ms) for in-memory agent proposal leases (30 min)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	TRANSPORT_WAKE_TIMEOUT_MS: {
+		name: "TRANSPORT_WAKE_TIMEOUT_MS",
+		class: "flag" as const,
+		category: "system" as ConfigKeyCategory,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1_000 || n > 300_000) throw new Error("must be integer 1000–300000");
+			return n;
+		},
+		required: false,
+		defaultValue: 10_000,
+		description: "Max time (ms) to wait for a transport adapter to wake from offline state",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	// ─── P3787 / P3782 AC-12: remaining leaked process.env feature flags ─────
+
+	LIAISON_LLM_TIMEOUT_MS: {
+		name: "LIAISON_LLM_TIMEOUT_MS",
+		class: "flag" as const,
+		category: "a2a" as ConfigKeyCategory,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1_000 || n > 600_000) throw new Error("must be integer 1000–600000");
+			return n;
+		},
+		required: false,
+		defaultValue: 30_000,
+		description: "Default LLM invocation timeout (ms) for liaison agents; per-provider env overrides (AGENTHIVE_LIAISON_LLM_TIMEOUT_MS_{PROVIDER}) still take precedence",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies ConfigKey<number>,
+
+	SELF_CLAIM_AGENCIES: {
+		name: "SELF_CLAIM_AGENCIES",
+		class: "flag" as const,
+		category: "agency" as ConfigKeyCategory,
+		parse: (v: string) => {
+			const parsed = JSON.parse(v);
+			if (typeof parsed === "string") return parsed;
+			throw new Error("must be a comma-separated string of agency identities");
+		},
+		required: false,
+		defaultValue: "",
+		description: "Comma-separated agency identities allowed to self-claim offers when AGENCY_OFFER_CLAIM_ENABLED=true; empty = all agencies",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies ConfigKey<string>,
 };
 
 /**

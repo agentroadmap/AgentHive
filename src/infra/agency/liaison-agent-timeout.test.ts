@@ -21,28 +21,28 @@ function restoreEnv() {
 describe("resolveLiaisonLlmTimeoutMs", () => {
 	afterEach(restoreEnv);
 
-	it("uses a longer default for Codex liaison invocations", () => {
+	it("uses a longer default for Codex liaison invocations", async () => {
 		delete process.env.AGENTHIVE_LIAISON_LLM_TIMEOUT_MS;
 		delete process.env.AGENTHIVE_LIAISON_LLM_TIMEOUT_MS_CODEX;
 
-		expect(resolveLiaisonLlmTimeoutMs("codex")).toBe(120000);
-		expect(resolveLiaisonLlmTimeoutMs("claude")).toBe(30000);
+		expect(await resolveLiaisonLlmTimeoutMs("codex")).toBe(120000);
+		expect(await resolveLiaisonLlmTimeoutMs("claude")).toBe(30000);
 	});
 
-	it("allows global and provider-specific timeout overrides", () => {
+	it("allows global and provider-specific timeout overrides", async () => {
 		process.env.AGENTHIVE_LIAISON_LLM_TIMEOUT_MS = "45000";
-		expect(resolveLiaisonLlmTimeoutMs("claude")).toBe(45000);
-		expect(resolveLiaisonLlmTimeoutMs("codex")).toBe(45000);
+		expect(await resolveLiaisonLlmTimeoutMs("claude")).toBe(45000);
+		expect(await resolveLiaisonLlmTimeoutMs("codex")).toBe(45000);
 
 		process.env.AGENTHIVE_LIAISON_LLM_TIMEOUT_MS_CODEX = "180000";
-		expect(resolveLiaisonLlmTimeoutMs("codex")).toBe(180000);
+		expect(await resolveLiaisonLlmTimeoutMs("codex")).toBe(180000);
 	});
 
-	it("ignores invalid overrides", () => {
+	it("ignores invalid overrides", async () => {
 		process.env.AGENTHIVE_LIAISON_LLM_TIMEOUT_MS = "not-a-number";
 		process.env.AGENTHIVE_LIAISON_LLM_TIMEOUT_MS_CODEX = "0";
 
-		expect(resolveLiaisonLlmTimeoutMs("codex")).toBe(120000);
-		expect(resolveLiaisonLlmTimeoutMs("claude")).toBe(30000);
+		expect(await resolveLiaisonLlmTimeoutMs("codex")).toBe(120000);
+		expect(await resolveLiaisonLlmTimeoutMs("claude")).toBe(30000);
 	});
 });

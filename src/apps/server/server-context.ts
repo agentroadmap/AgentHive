@@ -11,6 +11,7 @@
  * import cycle with `roadmap.ts`.
  */
 import type { SearchService } from "../../core/infrastructure/search-service.ts";
+import type { McpServer } from "../../mcp/server.ts";
 import type { Core } from "../../core/roadmap.ts";
 import type { ContentStore } from "../../core/storage/content-store.ts";
 
@@ -32,6 +33,16 @@ export interface ServerContext {
 	searchService: SearchService | null;
 	/** Content store backing search/indexing; null until initialised. */
 	contentStore: ContentStore | null;
+	/** MCP server instance; null until started. */
+	mcpServer: McpServer | null;
+	/** Timestamp when the HTTP server started. */
+	startedAt: Date;
+	/** Current human-readable project name. */
+	getProjectName: () => string;
+	/** Update the in-memory project name (e.g. after /api/init or /api/config PUT). */
+	setProjectName: (name: string) => void;
+	/** Notify all SSE-connected dashboard clients that proposal data has changed. */
+	broadcastProposalsUpdated: () => void;
 	/** Resolve the project scope for an incoming request (header/query/default). */
 	resolveProjectScope: (req: Request) => Promise<ProjectScope>;
 	/** Convert an unexpected error into a 500 Response (with logging). */
