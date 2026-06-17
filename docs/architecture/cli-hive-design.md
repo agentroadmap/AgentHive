@@ -1138,6 +1138,31 @@ hive dispatch list --proposal P123 --state new
 **Summary:** Phases 1–9 are substantially complete. Phase 10 (board/web launchers) is the primary gap. Phases 11–13 are partially done.
 
 **Original estimate**: 15–16 weeks for full feature parity with legacy `roadmap` CLI + new control-plane-aware commands.
+## 8. Implementation Roadmap (Sketch)
+
+> **Runtime notes (as of 2026-06-17):**
+> - `jiti` IS installed (`node_modules/jiti`) — scripts run via jiti without a prebuilt bundle.
+> - `bin/hive` shim IS present and resolves the entry point correctly.
+> - No `dist/hive-cli.cjs.js` prebuilt bundle exists yet (Phase 13 Polish).
+> - Dependency proposals P453/P411/P410/P454/P446 are COMPLETE — their blockers are resolved.
+
+| Phase | Duration | Status | Deliverables | Depends On |
+| --- | --- | --- | --- | --- |
+| **Phase 1: Core Scaffolding** | 1 week | **COMPLETE** | Domain module template, context resolution, formatters, mcp-client wrapper, control-plane-client (`context.ts`, `control-plane-client.ts`, `control-plane-types.ts`, `mcp-client.ts`, `mcp-tools.ts`, `formatters.ts`, `discovery.ts`, `recipes.ts`, `error.ts`, `exit-codes.ts`, `envelope.ts`, `explain.ts`) | — |
+| **Phase 2: Proposal Domain** | 2 weeks | **PARTIAL** | proposal create/get/list/search/edit/claim/release/transition/maturity — `commands/proposal.ts` + `domains/proposal/` exist | Phase 1 |
+| **Phase 3: Workflow + State** | 1 week | **PARTIAL** | workflow list/show, state next/history — `commands/workflow.ts` + `domains/workflow/` exist | Phase 1, P453 (COMPLETE) |
+| **Phase 4: Provider + Route + Budget** | 1.5 weeks | **PARTIAL** | provider/model/route/budget list/show/toggle — `commands/model-profile.ts`, `domains/provider/`, `domains/route/`, `domains/budget/` exist | Phase 1, P411 (COMPLETE) |
+| **Phase 5: Dispatch + Queue** | 1 week | **PARTIAL** | dispatch list/show, offer list, queue show, stop — `commands/stop.ts` + `domains/dispatch/` exist | Phase 1, Phase 2 |
+| **Phase 6: Service + System Ops** | 1 week | **PARTIAL** | service list/status/restart/logs, mcp ping/smoke/health, db migrate/check, cubic list/clean/repair — `domains/system/`, `domains/db/`, `domains/mcp/`, `domains/cubic/` exist | Phase 1 |
+| **Phase 7: Audit + Observability** | 1 week | **PARTIAL** | audit feed/events, metrics show, report run — `commands/sla.ts`, `commands/cost.ts`, `domains/audit/` exist | Phase 1, P410 (COMPLETE) |
+| **Phase 8: Scan + Lint** | 1 week | **PARTIAL** | scan hardcoding/secrets/performance, lint eslint/tsc — `domains/scan/`, `domains/lint/` exist | Phase 1, P454 (COMPLETE) |
+| **Phase 9: Knowledge + Doctor** | 1 week | **PARTIAL** | kb add/search, memory show/set/delete, doctor readiness suite — `commands/doctor.ts` + `domains/knowledge/` exist | Phase 1, P446 (COMPLETE) |
+| **Phase 10: Board + UI Launchers** | 1.5 weeks | **NOT STARTED** | board (tmux TUI), web (dev server launch), tui alias — no board/web/tui launch command yet | Phase 1, existing board code |
+| **Phase 11: Help + Completion + Version** | 0.5 weeks | **NOT STARTED** | hierarchical help, shell completion, version command — no shell completion yet; basic help may exist | Phase 1–10 |
+| **Phase 12: Migration + Docs** | 1 week | **NOT STARTED** | roadmap compat shim, deprecation guide, ADR docs, help recipes | Phase 1–11 |
+| **Phase 13: Testing + Polish** | 2 weeks | **NOT STARTED** | E2E tests (against mock control plane), performance tuning, UX refinement, prebuilt `dist/hive-cli.cjs.js` bundle | Phase 1–12 |
+
+**Total estimate**: 15–16 weeks for full feature parity with legacy `roadmap` CLI + new control-plane-aware commands.
 
 ---
 

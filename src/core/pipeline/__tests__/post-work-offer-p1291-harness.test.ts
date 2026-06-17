@@ -275,7 +275,7 @@ describe("P1291 AC-4 + AC-10: Per-(proposal_id, role) pause harness", () => {
 			"no_eligible_agency",
 			expiresAt,
 		);
-		const dispatchLoopError = new DispatchLoopError(proposalId, role1, 6);
+		const dispatchLoopError = new DispatchLoopError(proposalId, role1, 6, 6);
 
 		// Both should be distinct error types
 		expect(pausedRoleError.name).toBe("PausedRoleError");
@@ -299,7 +299,7 @@ describe("P1291 AC-4 + AC-10: Per-(proposal_id, role) pause harness", () => {
 			"no_eligible_agency",
 			new Date(),
 		);
-		const loopErr = new DispatchLoopError(testProposalId, testRole, 6);
+		const loopErr = new DispatchLoopError(testProposalId, testRole, 6, 6);
 
 		// Both should have distinct message formats
 		expect(pausedErr.message).toContain("paused");

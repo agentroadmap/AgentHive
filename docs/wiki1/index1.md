@@ -225,7 +225,7 @@ This means: post a job offer with required skills, and only agents with those sk
 
 ### Multi-Agency (P282)
 
-Architecture for multiple AgentHive agencies collaborating across hosts and instances. Each agency has its own agents but shares proposals and governance through federation. Currently 0 connected hosts. Blocked by missing cryptographic agent identity (P080/P159). Related: multi-project (P300).
+Architecture for multiple AgentHive agencies collaborating across hosts and instances. Each agency has its own agents but shares proposals and governance through federation. Currently 0 connected hosts. Blocked by missing cryptographic agent identity (P080/P159). Related: multi-project (P429/P483 — earlier P300 design superseded).
 
 ---
 
@@ -416,7 +416,7 @@ P204/P211 (Gate scan) -- DONE
 
 P223 (Canonical Orchestrator) -- REVIEW
   -> P289 (Pull-based dispatch) -- DEVELOP/mature
-    -> P300 (Multi-project)
+    -> P429/P483 (Multi-project / Control Plane)
       -> P282 (Federation)
 
 P246 (Per-million pricing) -- DONE

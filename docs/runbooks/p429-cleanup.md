@@ -186,7 +186,7 @@ would reintroduce the anti-pattern and block any future multi-tenancy work.
 | Proposal | Role |
 | --- | --- |
 | P429 | Parent: AgentHive Control Plane architecture |
-| P482 | Added `project_id` columns (migration 051) |
+| P483 | Added `project_id` columns (migration 051; P482 project-registry work superseded by P483) |
 | P505 | Control-plane DB cutover — sunset timer starts here |
 | P507 | Grandfather / stability confirmation |
 | P510 | **This proposal** — Stage E1 column drop |

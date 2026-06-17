@@ -136,6 +136,10 @@ await closePool();
 
 Why this rule exists: shared CLI code (e.g., `agents send` subcommand exit, internal getPool signature-change path) can call `pool.end()` mid-process. In CLI mode that's fine — the process exits. In a long-running service it poisons every downstream consumer (broadcastSnapshot, LISTEN reconnect, TimeoutCron, ledger writes) for the remainder of the process. The 2026-05-15 agenthive-board.service outage (30 hours silent failure) is the canonical incident. See `docs/audit/p1123-pool-end-callers.md` for the full caller catalog and verdict matrix. A Phase 3 watchdog (`SELECT 1` probe + `pg_notify control_feed pool_poisoned`) provides defense in depth for any bypass path.
 
+**Board connection routing (P3564):** The `agenthive-board` service uses two separate connection endpoints:
+- **Queries → pgbouncer 6432** via `getPool()` / `PGPORT` (default). `resolvePoolConfig` defaults port to `PGPORT=6432` so the shared pool targets pgbouncer unless overridden.
+- **LISTEN → direct 5432** via a dedicated `new pg.Client({ port: PGPORT_DIRECT ?? 5432 })` in `src/apps/dashboard-web/websocket-server.ts`. `LISTEN` is incompatible with pgbouncer transaction-mode and MUST bypass it. Do NOT use `getPool()` for LISTEN in the board — that pins the shared pool to 5432 and floods journald with `getPool() signature change refused` warnings (≈1/30 s). All other LISTEN consumers (`feature-flag-service`, `liaison-agent`, `memory-event-consumer`, TUI `pg-listen-driver`) already follow the same pattern via `ConfigResolver.buildDirectListenPoolConfig`.
+
 ### Wrapper-enforced concerns invariant (P1859 / P1018 / P1022)
 
 **Cross-cutting mechanical concerns are enforced structurally in the deterministic liaison/wrapper layer — never "remembered" by an LLM agent or subagent.**

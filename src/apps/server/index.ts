@@ -13,13 +13,12 @@ import {
 } from "node:http";
 import { join } from "node:path";
 import type { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
-import { type WebSocket, WebSocketServer } from "ws";
+import { initializeProject } from "../../core/infrastructure/init.ts";
 import type { SearchService } from "../../core/infrastructure/search-service.ts";
 import { Core } from "../../core/roadmap.ts";
 import type { ContentStore } from "../../core/storage/content-store.ts";
 import { createMcpServer, type McpServer } from "../../mcp/server.ts";
 import { handleDirectMcpRequest } from "../mcp-server/http-compat.ts";
-import type { ServerContext } from "./server-context.ts";
 import {
 	handleHealthz,
 	handleSmoke,
@@ -40,14 +39,16 @@ import {
 	handleListKnowledge as handleListKnowledgeRoute,
 	handleMarkKnowledgeHelpful as handleMarkKnowledgeHelpfulRoute,
 } from "./routes/search-knowledge.ts";
-import { RfcStates, getView, getRegistry } from "../../core/workflow/state-names.ts";
-import { loadStageRegistry } from "../../core/workflow/stage-registry.ts";
 import type {
 	Proposal,
 	ProposalMaturity,
 	ProposalUpdateInput,
 } from "../../types/index.ts";
 import { watchConfig } from "../../utils/config-watcher.ts";
+import {
+	AllConfigKeys,
+	getConfigKeyByName,
+} from "../../shared/runtime/config-keys.ts";
 import { formatVersionLabel, getVersionInfo } from "../../utils/version.ts";
 import {
 	getPool,
@@ -64,9 +65,12 @@ import { sendMessage as sendLiaisonMessage } from "../../infra/agency/liaison-me
 import { agentNotifyChannel } from "../../infra/messaging/a2a-access-control.ts";
 import { discordSend } from "../../infra/discord/notify.ts";
 import { runObservabilityAlertTick } from "../../infra/agency/observability-alerting.ts";
-import type { Pool, PoolClient, Client as PgClient } from "pg";
-import { ConfigResolver } from "../../shared/runtime/config.ts";
+import type { Client as PgClient } from "pg";
 import { hashOperatorToken, requireOperator } from "./operator-auth.ts";
+import type {
+	ProjectScope,
+	ServerContext,
+} from "./server-context.ts";
 import { projectCreate } from "../mcp-server/tools/projects/lifecycle-handlers.ts";
 import { agentContextStorage, type VerifiedPrincipal } from "../../shared/identity/agent-context.ts";
 import { verifyBoundBearer } from "../../core/identity/principal-identity.ts";
@@ -95,74 +99,20 @@ import {
 	resumeAgencyOperator,
 	retireAgencyOperator,
 } from "../../core/orchestration/resolvers/agency-resolver.ts";
-
-// Regex pattern to match any prefix (letters followed by dash)
-const PREFIX_PATTERN = /^[a-zA-Z]+-/i;
-const DEFAULT_PREFIX = "proposal-";
-
-/**
- * Strip any prefix from an ID (e.g., "proposal-123" -> "123", "JIRA-456" -> "456")
- */
-function stripPrefix(id: string): string {
-	return id.replace(PREFIX_PATTERN, "");
-}
-
-/**
- * Ensure an ID has a prefix. If it already has one, return as-is.
- * Otherwise, add the default "proposal-" prefix.
- */
-function ensurePrefix(id: string): string {
-	if (PREFIX_PATTERN.test(id)) {
-		return id;
-	}
-	return `${DEFAULT_PREFIX}${id}`;
-}
-
-function parseProposalIdSegments(value: string): number[] | null {
-	const withoutPrefix = stripPrefix(value);
-	if (!/^[0-9]+(?:\.[0-9]+)*$/.test(withoutPrefix)) {
-		return null;
-	}
-	return withoutPrefix
-		.split(".")
-		.map((segment) => Number.parseInt(segment, 10));
-}
-
-function findProposalByLooseId(
-	proposals: Proposal[],
-	inputId: string,
-): Proposal | undefined {
-	// First try exact match (case-insensitive)
-	const lowerInputId = inputId.toLowerCase();
-	const exact = proposals.find(
-		(proposal) => proposal.id.toLowerCase() === lowerInputId,
-	);
-	if (exact) {
-		return exact;
-	}
-
-	// Try matching by numeric segments only
-	const inputSegments = parseProposalIdSegments(inputId);
-	if (!inputSegments) {
-		return undefined;
-	}
-
-	return proposals.find((proposal) => {
-		const candidateSegments = parseProposalIdSegments(proposal.id);
-		if (
-			!candidateSegments ||
-			candidateSegments.length !== inputSegments.length
-		) {
-			return false;
-		}
-		for (let index = 0; index < candidateSegments.length; index += 1) {
-			if (candidateSegments[index] !== inputSegments[index]) {
-				return false;
-			}
-		}
-		return true;
-	});
-}
+import { routeSearchKnowledgeRequest } from "./routes/search-knowledge.ts";
+import { WebSocketManager } from "./websocket.ts";
+import {
+	handleCreateProposal,
+	handleListProposals,
+	handleProposalMaintenanceRoutes,
+	handleProposalRoutes,
+} from "./routes/proposals.ts";
+import { handleContentRoutes } from "./routes/content.ts";
+import {
+	handleBoardRoutes,
+	handleGetSequences,
+	handleMoveSequence,
+} from "./routes/board.ts";
 
 // Asset paths (will be read from disk)
 const faviconPath = join(import.meta.dirname, "../web/favicon.png");
@@ -196,16 +146,10 @@ try {
 export class RoadmapServer {
 	private core: Core;
 	private server: ReturnType<typeof createServer> | null = null;
-	private wss: WebSocketServer | null = null;
+	// P3796 AC-17: WebSocket/broadcast/subscription machinery extracted to
+	// WebSocketManager. Constructed in the RoadmapServer constructor.
+	private wsManager: WebSocketManager;
 	private projectName = "Untitled Project";
-	private sockets = new Set<WebSocket>();
-	private channelSubscriptions = new Map<WebSocket, Map<string, () => void>>();
-	// Table subscriptions for frontend protocol: { ws -> Set<table> }
-	private tableSubscriptions = new Map<WebSocket, Set<string>>();
-	// P477 AC-2: per-socket project scope. Updated on every "subscribe"
-	// payload that carries a project_id; null means "no scope chosen yet"
-	// so we fall back to the server-default project.
-	private wsProjectScope = new Map<WebSocket, number | null>();
 	private contentStore: ContentStore | null = null;
 	private searchService: SearchService | null = null;
 	private unsubscribeContentStore?: () => void;
@@ -213,16 +157,6 @@ export class RoadmapServer {
 	private configWatcher: { stop: () => void } | null = null;
 	private mcpServer: McpServer | null = null;
 	private sseTransports = new Map<string, SSEServerTransport>();
-	private roadmapEventsClient: PoolClient | null = null;
-	// P3564: LISTEN can't run on PgBouncer transaction-mode, so taking the LISTEN
-	// client from the shared getPool() pins that pool to direct 5432 (the
-	// dual-signature WARN) AND, when the shared pool resolves to 6432, silently
-	// drops notifications. Give roadmap_events its own dedicated direct-5432 pool
-	// (P827 pattern, max:1). Falls back to the shared pool when PGPORT_DIRECT is
-	// unset.
-	private directListenPool: Pool | null = null;
-	private roadmapEventsReconnectTimer: ReturnType<typeof setTimeout> | null =
-		null;
 
 	// P446: track server start time for /healthz
 	private readonly _startedAt = new Date();
@@ -236,6 +170,11 @@ export class RoadmapServer {
 
 	constructor(projectPath: string) {
 		this.core = new Core(projectPath, { enableWatchers: true });
+		// P3796 AC-17: WebSocketManager owns all WS/broadcast/subscription state.
+		this.wsManager = new WebSocketManager({
+			core: this.core,
+			getContentStore: () => this.getContentStoreInstance(),
+		});
 	}
 
 	private async resolveDirectiveInput(directive: string): Promise<string> {
@@ -423,326 +362,24 @@ export class RoadmapServer {
 		return typeof addr === "object" ? (addr?.port ?? null) : null;
 	}
 
-	private broadcastProposalsUpdated() {
-		// Send proper protocol messages to table-subscribed clients
-		// Also keep backward compat for simple string subscribers
-		for (const ws of this.sockets) {
-			try {
-				const tables = this.tableSubscriptions.get(ws);
-				if (tables?.has("proposal")) {
-					// Frontend protocol: send snapshot for full refresh
-					void this.sendProposalSnapshot(ws);
-				} else {
-					// Legacy: simple notification string
-					ws.send("proposals-updated");
-				}
-			} catch {}
-		}
+	// P3796 AC-17: WebSocket/broadcast/subscription machinery extracted to
+	// WebSocketManager (src/apps/server/websocket.ts). These thin wrappers keep
+	// existing call sites working and expose the broadcast surface to handlers.
+	private broadcastProposalsUpdated(): void {
+		this.wsManager.broadcastProposalsUpdated();
 	}
 
-	private broadcastConfigUpdated() {
-		for (const ws of this.sockets) {
-			try {
-				ws.send("config-updated");
-			} catch {}
-		}
+	private broadcastConfigUpdated(): void {
+		this.wsManager.broadcastConfigUpdated();
 	}
 
-	// Poll for external DB changes (cron, MCP, direct SQL)
-	private lastProposalCheck = new Date(0);
-	private startChangePolling() {
-		const POLL_INTERVAL = 30000; // 30 seconds
-		setInterval(async () => {
-			try {
-				const result = await query(
-					`SELECT MAX(updated_at) as latest FROM roadmap_proposal.proposal`,
-				);
-				const latest = result.rows[0]?.latest;
-				if (latest && new Date(latest) > this.lastProposalCheck) {
-					this.lastProposalCheck = new Date(latest);
-					this.broadcastProposalsUpdated();
-				}
-			} catch (err) {
-				// Silently continue on polling errors
-			}
-		}, POLL_INTERVAL);
-		console.log(`📊 Change polling started (every ${POLL_INTERVAL / 1000}s)`);
-	}
-
-	private handleSubscribe(ws: WebSocket, channel: string) {
-		const subs = this.channelSubscriptions.get(ws);
-		if (!subs || subs.has(channel)) return;
-		let lastId = 0;
-		const interval = setInterval(async () => {
-			try {
-				const result = await query(
-					`SELECT id, from_agent, to_agent, message_content, created_at
-					 FROM roadmap.message_ledger
-					 WHERE channel = $1 AND id > $2
-					 ORDER BY id ASC LIMIT 50`,
-					[channel, lastId],
-				);
-				for (const row of result.rows) {
-					lastId = row.id;
-					try {
-						ws.send(JSON.stringify({ type: "channel-message", channel, message: row }));
-					} catch {}
-				}
-			} catch {}
-		}, 1000);
-		subs.set(channel, () => clearInterval(interval));
-	}
-
-	private handleUnsubscribe(ws: WebSocket, channel: string) {
-		const subs = this.channelSubscriptions.get(ws);
-		const unsub = subs?.get(channel);
-		if (unsub) {
-			unsub();
-			subs?.delete(channel);
-		}
-	}
-
-	private cleanupSubscriptions(ws: WebSocket) {
-		const subs = this.channelSubscriptions.get(ws);
-		if (!subs) return;
-		for (const unsub of subs.values()) {
-			unsub();
-		}
-		subs.clear();
-	}
-
-	// Frontend table subscription protocol
-	// P477 AC-2: project_id is captured per-socket so subsequent snapshots and
-	// broadcasts can be filtered down to the operator's selected project. A
-	// null/missing project_id keeps the legacy "all projects" behaviour.
-	private async handleTableSubscribe(
-		ws: WebSocket,
-		tables: string[],
-		projectId: number | null,
-	) {
-		const subscribedTables = this.tableSubscriptions.get(ws);
-		if (!subscribedTables) return;
-
-		const previousScope = this.wsProjectScope.get(ws) ?? null;
-		const scopeChanged = previousScope !== projectId;
-		// Always update the scope; clients re-send subscribe on project change.
-		this.wsProjectScope.set(ws, projectId);
-
-		let needsProposalSnapshot = false;
-		for (const table of tables) {
-			if (subscribedTables.has(table)) {
-				if (table === "proposal" && scopeChanged) {
-					// Same table, new scope — refresh.
-					needsProposalSnapshot = true;
-				}
-				continue;
-			}
-			subscribedTables.add(table);
-			console.log(
-				`[WS] Client subscribed to table: ${table} (project=${projectId ?? "*"})`,
-			);
-
-			if (table === "proposal") {
-				needsProposalSnapshot = true;
-			}
-			// Other tables (workforce_registry, etc.) can be added here
-		}
-
-		if (needsProposalSnapshot) {
-			await this.sendProposalSnapshot(ws);
-		}
-	}
-
-	// Transform API proposal to frontend WebSocketProposal format
-	private proposalToWsFormat(p: any): any {
-		const canonicalDisplayId = p.displayId || p.display_id || p.id || "";
-		const websocketId = p.id || p.display_id || "";
-		const sanitizedLabels = Array.isArray(p.labels)
-			? p.labels
-					.map((label: unknown) => String(label).trim())
-					.filter(
-						(label: string) => label.length > 0 && label !== "[object Object]",
-					)
-			: [];
-		return {
-			id: canonicalDisplayId || `#${websocketId}`,
-			displayId: canonicalDisplayId,
-			websocketId,
-			parentId: p.parentProposalId || null,
-			proposalType: p.proposalType || p.type || "feature",
-			category: p.category || "",
-			domainId: p.domainId || "",
-			title: p.title || "(no title)",
-			status: p.status || RfcStates.DRAFT,
-			priority: p.priority || "",
-			bodyMarkdown: p.summary || p.description || p.rawContent || null,
-			summary: p.summary || p.description || null,
-			motivation: p.motivation || null,
-			design: p.design || p.implementationPlan || null,
-			drawbacks: p.drawbacks || null,
-			alternatives: p.alternatives || null,
-			dependencyNote: p.dependency_note || null,
-			processLogic: p.design || p.implementationPlan || null,
-			implementationPlan: p.implementationPlan || p.design || null,
-			implementationNotes: p.implementationNotes || null,
-			finalSummary: p.finalSummary || null,
-			acceptanceCriteriaItems: p.acceptanceCriteriaItems || [],
-			requiredCapabilities: p.required_capabilities || [],
-			needsCapabilities: p.needs_capabilities || [],
-			liveActivity: p.liveActivity || null,
-			maturity: p.maturity || null,
-			maturityLevel:
-				p.maturity === "new"
-					? 0
-					: p.maturity === "mature"
-						? 5
-						: p.maturity === "obsolete"
-							? 10
-							: null,
-			repositoryPath: p.filePath || null,
-			budgetLimitUsd: p.budgetLimitUsd || 0,
-			tags: sanitizedLabels.length > 0 ? sanitizedLabels.join(",") : null,
-			createdAt: (p.createdDate && p.createdDate !== "") ? p.createdDate : (p.createdAt || null),
-			updatedAt: (p.updatedDate && p.updatedDate !== "") ? p.updatedDate : (p.updatedAt || null),
-		};
-	}
-
-	private scheduleRoadmapEventsReconnect() {
-		if (this._stopping || this.roadmapEventsReconnectTimer) return;
-		this.roadmapEventsReconnectTimer = setTimeout(() => {
-			this.roadmapEventsReconnectTimer = null;
-			void this.startRoadmapEventsListener();
-		}, 3000);
-	}
-
-	private async connectRoadmapListenClient(): Promise<PoolClient> {
-		const directPortEnv = process.env.PGPORT_DIRECT;
-		const directPort = Number(directPortEnv);
-		if (
-			directPortEnv &&
-			Number.isFinite(directPort) &&
-			directPort > 0 &&
-			directPort <= 65535
-		) {
-			if (!this.directListenPool) {
-				const { Pool } = await import("pg");
-				const poolOptions =
-					(getPool() as unknown as { options?: Record<string, unknown> })
-						.options ?? {};
-				this.directListenPool = new Pool(
-					ConfigResolver.buildDirectListenPoolConfig(poolOptions, directPort),
-				);
-				this.directListenPool.on("error", (err) => {
-					console.error("[WS] direct LISTEN pool error:", err.message);
-				});
-			}
-			return this.directListenPool.connect();
-		}
-		return getPool().connect();
-	}
-
-	private async startRoadmapEventsListener(): Promise<void> {
-		if (this._stopping || this.roadmapEventsClient) return;
-		try {
-			const client = await this.connectRoadmapListenClient();
-			this.roadmapEventsClient = client;
-			client.on("error", (err) => {
-				console.error("[WS] roadmap_events listener error:", err.message);
-				if (this.roadmapEventsClient === client) {
-					this.roadmapEventsClient = null;
-				}
-				try {
-					client.release(true);
-				} catch {}
-				this.scheduleRoadmapEventsReconnect();
-			});
-			await client.query("LISTEN roadmap_events");
-			client.on("notification", (notification) => {
-				if (notification.channel !== "roadmap_events") return;
-				this.broadcastProposalsUpdated();
-			});
-			console.log("[WS] Listening for roadmap_events");
-		} catch (err) {
-			console.warn(
-				"[WS] roadmap_events listener unavailable:",
-				(err as Error).message,
-			);
-			this.roadmapEventsClient = null;
-			this.scheduleRoadmapEventsReconnect();
-		}
-	}
-
-	// Send proposal snapshot to a WebSocket client
-	// P477 AC-2: roadmap.proposal lives in the control plane and has no
-	// project_id column today (CONVENTIONS.md §6.0 / §8d). Filtering happens
-	// later via tenant-DB resolution (P429/P482-P485). We still consult the
-	// per-socket scope so future wiring can intersect via cubics/dispatches
-	// without rewriting this method.
-	private async sendProposalSnapshot(ws: WebSocket) {
-		try {
-			const projectScope = this.wsProjectScope.get(ws) ?? null;
-			console.log(
-				`[WS] Sending proposal snapshot (project=${projectScope ?? "*"})...`,
-			);
-			const store = await this.getContentStoreInstance();
-			const proposals = await this.core.queryProposals({
-				includeCrossBranch: true,
-			});
-			console.log(`[WS] Got ${proposals.length} proposals from query`);
-			const wsProposals = proposals.map((p) => this.proposalToWsFormat(p));
-			console.log(`[WS] Transformed to ${wsProposals.length} WS proposals`);
-
-			const msg = JSON.stringify({
-				type: "proposal_snapshot",
-				data: wsProposals,
-			});
-			console.log(`[WS] Sending message (${msg.length} bytes)`);
-			ws.send(msg);
-			console.log("[WS] Snapshot sent successfully");
-		} catch (err) {
-			console.error("[WS] Failed to send proposal snapshot:", err);
-			// Send empty snapshot on error so frontend doesn't hang
-			ws.send(
-				JSON.stringify({
-					type: "proposal_snapshot",
-					data: [],
-				}),
-			);
-		}
-	}
-
-	// Broadcast proposal update to all subscribed clients.
-	// P477 AC-2: proposals are control-plane today (no project_id column),
-	// so we cannot filter per recipient. Once tenant-DB routing lands the
-	// payload will carry project_id and we will skip clients whose
-	// wsProjectScope(ws) does not match.
 	private broadcastProposalUpdate(
 		type: "proposal_update" | "proposal_insert" | "proposal_delete",
 		data: any,
-	) {
-		const wsData =
-			type === "proposal_delete" ? data : this.proposalToWsFormat(data);
-		const dataProjectId =
-			typeof (data as Record<string, unknown> | null)?.project_id === "number"
-				? ((data as Record<string, unknown>).project_id as number)
-				: null;
-		const msg = JSON.stringify({ type, data: wsData });
-
-		for (const ws of this.sockets) {
-			const tables = this.tableSubscriptions.get(ws);
-			if (!tables?.has("proposal")) continue;
-			// When the row carries an explicit project_id (future tenant-DB path),
-			// honour the recipient's scope. Today dataProjectId is always null,
-			// so this short-circuits to "send to everyone subscribed".
-			if (dataProjectId != null) {
-				const scope = this.wsProjectScope.get(ws) ?? null;
-				if (scope != null && scope !== dataProjectId) continue;
-			}
-			try {
-				ws.send(msg);
-			} catch {}
-		}
+	): void {
+		this.wsManager.broadcastProposalUpdate(type, data);
 	}
+
 
 	async start(port?: number, openBrowser = true): Promise<void> {
 		// Prevent duplicate starts (e.g., accidental re-entry)
@@ -787,52 +424,9 @@ export class RoadmapServer {
 				await this.handleHttpRequest(req, res);
 			});
 
-			this.wss = new WebSocketServer({ server: this.server });
-			this.wss.on("connection", (ws) => {
-				this.sockets.add(ws);
-				this.channelSubscriptions.set(ws, new Map());
-				this.tableSubscriptions.set(ws, new Set());
-				ws.on("message", (msg) => {
-					const text = msg.toString();
-					if (text === "ping") {
-						ws.send("pong");
-						return;
-					}
-					// Try JSON protocol for table/channel subscribe
-					try {
-						const data = JSON.parse(text);
-						// Frontend table subscription: { type: "subscribe", tables: ["proposal", ...], project_id?: number }
-						if (data.type === "subscribe" && Array.isArray(data.tables)) {
-							const rawId = (data as Record<string, unknown>).project_id;
-							const projectId =
-								typeof rawId === "number" && Number.isFinite(rawId) && rawId > 0
-									? rawId
-									: typeof rawId === "string" && /^\d+$/.test(rawId)
-										? Number(rawId)
-										: null;
-							this.handleTableSubscribe(ws, data.tables, projectId);
-							return;
-						}
-						if (data.type === "subscribe" && data.channel) {
-							this.handleSubscribe(ws, data.channel);
-							return;
-						}
-						if (data.type === "unsubscribe" && data.channel) {
-							this.handleUnsubscribe(ws, data.channel);
-							return;
-						}
-					} catch {
-						// Not JSON, ignore unknown messages
-					}
-				});
-				ws.on("close", () => {
-					this.cleanupSubscriptions(ws);
-					this.channelSubscriptions.delete(ws);
-					this.tableSubscriptions.delete(ws);
-					this.wsProjectScope.delete(ws);
-					this.sockets.delete(ws);
-				});
-			});
+			// P3796 AC-17: WebSocketManager attaches its WebSocketServer to the
+			// HTTP server and owns all connection/subscription handling.
+			this.wsManager.setup(this.server);
 
 			await new Promise<void>((resolve, reject) => {
 				const httpServer = this.server;
@@ -860,9 +454,9 @@ export class RoadmapServer {
 				console.log("💡 Open your browser and navigate to the URL above");
 			}
 
-			// Start polling for external DB changes (cron, MCP, direct SQL)
-			this.startChangePolling();
-			void this.startRoadmapEventsListener();
+			// Start polling for external DB changes (cron, MCP, direct SQL) and
+			// the roadmap_events LISTEN client (P3796 AC-17: owned by wsManager).
+			this.wsManager.startBackgroundListeners();
 			void this.scanAgencyObservabilityAlerts();
 			this.agencyAlertInterval = setInterval(
 				() => void this.scanAgencyObservabilityAlerts(),
@@ -928,41 +522,14 @@ export class RoadmapServer {
 		this.searchService = null;
 		this.contentStore = null;
 		this.storeReadyBroadcasted = false;
-		if (this.roadmapEventsReconnectTimer) {
-			clearTimeout(this.roadmapEventsReconnectTimer);
-			this.roadmapEventsReconnectTimer = null;
-		}
-		if (this.roadmapEventsClient) {
-			const client = this.roadmapEventsClient;
-			this.roadmapEventsClient = null;
-			try {
-				await client.query("UNLISTEN roadmap_events");
-			} catch {}
-			try {
-				client.release();
-			} catch {}
-		}
-		// P3564: tear down the dedicated direct-LISTEN pool on shutdown.
-		if (this.directListenPool) {
-			const lp = this.directListenPool;
-			this.directListenPool = null;
-			try {
-				await lp.end();
-			} catch {}
-		}
 		if (this.agencyAlertInterval) {
 			clearInterval(this.agencyAlertInterval);
 			this.agencyAlertInterval = null;
 		}
 
-		// Proactively close WebSocket connections
-		for (const ws of this.sockets) {
-			try {
-				ws.close();
-			} catch {}
-		}
-		this.sockets.clear();
-		this.wss?.close();
+		// P3796 AC-17: tear down WebSocket connections, timers, and the
+		// roadmap_events LISTEN client (all owned by wsManager).
+		await this.wsManager.shutdown();
 
 		// Attempt to stop the server but don't hang forever
 		if (this.server) {
@@ -1165,8 +732,11 @@ export class RoadmapServer {
 		// API Routes
 		if (pathname.startsWith("/api/")) {
 			if (pathname === "/api/proposals") {
-				if (method === "GET") return await this.handleListProposals(req);
-				if (method === "POST") return await this.handleCreateProposal(req);
+				// list/create — delegated to routes/proposals.ts (P3796 AC-18)
+				if (method === "GET")
+					return await handleListProposals(this.buildServerContext(), req);
+				if (method === "POST")
+					return await handleCreateProposal(this.buildServerContext(), req);
 			}
 
 			if (pathname === "/api/agents" && method === "GET")
@@ -1302,12 +872,19 @@ export class RoadmapServer {
 			}
 			if (pathname === "/api/dispatches" && method === "GET")
 				return await this.handleListDispatches(req);
-			if (pathname === "/api/board/stages" && method === "GET")
-				return await this.handleGetBoardStages(req);
-			if (pathname === "/api/board/columns" && method === "GET")
-				return await this.handleGetBoardColumns(req);
-			if (pathname === "/api/board/live-feed" && method === "GET")
-				return await this.handleBoardLiveFeed(req);
+			// Board stage/column/live-feed + sequence routes — delegated to
+			// routes/board.ts (P3796 AC-18). The sequence routes (exact-match
+			// /api/sequences[/move]) collide with nothing in between, so a single
+			// delegation here preserves the original behaviour.
+			{
+				const boardResult = handleBoardRoutes(
+					this.buildServerContext(),
+					method,
+					pathname,
+					req,
+				);
+				if (boardResult) return await boardResult;
+			}
 			if (pathname === "/api/arch-docs" && method === "GET")
 				return await this.handleGetArchDocs();
 
@@ -1324,81 +901,32 @@ export class RoadmapServer {
 				return await this.handleMcpMessage(req);
 			}
 
-			if (pathname.startsWith("/api/proposal/")) {
-				const id = pathname.slice("/api/proposal/".length);
-				if (method === "GET") return await this.handleGetProposal(id);
+			// Proposal CRUD/lifecycle + notification routes — delegated to
+			// routes/proposals.ts (P3796 AC-18). Preserves the original inline
+			// ordering (proposal/:id → proposals/:id sub-routes → notifications →
+			// notes/decisions/reviews).
+			{
+				const proposalResult = handleProposalRoutes(
+					this.buildServerContext(),
+					method,
+					pathname,
+					req,
+				);
+				if (proposalResult) return await proposalResult;
 			}
-
-			if (pathname.startsWith("/api/proposals/")) {
-				const parts = pathname.split("/");
-				const id = parts[3]!;
-				if (parts.length === 4) {
-					if (method === "GET") return await this.handleGetProposal(id);
-					if (method === "PUT") return await this.handleUpdateProposal(req, id);
-					if (method === "DELETE") return await this.handleDeleteProposal(id);
-				}
-				if (parts.length === 5 && parts[4] === "complete") {
-					if (method === "POST") return await this.handleCompleteProposal(id);
-				}
-				if (parts.length === 5 && parts[4] === "release") {
-					if (method === "POST") return await this.handleReleaseProposal(id);
-				}
-				if (parts.length === 5 && parts[4] === "demote") {
-					if (method === "POST") return await this.handleDemoteProposal(id);
-				}
-				if (parts.length === 5 && parts[4] === "schema-drift-resolve") {
-					if (method === "POST") return await this.handleSchemaDriftResolve(req, id);
-				}
-			}
-
-			// P705 Phase 4: Notification endpoint
-			if (pathname.startsWith("/api/notifications/")) {
-				const parts = pathname.split("/");
-				const id = parts[3]!;
-				if (parts.length === 5 && parts[4] === "seen") {
-					if (method === "PATCH") return await this.handleMarkNotificationSeen(id);
-				}
-			}
-
-			// GET /api/proposals/:id/notes - Discussion notes for a proposal
-			if (
-				pathname.startsWith("/api/proposals/") &&
-				pathname.endsWith("/notes")
-			) {
-				const parts = pathname.split("/");
-				const id = parts[3]!; // /api/proposals/{id}/notes
-				if (method === "GET") return await this.handleGetProposalNotes(id, req);
-			}
-
-			// GET /api/proposals/:id/decisions
-			if (
-				pathname.startsWith("/api/proposals/") &&
-				pathname.endsWith("/decisions")
-			) {
-				const parts = pathname.split("/");
-				const id = parts[3]!;
-				if (method === "GET") return await this.handleGetProposalDecisions(id);
-			}
-
-			// GET /api/proposals/:id/reviews
-			if (
-				pathname.startsWith("/api/proposals/") &&
-				pathname.endsWith("/reviews")
-			) {
-				const parts = pathname.split("/");
-				const id = parts[3]!;
-				if (method === "GET") return await this.handleGetProposalReviews(id);
-			}
-
-			if (pathname === "/api/arch-docs" && method === "GET")
-				return await this.handleGetArchDocs();
 
 			if (pathname === "/api/statuses" && method === "GET")
 				return await this.handleGetStatuses();
 
 			// P3784: config-key registry (must precede /api/config to avoid shadowing)
-			if (pathname === "/api/config/keys" && method === "GET")
-				return await this.handleGetConfigKeys(req);
+			if (pathname === "/api/config/keys") {
+				if (method === "GET") return await this.handleGetConfigKeys(req);
+			}
+
+			if (pathname.startsWith("/api/config/keys/")) {
+				const keyName = pathname.slice("/api/config/keys/".length);
+				if (method === "PUT") return await this.handleMutateConfigKey(req, keyName);
+			}
 
 			if (pathname === "/api/config") {
 				if (method === "GET") return await this.handleGetConfig();
@@ -1420,74 +948,29 @@ export class RoadmapServer {
 				if (method === "PATCH") return await this.handlePatchFlag(req, flagMatch[1]);
 			}
 
-			if (pathname === "/api/docs") {
-				if (method === "GET") return await this.handleListDocs();
-				if (method === "POST") return await this.handleCreateDoc(req);
+			// Document/decision/draft/directive routes — delegated to
+			// routes/content.ts (P3796 AC-18).
+			{
+				const contentResult = handleContentRoutes(
+					this.buildServerContext(),
+					method,
+					pathname,
+					req,
+				);
+				if (contentResult) return await contentResult;
 			}
 
-			if (pathname.startsWith("/api/doc/")) {
-				const id = pathname.slice("/api/doc/".length);
-				if (method === "GET") return await this.handleGetDoc(id);
+			// Proposal reorder/cleanup — delegated to routes/proposals.ts
+			// (P3796 AC-18). Invoked here to preserve original precedence.
+			{
+				const maintResult = handleProposalMaintenanceRoutes(
+					this.buildServerContext(),
+					method,
+					pathname,
+					req,
+				);
+				if (maintResult) return await maintResult;
 			}
-
-			if (pathname.startsWith("/api/docs/")) {
-				const id = pathname.split("/")[3]!;
-				if (method === "GET") return await this.handleGetDoc(id);
-				if (method === "PUT") return await this.handleUpdateDoc(req, id);
-			}
-
-			if (pathname === "/api/decisions") {
-				if (method === "GET") return await this.handleListDecisions();
-				if (method === "POST") return await this.handleCreateDecision(req);
-			}
-
-			if (pathname.startsWith("/api/decision/")) {
-				const id = pathname.slice("/api/decision/".length);
-				if (method === "GET") return await this.handleGetDecision(id);
-			}
-
-			if (pathname.startsWith("/api/decisions/")) {
-				const id = pathname.split("/")[3]!;
-				if (method === "GET") return await this.handleGetDecision(id);
-				if (method === "PUT") return await this.handleUpdateDecision(req, id);
-			}
-
-			if (pathname === "/api/drafts" && method === "GET")
-				return await this.handleListDrafts();
-			if (
-				pathname.startsWith("/api/drafts/") &&
-				pathname.endsWith("/promote") &&
-				method === "POST"
-			) {
-				const id = pathname.split("/")[3]!;
-				return await this.handlePromoteDraft(id);
-			}
-
-			if (pathname === "/api/directives") {
-				if (method === "GET") return await this.handleListDirectives();
-				if (method === "POST") return await this.handleCreateDirective(req);
-			}
-
-			if (pathname === "/api/directives/archived" && method === "GET")
-				return await this.handleListArchivedDirectives();
-
-			if (pathname.startsWith("/api/directives/")) {
-				const parts = pathname.split("/");
-				const id = parts[3]!;
-				if (parts.length === 4) {
-					if (method === "GET") return await this.handleGetDirective(id);
-				}
-				if (parts.length === 5 && parts[4] === "archive") {
-					if (method === "POST") return await this.handleArchiveDirective(id);
-				}
-			}
-
-			if (pathname === "/api/proposals/reorder" && method === "POST")
-				return await this.handleReorderProposal(req);
-			if (pathname === "/api/proposals/cleanup" && method === "GET")
-				return await this.handleCleanupPreview(req);
-			if (pathname === "/api/proposals/cleanup/execute" && method === "POST")
-				return await this.handleCleanupExecute(req);
 
 			if (pathname === "/api/version" && method === "GET")
 				return await this.handleGetVersion();
@@ -1501,13 +984,13 @@ export class RoadmapServer {
 				return await this.handleGetSla();
 			if (pathname === "/api/init" && method === "POST")
 				return await this.handleInit(req);
-			if (pathname === "/api/search" && method === "GET")
-				return await this.handleSearch(req);
+			// search + knowledge — delegated to routes/search-knowledge.ts (P3796 AC-13)
+			{
+				const skResult = await routeSearchKnowledgeRequest(req, this.buildServerContext());
+				if (skResult) return skResult;
+			}
 
-			if (pathname === "/api/sequences" && method === "GET")
-				return await this.handleGetSequences();
-			if (pathname === "/api/sequences/move" && method === "POST")
-				return await this.handleMoveSequence(req);
+			// /api/sequences[/move] handled by handleBoardRoutes above (P3796 AC-18).
 
 			if (pathname === "/api/teams" && method === "GET")
 				return await this.handleListTeams();
@@ -1523,18 +1006,17 @@ export class RoadmapServer {
 				const id = pathname.split("/")[3]!;
 				return await this.handleMarkKnowledgeHelpful(id);
 			}
-
 		}
 
 		// Metrics endpoint (outside /api/ prefix for Prometheus scraping convention)
 		if (pathname === "/metrics" && method === "GET")
 			return await this.handleMetrics();
 
-		// Legacy/Duplicate routes
+		// Legacy/Duplicate routes (P3796 AC-18: delegated to routes/board.ts)
 		if (pathname === "/sequences" && method === "GET")
-			return await this.handleGetSequences();
+			return await handleGetSequences(this.buildServerContext());
 		if (pathname === "/sequences/move" && method === "POST")
-			return await this.handleMoveSequence(req);
+			return await handleMoveSequence(this.buildServerContext(), req);
 
 		// Assets (not implemented - return 404)
 		if (pathname.startsWith("/assets/")) {
@@ -1707,755 +1189,129 @@ export class RoadmapServer {
 	}
 
 	// Proposal handlers
-	private async handleListProposals(req: Request): Promise<Response> {
-		const url = new URL(req.url);
-		const status = url.searchParams.get("status") || undefined;
-		const assignee = url.searchParams.get("assignee") || undefined;
-		const parent = url.searchParams.get("parent") || undefined;
-		const priorityParam = url.searchParams.get("priority") || undefined;
-		const crossBranch = url.searchParams.get("crossBranch") === "true";
-		// P1613: parse limit. Default 100, max 1000 — prior implementation silently
-		// dropped the param and always returned the full table (~11MB on prod).
-		const DEFAULT_LIMIT = 100;
-		const MAX_LIMIT = 1000;
-		const limitRaw = url.searchParams.get("limit");
-		const parsedLimit = limitRaw ? Number.parseInt(limitRaw, 10) : NaN;
-		const limit =
-			Number.isFinite(parsedLimit) && parsedLimit > 0
-				? Math.min(parsedLimit, MAX_LIMIT)
-				: DEFAULT_LIMIT;
-		const labelParams = [
-			...url.searchParams.getAll("label"),
-			...url.searchParams.getAll("labels"),
-		];
-		const labelsCsv = url.searchParams.get("labels");
-		if (labelsCsv) {
-			labelParams.push(...labelsCsv.split(","));
-		}
-		const labels = labelParams
-			.map((label) => label.trim())
-			.filter((label) => label.length > 0);
-
-		let priority: "high" | "medium" | "low" | undefined;
-		if (priorityParam) {
-			const normalizedPriority = priorityParam.toLowerCase();
-			const allowed = ["high", "medium", "low"];
-			if (!allowed.includes(normalizedPriority)) {
-				return Response.json(
-					{ error: "Invalid priority filter" },
-					{ status: 400 },
-				);
-			}
-			priority = normalizedPriority as "high" | "medium" | "low";
-		}
-
-		// Resolve parent proposal ID if provided
-		let parentProposalId: string | undefined;
-		if (parent) {
-			const store = await this.getContentStoreInstance();
-			const allProposals = store.getProposals();
-			let parentProposal = findProposalByLooseId(allProposals, parent);
-			if (!parentProposal) {
-				const fallbackId = ensurePrefix(parent);
-				const fallback = await this.core.filesystem.loadProposal(fallbackId);
-				if (fallback) {
-					store.upsertProposal(fallback);
-					parentProposal = fallback;
-				}
-			}
-			if (!parentProposal) {
-				const normalizedParent = ensurePrefix(parent);
-				return Response.json(
-					{ error: `Parent proposal ${normalizedParent} not found` },
-					{ status: 404 },
-				);
-			}
-			parentProposalId = parentProposal.id;
-		}
-
-		// Use Core.queryProposals which handles all filtering and cross-branch logic
-		const proposals = await this.core.queryProposals({
-			filters: {
-				status,
-				assignee,
-				priority,
-				parentProposalId,
-				labels: labels.length > 0 ? labels : undefined,
-			},
-			includeCrossBranch: crossBranch,
-			limit,
-		});
-
-		// P1613 belt-and-suspenders: queryProposals' limit only applies to the
-		// search-query path; cap the result here so the list path also respects it.
-		return Response.json(proposals.slice(0, limit));
-	}
-
 	private async handleSearch(req: Request): Promise<Response> {
 		return handleSearchRoute(req, this.serverContext());
 	}
 
-	private async handleCreateProposal(req: Request): Promise<Response> {
-		const payload = await req.json();
-
-		if (
-			!payload ||
-			typeof payload.title !== "string" ||
-			payload.title.trim().length === 0
-		) {
-			return Response.json({ error: "Title is required" }, { status: 400 });
-		}
-
-		const acceptanceCriteria = Array.isArray(payload.acceptanceCriteriaItems)
-			? payload.acceptanceCriteriaItems
-					.map((item: { text?: string; checked?: boolean }) => ({
-						text: String(item?.text ?? "").trim(),
-						checked: Boolean(item?.checked),
-					}))
-					.filter((item: { text: string }) => item.text.length > 0)
-			: [];
-
-		try {
-			const directive =
-				typeof payload.directive === "string"
-					? await this.resolveDirectiveInput(payload.directive)
-					: undefined;
-
-			const { proposal: createdProposal } =
-				await this.core.createProposalFromInput({
-					title: payload.title,
-					description: payload.summary ?? payload.description,
-					status: payload.status,
-					priority: payload.priority,
-					directive,
-					labels: payload.labels,
-					assignee: payload.assignee,
-					dependencies: payload.dependencies,
-					references: payload.references,
-					parentProposalId: payload.parentProposalId,
-					summary: payload.summary,
-					motivation: payload.motivation,
-					design: payload.design,
-					drawbacks: payload.drawbacks,
-					alternatives: payload.alternatives,
-					dependency_note: payload.dependency_note,
-					needs_capabilities:
-						payload.needs_capabilities ?? payload.required_capabilities,
-					implementationPlan: payload.design ?? payload.implementationPlan,
-					implementationNotes: payload.implementationNotes,
-					finalSummary: payload.finalSummary,
-					acceptanceCriteria,
-				});
-			return Response.json(createdProposal, { status: 201 });
-		} catch (error) {
-			const message =
-				error instanceof Error ? error.message : "Failed to create proposal";
-			return Response.json({ error: message }, { status: 400 });
-		}
-	}
-
-	private async handleGetProposal(proposalId: string): Promise<Response> {
-		const liveProposal = await this.core.getProposal(proposalId);
-		if (liveProposal) {
-			return Response.json(liveProposal);
-		}
-
-		const store = await this.getContentStoreInstance();
-		const proposals = store.getProposals();
-		const proposal = findProposalByLooseId(proposals, proposalId);
-		if (!proposal) {
-			const fallbackId = ensurePrefix(proposalId);
-			const fallback = await this.core.filesystem.loadProposal(fallbackId);
-			if (fallback) {
-				return Response.json(fallback);
-			}
-			return Response.json({ error: "Proposal not found" }, { status: 404 });
-		}
-		return Response.json(proposal);
-	}
-
-	private async handleGetProposalNotes(
-		proposalId: string,
-		req: Request,
-	): Promise<Response> {
-		try {
-			const url = new URL(req.url);
-			const noteType = url.searchParams.get("type");
-			const isNumeric = /^\d+$/.test(proposalId);
-			let sql = `SELECT id, proposal_id, author_identity, context_prefix, COALESCE(body, body_markdown) as body_markdown, created_at
-				FROM roadmap_proposal.proposal_discussions
-				WHERE proposal_id = ${isNumeric ? "$1" : "(SELECT id FROM roadmap_proposal.proposal WHERE display_id = $1)"}`;
-			const params: unknown[] = [
-				isNumeric ? parseInt(proposalId, 10) : proposalId,
-			];
-			if (noteType) {
-				sql += ` AND context_prefix = $2`;
-				params.push(noteType);
-			}
-			sql += ` ORDER BY created_at DESC LIMIT 50`;
-			const { rows } = await query(sql, params);
-			return Response.json({ notes: rows || [] });
-		} catch (error) {
-			return Response.json({ error: String(error) }, { status: 500 });
-		}
-	}
-
-	private async handleGetProposalDecisions(
-		proposalId: string,
-	): Promise<Response> {
-		try {
-			const isNumeric = /^\d+$/.test(proposalId);
-			const { rows } = await query(
-				`SELECT id, decision, authority, rationale, binding, decided_at
-				 FROM roadmap_proposal.proposal_decision
-				 WHERE proposal_id = ${isNumeric ? "$1" : "(SELECT id FROM roadmap_proposal.proposal WHERE display_id = $1)"}
-				 ORDER BY decided_at DESC`,
-				[isNumeric ? parseInt(proposalId, 10) : proposalId],
-			);
-			return Response.json({ decisions: rows || [] });
-		} catch (error) {
-			return Response.json({ error: String(error) }, { status: 500 });
-		}
-	}
-
-	private async handleGetProposalReviews(
-		proposalId: string,
-	): Promise<Response> {
-		try {
-			const isNumeric = /^\d+$/.test(proposalId);
-			const { rows } = await query(
-				`SELECT id, reviewer_identity, verdict, notes, findings, is_blocking, reviewed_at
-				 FROM roadmap_proposal.proposal_reviews
-				 WHERE proposal_id = ${isNumeric ? "$1" : "(SELECT id FROM roadmap_proposal.proposal WHERE display_id = $1)"}
-				 ORDER BY reviewed_at DESC`,
-				[isNumeric ? parseInt(proposalId, 10) : proposalId],
-			);
-			return Response.json({ reviews: rows || [] });
-		} catch (error) {
-			return Response.json({ error: String(error) }, { status: 500 });
-		}
-	}
-
-	private async handleUpdateProposal(
-		req: Request,
-		proposalId: string,
-	): Promise<Response> {
-		const updates = await req.json();
-		const updateInput: ProposalUpdateInput = {};
-
-		if ("title" in updates && typeof updates.title === "string") {
-			updateInput.title = updates.title;
-		}
-
-		if ("description" in updates && typeof updates.description === "string") {
-			updateInput.description = updates.description;
-		}
-		if ("summary" in updates && typeof updates.summary === "string") {
-			updateInput.summary = updates.summary;
-			updateInput.description = updates.summary;
-		}
-		if ("motivation" in updates && typeof updates.motivation === "string") {
-			updateInput.motivation = updates.motivation;
-		}
-		if ("design" in updates && typeof updates.design === "string") {
-			updateInput.design = updates.design;
-			updateInput.implementationPlan = updates.design;
-		}
-		if ("drawbacks" in updates && typeof updates.drawbacks === "string") {
-			updateInput.drawbacks = updates.drawbacks;
-		}
-		if ("alternatives" in updates && typeof updates.alternatives === "string") {
-			updateInput.alternatives = updates.alternatives;
-		}
-		if (
-			"dependency_note" in updates &&
-			typeof updates.dependency_note === "string"
-		) {
-			updateInput.dependency_note = updates.dependency_note;
-		}
-
-		if ("status" in updates && typeof updates.status === "string") {
-			updateInput.status = updates.status;
-		}
-
-		if ("maturity" in updates && typeof updates.maturity === "string") {
-			// Live DB CHECK constraint on proposal.maturity accepts exactly 4 values.
-			// Reject anything else loudly rather than letting the UPDATE fail at SQL.
-			const ALLOWED_MATURITY = new Set([
-				"new",
-				"active",
-				"mature",
-				"obsolete",
-			]);
-			if (!ALLOWED_MATURITY.has(updates.maturity)) {
-				return new Response(
-					JSON.stringify({
-						error: `Invalid maturity '${updates.maturity}'. Allowed: ${Array.from(ALLOWED_MATURITY).join(", ")}`,
-					}),
-					{ status: 400, headers: { "content-type": "application/json" } },
-				);
-			}
-			updateInput.maturity = updates.maturity as ProposalMaturity;
-		}
-
-		if ("priority" in updates && typeof updates.priority === "string") {
-			updateInput.priority = updates.priority;
-		}
-
-		if (
-			"directive" in updates &&
-			(typeof updates.directive === "string" || updates.directive === null)
-		) {
-			if (typeof updates.directive === "string") {
-				updateInput.directive = await this.resolveDirectiveInput(
-					updates.directive,
-				);
-			} else {
-				updateInput.directive = updates.directive;
-			}
-		}
-
-		if ("labels" in updates && Array.isArray(updates.labels)) {
-			updateInput.labels = updates.labels;
-		}
-
-		if ("assignee" in updates && Array.isArray(updates.assignee)) {
-			updateInput.assignee = updates.assignee;
-		}
-
-		if ("dependencies" in updates && Array.isArray(updates.dependencies)) {
-			updateInput.dependencies = updates.dependencies;
-		}
-
-		if ("references" in updates && Array.isArray(updates.references)) {
-			updateInput.references = updates.references;
-		}
-		if (
-			"required_capabilities" in updates &&
-			Array.isArray(updates.required_capabilities)
-		) {
-			updateInput.required_capabilities = updates.required_capabilities;
-			updateInput.needs_capabilities = updates.required_capabilities;
-		}
-		if (
-			"needs_capabilities" in updates &&
-			Array.isArray(updates.needs_capabilities)
-		) {
-			updateInput.needs_capabilities = updates.needs_capabilities;
-		}
-
-		if (
-			"implementationPlan" in updates &&
-			typeof updates.implementationPlan === "string" &&
-			!("design" in updates)
-		) {
-			updateInput.implementationPlan = updates.implementationPlan;
-		}
-
-		if (
-			"implementationNotes" in updates &&
-			typeof updates.implementationNotes === "string"
-		) {
-			updateInput.implementationNotes = updates.implementationNotes;
-		}
-
-		if ("finalSummary" in updates && typeof updates.finalSummary === "string") {
-			updateInput.finalSummary = updates.finalSummary;
-		}
-
-		if (
-			"acceptanceCriteriaItems" in updates &&
-			Array.isArray(updates.acceptanceCriteriaItems)
-		) {
-			updateInput.acceptanceCriteria = updates.acceptanceCriteriaItems
-				.map((item: { text?: string; checked?: boolean }) => ({
-					text: String(item?.text ?? "").trim(),
-					checked: Boolean(item?.checked),
-				}))
-				.filter((item: { text: string }) => item.text.length > 0);
-		}
-
-		try {
-			const updatedProposal = await this.core.updateProposalFromInput(
-				proposalId,
-				updateInput,
-			);
-			return Response.json(updatedProposal);
-		} catch (error) {
-			const message =
-				error instanceof Error ? error.message : "Failed to update proposal";
-			return Response.json({ error: message }, { status: 400 });
-		}
-	}
-
-	private async handleDeleteProposal(proposalId: string): Promise<Response> {
-		const success = await this.core.archiveProposal(proposalId);
-		if (!success) {
-			return Response.json({ error: "Proposal not found" }, { status: 404 });
-		}
-		return Response.json({ success: true });
-	}
-
-	private async handleCompleteProposal(proposalId: string): Promise<Response> {
-		try {
-			const proposal = await this.core.filesystem.loadProposal(proposalId);
-			if (!proposal) {
-				return Response.json({ error: "Proposal not found" }, { status: 404 });
-			}
-
-			const success = await this.core.completeProposal(proposalId);
-			if (!success) {
-				return Response.json(
-					{ error: "Failed to complete proposal" },
-					{ status: 500 },
-				);
-			}
-
-			// Notify listeners to refresh
-			this.broadcastProposalsUpdated();
-			return Response.json({ success: true });
-		} catch (error) {
-			const message =
-				error instanceof Error ? error.message : "Failed to complete proposal";
-			console.error("Error completing proposal:", error);
-			return Response.json({ error: message }, { status: 500 });
-		}
-	}
-
-	private async handleReleaseProposal(proposalId: string): Promise<Response> {
-		try {
-			const proposal = await this.core.filesystem.loadProposal(proposalId);
-			if (!proposal) {
-				return Response.json({ error: "Proposal not found" }, { status: 404 });
-			}
-
-			// Get the claim agent or use a default
-			const agent = proposal.claim?.agent ?? "system";
-			await this.core.releaseClaim(proposalId, agent, { force: true });
-
-			// Notify listeners to refresh
-			this.broadcastProposalsUpdated();
-			return Response.json({ success: true });
-		} catch (error) {
-			const message =
-				error instanceof Error ? error.message : "Failed to release proposal";
-			console.error("Error releasing proposal:", error);
-			return Response.json({ error: message }, { status: 500 });
-		}
-	}
-
-	private async handleDemoteProposal(proposalId: string): Promise<Response> {
-		try {
-			const proposal = await this.core.filesystem.loadProposal(proposalId);
-			if (!proposal) {
-				return Response.json({ error: "Proposal not found" }, { status: 404 });
-			}
-
-			const result = await this.core.demoteProposalProper(
-				proposalId,
-				"user",
-				true,
-			);
-			// Notify listeners to refresh
-			this.broadcastProposalsUpdated();
-			return Response.json({ success: true, status: result.status });
-		} catch (error) {
-			const message =
-				error instanceof Error ? error.message : "Failed to demote proposal";
-			console.error("Error demoting proposal:", error);
-			return Response.json({ error: message }, { status: 500 });
-		}
-	}
-
-	private async handleSchemaDriftResolve(
-		req: Request,
-		proposalId: string,
-	): Promise<Response> {
-		try {
-			const body = await req.json();
-			const fingerprint = body.fingerprint;
-
-			if (!fingerprint) {
-				return Response.json(
-					{ error: "fingerprint is required" },
-					{ status: 400 },
-				);
-			}
-
-			// Get agenthive database connection (P674, P675 create tables here)
-			const result = await this.db.query(
-				`UPDATE roadmap.schema_drift_seen
-         SET resolved_at = now()
-         WHERE fingerprint = $1 AND hotfix_proposal_id = $2`,
-				[fingerprint, proposalId],
-			);
-
-			if (result.rowCount === 0) {
-				return Response.json(
-					{ error: "No matching schema drift record found" },
-					{ status: 404 },
-				);
-			}
-
-			// Broadcast update to clients
-			this.broadcastProposalsUpdated();
-			return Response.json({ success: true, resolved: true });
-		} catch (error) {
-			const message =
-				error instanceof Error
-					? error.message
-					: "Failed to resolve schema drift";
-			console.error("Error resolving schema drift:", error);
-			return Response.json({ error: message }, { status: 500 });
-		}
-	}
-
-	// P705 Phase 4: Mark notification as seen
-	private async handleMarkNotificationSeen(
-		notificationId: string,
-	): Promise<Response> {
-		try {
-			// Check if notification_inbox table exists (Phase 4 optional feature)
-			const tableExists = await this.db.query(
-				`SELECT EXISTS (
-					SELECT 1 FROM information_schema.tables
-					WHERE table_schema='roadmap' AND table_name='notification_inbox'
-				) as exists`,
-			);
-
-			if (!tableExists.rows[0]?.exists) {
-				return Response.json(
-					{ error: "notification_inbox table not available (Phase 4 not deployed)" },
-					{ status: 503 },
-				);
-			}
-
-			// Update notification to mark as seen
-			const result = await this.db.query(
-				`UPDATE roadmap.notification_inbox
-				 SET seen = true
-				 WHERE id = $1
-				 RETURNING id, severity, title, message, created_at, seen`,
-				[notificationId],
-			);
-
-			if (result.rowCount === 0) {
-				return Response.json(
-					{ error: "Notification not found" },
-					{ status: 404 },
-				);
-			}
-
-			// Trigger pg_notify so WebSocket clients get real-time update
-			const notif = result.rows[0];
-			await this.db.query(
-				`SELECT pg_notify('notification_inbox_change', json_build_object('id', $1, 'change_type', 'update')::text)`,
-				[notificationId],
-			);
-
-			return Response.json({
-				success: true,
-				notification: {
-					id: notif.id,
-					severity: notif.severity ?? "info",
-					title: notif.title,
-					message: notif.message,
-					created_at: notif.created_at,
-					seen: notif.seen,
-				},
-			});
-		} catch (error) {
-			const message =
-				error instanceof Error
-					? error.message
-					: "Failed to mark notification as seen";
-			console.error("Error marking notification as seen:", error);
-			return Response.json({ error: message }, { status: 500 });
-		}
-	}
 
 	// Documentation handlers
-	private async handleListDocs(): Promise<Response> {
-		try {
-			const store = await this.getContentStoreInstance();
-			const docs = store.getDocuments();
-			const docFiles = docs.map((doc) => ({
-				name: `${doc.title}.md`,
-				id: doc.id,
-				title: doc.title,
-				type: doc.type,
-				createdDate: doc.createdDate,
-				updatedDate: doc.updatedDate,
-				lastModified: doc.updatedDate || doc.createdDate,
-				tags: doc.tags || [],
-			}));
-			return Response.json(docFiles);
-		} catch (error) {
-			console.error("Error listing documents:", error);
-			return Response.json([]);
-		}
-	}
+	private async handleGetConfigKeys(req: Request): Promise<Response> {
+		const auth = await requireOperator(req, { action: "config.read" });
+		if (auth.rejected) return auth.rejected;
 
-	private async handleGetDoc(docId: string): Promise<Response> {
+		const url = new URL(req.url);
+		const categoryFilter = url.searchParams.get("category") ?? null;
+
+		// Query all active flag values in one shot
+		let flagRows: { flag_name: string; scope: string; value_jsonb: unknown; category: string | null }[] = [];
 		try {
-			const doc = await this.core.getDocument(docId);
-			if (!doc) {
-				return Response.json({ error: "Document not found" }, { status: 404 });
+			const { rows } = await query<{ flag_name: string; scope: string; value_jsonb: unknown; category: string | null }>(
+				`SELECT flag_name, scope, value_jsonb, category
+				   FROM core.runtime_flag
+				  WHERE lifecycle_status = 'active'`,
+			);
+			flagRows = rows;
+		} catch {
+			// non-fatal if table not migrated yet
+		}
+		const flagMap = new Map<string, { value: unknown; category: string | null }>();
+		for (const r of flagRows) {
+			if (!flagMap.has(r.flag_name)) {
+				flagMap.set(r.flag_name, { value: r.value_jsonb, category: r.category });
 			}
-			return Response.json(doc);
-		} catch (error) {
-			console.error("Error loading document:", error);
-			return Response.json({ error: "Document not found" }, { status: 404 });
 		}
+
+		const descriptors = Object.values(AllConfigKeys).map((key) => {
+			let value: unknown = null;
+			let masked = false;
+
+			if (key.class === "secret") {
+				masked = true;
+				value = null;
+			} else if (key.class === "structural") {
+				value = process.env[key.name] ?? ("defaultValue" in key ? key.defaultValue : null) ?? null;
+			} else if (key.class === "flag") {
+				const flagEntry = flagMap.get(key.name);
+				value = flagEntry?.value ?? ("defaultValue" in key ? key.defaultValue : null) ?? null;
+			} else if (key.class === "registry") {
+				value = process.env[key.name] ?? ("defaultValue" in key ? key.defaultValue : null) ?? null;
+			}
+
+			const flagMeta = flagMap.get(key.name);
+			const category =
+				(flagMeta?.category ?? null) ||
+				("category" in key ? (key as { category?: string }).category : null) ||
+				"uncategorized";
+
+			return {
+				name: key.name,
+				class: key.class,
+				category,
+				description: "description" in key ? (key as { description?: string }).description ?? null : null,
+				value,
+				default_value: "defaultValue" in key ? (key as { defaultValue?: unknown }).defaultValue ?? null : null,
+				required: key.required,
+				editable: key.class === "flag",
+				masked,
+			};
+		});
+
+		const filtered = categoryFilter
+			? descriptors.filter((d) => d.category === categoryFilter)
+			: descriptors;
+
+		return Response.json({ keys: filtered, count: filtered.length });
 	}
 
-	private async handleCreateDoc(req: Request): Promise<Response> {
-		const { filename, content } = await req.json();
+	private async handleMutateConfigKey(req: Request, keyName: string): Promise<Response> {
+		const auth = await requireOperator(req, { action: "config.write" });
+		if (auth.rejected) return auth.rejected;
 
+		let key: ReturnType<typeof getConfigKeyByName>;
 		try {
-			const title = filename.replace(".md", "");
-			const document = await this.core.createDocumentWithId(title, content);
-			return Response.json({ success: true, id: document.id }, { status: 201 });
-		} catch (error) {
-			console.error("Error creating document:", error);
+			key = getConfigKeyByName(keyName);
+		} catch {
+			return Response.json({ error: "Unknown config key" }, { status: 404 });
+		}
+
+		if (key.class !== "flag") {
 			return Response.json(
-				{ error: "Failed to create document" },
-				{ status: 500 },
+				{ error: `Key '${keyName}' (class: ${key.class}) is not editable via this endpoint` },
+				{ status: 400 },
 			);
 		}
-	}
 
-	private async handleUpdateDoc(
-		req: Request,
-		docId: string,
-	): Promise<Response> {
+		let body: { value: unknown; scope?: string };
 		try {
-			const body = await req.json();
-			const content =
-				typeof body?.content === "string" ? body.content : undefined;
-			const title = typeof body?.title === "string" ? body.title : undefined;
+			body = await req.json();
+		} catch {
+			return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+		}
 
-			if (typeof content !== "string") {
-				return Response.json(
-					{ error: "Document content is required" },
-					{ status: 400 },
-				);
-			}
+		const scope = typeof body.scope === "string" ? body.scope : "global";
 
-			let normalizedTitle: string | undefined;
-
-			if (typeof title === "string") {
-				normalizedTitle = title.trim();
-				if (normalizedTitle.length === 0) {
-					return Response.json(
-						{ error: "Document title cannot be empty" },
-						{ status: 400 },
-					);
-				}
-			}
-
-			const existingDoc = await this.core.getDocument(docId);
-			if (!existingDoc) {
-				return Response.json({ error: "Document not found" }, { status: 404 });
-			}
-
-			const nextDoc = normalizedTitle
-				? { ...existingDoc, title: normalizedTitle }
-				: { ...existingDoc };
-
-			await this.core.updateDocument(nextDoc, content);
-			return Response.json({ success: true });
-		} catch (error) {
-			console.error("Error updating document:", error);
-			if (error instanceof SyntaxError) {
-				return Response.json(
-					{ error: "Invalid request payload" },
-					{ status: 400 },
-				);
-			}
-			return Response.json(
-				{ error: "Failed to update document" },
-				{ status: 500 },
+		try {
+			const serialized = JSON.stringify(body.value);
+			await query(
+				`INSERT INTO core.runtime_flag (flag_name, scope, value_jsonb, lifecycle_status)
+				 VALUES ($1, $2, $3::jsonb, 'active')
+				 ON CONFLICT (flag_name, scope)
+				 DO UPDATE SET value_jsonb = EXCLUDED.value_jsonb, updated_at = now()`,
+				[keyName, scope, serialized],
 			);
-		}
-	}
-
-	// Decision handlers
-	private async handleListDecisions(): Promise<Response> {
-		try {
-			const store = await this.getContentStoreInstance();
-			const decisions = store.getDecisions();
-			const decisionFiles = decisions.map((decision) => ({
-				id: decision.id,
-				title: decision.title,
-				status: decision.status,
-				date: decision.date,
-				context: decision.context,
-				decision: decision.decision,
-				consequences: decision.consequences,
-				alternatives: decision.alternatives,
-			}));
-			return Response.json(decisionFiles);
-		} catch (error) {
-			console.error("Error listing decisions:", error);
-			return Response.json([]);
-		}
-	}
-
-	private async handleGetDecision(decisionId: string): Promise<Response> {
-		try {
-			const store = await this.getContentStoreInstance();
-			const normalizedId = decisionId.startsWith("decision-")
-				? decisionId
-				: `decision-${decisionId}`;
-			const decision = store
-				.getDecisions()
-				.find((item) => item.id === normalizedId || item.id === decisionId);
-
-			if (!decision) {
-				return Response.json({ error: "Decision not found" }, { status: 404 });
-			}
-
-			return Response.json(decision);
-		} catch (error) {
-			console.error("Error loading decision:", error);
-			return Response.json({ error: "Decision not found" }, { status: 404 });
-		}
-	}
-
-	private async handleCreateDecision(req: Request): Promise<Response> {
-		const { title } = await req.json();
-
-		try {
-			const decision = await this.core.createDecisionWithTitle(title);
-			return Response.json(decision, { status: 201 });
-		} catch (error) {
-			console.error("Error creating decision:", error);
-			return Response.json(
-				{ error: "Failed to create decision" },
-				{ status: 500 },
+			await query(
+				`SELECT pg_notify('runtime_flag_changed', $1::text)`,
+				[JSON.stringify({ flag_name: keyName, scope })],
 			);
-		}
-	}
-
-	private async handleUpdateDecision(
-		req: Request,
-		decisionId: string,
-	): Promise<Response> {
-		const content = await req.text();
-
-		try {
-			await this.core.updateDecisionFromContent(decisionId, content);
-			return Response.json({ success: true });
-		} catch (error) {
-			if (error instanceof Error && error.message.includes("not found")) {
-				return Response.json({ error: "Decision not found" }, { status: 404 });
-			}
-			console.error("Error updating decision:", error);
-			return Response.json(
-				{ error: "Failed to update decision" },
-				{ status: 500 },
-			);
+			return Response.json({
+				key_name: keyName,
+				scope,
+				new_value: body.value,
+				operator: auth.outcome.operatorName,
+			});
+		} catch (err) {
+			console.error(`[config.write] Failed to mutate ${keyName}:`, err);
+			return Response.json({ error: "Failed to update flag" }, { status: 500 });
 		}
 	}
 
@@ -2593,367 +1449,34 @@ export class RoadmapServer {
 		return new Response("Internal Server Error", { status: 500 });
 	}
 
-	// Draft handlers
-	private async handleListDrafts(): Promise<Response> {
-		try {
-			const drafts = await this.core.filesystem.listDrafts();
-			return Response.json(drafts);
-		} catch (error) {
-			console.error("Error listing drafts:", error);
-			return Response.json([]);
-		}
+	/**
+	 * Build the injected dependency bundle handed to extracted router modules
+	 * (P3796). Methods are bound to this instance so router modules can call
+	 * them without holding a reference to the whole server.
+	 */
+	private buildServerContext(): ServerContext {
+		return {
+			core: this.core,
+			searchService: this.searchService,
+			contentStore: this.contentStore,
+			mcpServer: this.mcpServer,
+			startedAt: this._startedAt,
+			getProjectName: () => this.projectName,
+			setProjectName: (name: string) => {
+				this.projectName = name;
+			},
+			broadcastProposalsUpdated: () => this.broadcastProposalsUpdated(),
+			broadcastProposalUpdate: (type, data) =>
+				this.broadcastProposalUpdate(type, data),
+			resolveProjectScope: (req: Request) => this.resolveProjectScope(req),
+			handleError: (error: Error) => this.handleError(error),
+			getContentStore: () => this.getContentStoreInstance(),
+			resolveDirectiveInput: (directive: string) =>
+				this.resolveDirectiveInput(directive),
+		};
 	}
 
-	private async handlePromoteDraft(draftId: string): Promise<Response> {
-		try {
-			const success = await this.core.promoteDraft(draftId);
-			if (!success) {
-				return Response.json({ error: "Draft not found" }, { status: 404 });
-			}
-			return Response.json({ success: true });
-		} catch (error) {
-			console.error("Error promoting draft:", error);
-			return Response.json(
-				{ error: "Failed to promote draft" },
-				{ status: 500 },
-			);
-		}
-	}
 
-	// Directive handlers
-	private async handleListDirectives(): Promise<Response> {
-		try {
-			const directives = await this.core.fs.listDirectives();
-			return Response.json(directives);
-		} catch (error) {
-			console.error("Error listing directives:", error);
-			return Response.json([]);
-		}
-	}
-
-	private async handleListArchivedDirectives(): Promise<Response> {
-		try {
-			const directives = await this.core.filesystem.listArchivedDirectives();
-			return Response.json(directives);
-		} catch (error) {
-			console.error("Error listing archived directives:", error);
-			return Response.json([]);
-		}
-	}
-
-	private async handleGetDirective(directiveId: string): Promise<Response> {
-		try {
-			const directive = await this.core.filesystem.loadDirective(directiveId);
-			if (!directive) {
-				return Response.json({ error: "Directive not found" }, { status: 404 });
-			}
-			return Response.json(directive);
-		} catch (error) {
-			console.error("Error loading directive:", error);
-			return Response.json({ error: "Directive not found" }, { status: 404 });
-		}
-	}
-
-	private async handleCreateDirective(req: Request): Promise<Response> {
-		try {
-			const body = (await req.json()) as {
-				title?: string;
-				description?: string;
-			};
-			const title = body.title?.trim();
-
-			if (!title) {
-				return Response.json(
-					{ error: "Directive title is required" },
-					{ status: 400 },
-				);
-			}
-
-			// Check for duplicates
-			const existingDirectives = await this.core.filesystem.listDirectives();
-			const buildAliasKeys = (value: string): Set<string> => {
-				const normalized = value.trim().toLowerCase();
-				const keys = new Set<string>();
-				if (!normalized) {
-					return keys;
-				}
-				keys.add(normalized);
-				if (/^\d+$/.test(normalized)) {
-					const numeric = String(Number.parseInt(normalized, 10));
-					keys.add(numeric);
-					keys.add(`d-${numeric}`);
-					return keys;
-				}
-				const match = normalized.match(/^d-(\d+)$/);
-				if (match?.[1]) {
-					const numeric = String(Number.parseInt(match[1], 10));
-					keys.add(numeric);
-					keys.add(`d-${numeric}`);
-				}
-				return keys;
-			};
-			const requestedKeys = buildAliasKeys(title);
-			const duplicate = existingDirectives.find((directive) => {
-				const directiveKeys = new Set<string>([
-					...buildAliasKeys(directive.id),
-					...buildAliasKeys(directive.title),
-				]);
-				for (const key of requestedKeys) {
-					if (directiveKeys.has(key)) {
-						return true;
-					}
-				}
-				return false;
-			});
-			if (duplicate) {
-				return Response.json(
-					{ error: "A directive with this title or ID already exists" },
-					{ status: 400 },
-				);
-			}
-
-			const directive = await this.core.filesystem.createDirective(
-				title,
-				body.description,
-			);
-			return Response.json(directive, { status: 201 });
-		} catch (error) {
-			console.error("Error creating directive:", error);
-			return Response.json(
-				{ error: "Failed to create directive" },
-				{ status: 500 },
-			);
-		}
-	}
-
-	private async handleArchiveDirective(directiveId: string): Promise<Response> {
-		try {
-			const result = await this.core.archiveDirective(directiveId);
-			if (!result.success) {
-				return Response.json({ error: "Directive not found" }, { status: 404 });
-			}
-			this.broadcastProposalsUpdated();
-			return Response.json({
-				success: true,
-				directive: result.directive ?? null,
-			});
-		} catch (error) {
-			const message =
-				error instanceof Error ? error.message : "Failed to archive directive";
-			console.error("Error archiving directive:", error);
-			return Response.json({ error: message }, { status: 500 });
-		}
-	}
-
-	private async handleReorderProposal(req: Request): Promise<Response> {
-		try {
-			const body = await req.json();
-			const proposalId =
-				typeof body.proposalId === "string"
-					? body.proposalId
-					: typeof body.proposalId === "string"
-						? body.proposalId
-						: "";
-			const targetStatus =
-				typeof body.targetStatus === "string" ? body.targetStatus : "";
-			const orderedProposalIds = Array.isArray(body.orderedProposalIds)
-				? body.orderedProposalIds
-				: Array.isArray(body.orderedProposalIds)
-					? body.orderedProposalIds
-					: [];
-			const targetDirective =
-				typeof body.targetDirective === "string"
-					? body.targetDirective
-					: body.targetDirective === null
-						? null
-						: typeof body.targetDirective === "string"
-							? body.targetDirective
-							: body.targetDirective === null
-								? null
-								: undefined;
-
-			if (!proposalId || !targetStatus || orderedProposalIds.length === 0) {
-				return Response.json(
-					{
-						error:
-							"Missing required fields: proposalId, targetStatus, and orderedProposalIds",
-					},
-					{ status: 400 },
-				);
-			}
-
-			const { updatedProposal } = await this.core.reorderProposal({
-				proposalId,
-				targetStatus,
-				orderedProposalIds,
-				targetDirective,
-				commitMessage: `Reorder proposals in ${targetStatus}`,
-			});
-
-			return Response.json({ success: true, proposal: updatedProposal });
-		} catch (error) {
-			const message =
-				error instanceof Error ? error.message : "Failed to reorder proposal";
-			// Cross-branch and validation errors are client errors (400), not server errors (500)
-			const isCrossBranchError = message.includes("exists in branch");
-			const isValidationError =
-				message.includes("not found") || message.includes("Missing required");
-			const status = isCrossBranchError || isValidationError ? 400 : 500;
-			if (status === 500) {
-				console.error("Error reordering proposal:", error);
-			}
-			return Response.json({ error: message }, { status });
-		}
-	}
-
-	private async handleCleanupPreview(req: Request): Promise<Response> {
-		try {
-			const url = new URL(req.url);
-			const ageParam = url.searchParams.get("age");
-
-			if (!ageParam) {
-				return Response.json(
-					{ error: "Missing age parameter" },
-					{ status: 400 },
-				);
-			}
-
-			const age = Number.parseInt(ageParam, 10);
-			if (Number.isNaN(age) || age < 0) {
-				return Response.json(
-					{ error: "Invalid age parameter" },
-					{ status: 400 },
-				);
-			}
-
-			// Get Reached proposals older than specified days
-			const proposalsToCleanup = await this.core.getReachedProposalsByAge(age);
-
-			// Return preview of proposals to be cleaned up
-			const preview = proposalsToCleanup.map((proposal) => ({
-				id: proposal.id,
-				title: proposal.title,
-				updatedDate: proposal.updatedDate,
-				createdDate: proposal.createdDate,
-			}));
-
-			return Response.json({
-				count: preview.length,
-				proposals: preview,
-			});
-		} catch (error) {
-			console.error("Error getting cleanup preview:", error);
-			return Response.json(
-				{ error: "Failed to get cleanup preview" },
-				{ status: 500 },
-			);
-		}
-	}
-
-	private async handleCleanupExecute(req: Request): Promise<Response> {
-		try {
-			const { age } = await req.json();
-
-			if (age === undefined || age === null) {
-				return Response.json(
-					{ error: "Missing age parameter" },
-					{ status: 400 },
-				);
-			}
-
-			const ageInDays = Number.parseInt(age, 10);
-			if (Number.isNaN(ageInDays) || ageInDays < 0) {
-				return Response.json(
-					{ error: "Invalid age parameter" },
-					{ status: 400 },
-				);
-			}
-
-			// Get Reached proposals older than specified days
-			const proposalsToCleanup =
-				await this.core.getReachedProposalsByAge(ageInDays);
-
-			if (proposalsToCleanup.length === 0) {
-				return Response.json({
-					success: true,
-					movedCount: 0,
-					message: "No proposals to clean up",
-				});
-			}
-
-			// Move proposals to completed folder
-			let successCount = 0;
-			const failedProposals: string[] = [];
-
-			for (const proposal of proposalsToCleanup) {
-				try {
-					const success = await this.core.completeProposal(proposal.id);
-					if (success) {
-						successCount++;
-					} else {
-						failedProposals.push(proposal.id);
-					}
-				} catch (error) {
-					console.error(`Failed to complete proposal ${proposal.id}:`, error);
-					failedProposals.push(proposal.id);
-				}
-			}
-
-			// Notify listeners to refresh
-			this.broadcastProposalsUpdated();
-
-			return Response.json({
-				success: true,
-				movedCount: successCount,
-				totalCount: proposalsToCleanup.length,
-				failedProposals:
-					failedProposals.length > 0 ? failedProposals : undefined,
-				message: `Moved ${successCount} of ${proposalsToCleanup.length} proposals to completed folder`,
-			});
-		} catch (error) {
-			console.error("Error executing cleanup:", error);
-			return Response.json(
-				{ error: "Failed to execute cleanup" },
-				{ status: 500 },
-			);
-		}
-	}
-
-	// Sequences handlers
-	private async handleGetSequences(): Promise<Response> {
-		const data = await this.core.listActiveSequences();
-		return Response.json(data);
-	}
-
-	private async handleMoveSequence(req: Request): Promise<Response> {
-		try {
-			const body = await req.json();
-			const proposalId = String(
-				body.proposalId || body.proposalId || "",
-			).trim();
-			const moveToUnsequenced = Boolean(body.unsequenced === true);
-			const targetSequenceIndex =
-				body.targetSequenceIndex !== undefined
-					? Number(body.targetSequenceIndex)
-					: undefined;
-
-			if (!proposalId)
-				return Response.json(
-					{ error: "proposalId is required" },
-					{ status: 400 },
-				);
-
-			const next = await this.core.moveProposalInSequences({
-				proposalId,
-				unsequenced: moveToUnsequenced,
-				targetSequenceIndex,
-			});
-			return Response.json(next);
-		} catch (error) {
-			const message = (error as Error)?.message || "Invalid request";
-			return Response.json({ error: message }, { status: 400 });
-		}
-	}
 
 	private async handleListAgents(req?: Request): Promise<Response> {
 		try {
@@ -3010,8 +1533,18 @@ export class RoadmapServer {
 				}));
 				return Response.json(agents);
 			}
-			const agents = await this.core.listAgents();
-			return Response.json(agents);
+			const { rows: allAgents } = await query<{
+				identity: string; agent_type: string; role: string | null;
+				status: string; trust_tier: string; updated_at: string;
+			}>(
+				`SELECT agent_identity AS identity, agent_type, role, status, trust_tier, updated_at
+				   FROM roadmap_workforce.agent_registry ORDER BY agent_identity ASC`,
+			);
+			return Response.json(allAgents.map((r) => ({
+				name: r.identity, identity: r.identity, agent_type: r.agent_type,
+				role: r.role, status: r.status, trustScore: 0,
+				trust_tier: r.trust_tier, capabilities: [] as string[], lastSeen: r.updated_at,
+			})));
 		} catch (error) {
 			console.error("Error listing agents:", error);
 			return Response.json({ error: "Failed to list agents" }, { status: 500 });
@@ -3442,13 +1975,7 @@ export class RoadmapServer {
 	// against the project table — invalid values fall back to project_id=1
 	// so the UI can never lock itself out by sending garbage. Returns the
 	// resolved id along with metadata used to render the active-scope chip.
-	private async resolveProjectScope(
-		req: Request,
-	): Promise<{
-		project_id: number;
-		project_slug: string;
-		project_name: string;
-	}> {
+	private async resolveProjectScope(req: Request): Promise<ProjectScope> {
 		const url = new URL(req.url);
 		const headerVal = req.headers.get("x-project-id") ?? "";
 		const queryVal = url.searchParams.get("project_id") ?? "";
@@ -4754,234 +3281,6 @@ export class RoadmapServer {
 		} catch (error) {
 			console.error("Error toggling route:", error);
 			return Response.json({ error: "Failed to update route" }, { status: 500 });
-		}
-	}
-
-	private async handleGetBoardStages(req?: Request): Promise<Response> {
-		try {
-			const url = new URL(req?.url || "http://localhost/?workflow=Standard RFC");
-			const workflow = url.searchParams.get("workflow") || "Standard RFC";
-
-			const registry = getRegistry();
-			const view = registry.getView(workflow);
-
-			// Load display metadata (displayLabel, hexColor) from the stage-definition table.
-			// Falls back gracefully — if the table is empty or a stage has no entry, use
-			// the stage name as the display label and null for colour.
-			let stageDefMap: Map<string, { displayLabel: string; hexColor: string | null }> = new Map();
-			try {
-				const raw = await loadStageRegistry();
-				for (const [name, def] of raw) {
-					stageDefMap.set(name, { displayLabel: def.displayLabel, hexColor: def.hexColor });
-				}
-			} catch {
-				// non-fatal — proceed with name-only labels
-			}
-
-			const stages = view.stages.map((stage) => {
-				const def = stageDefMap.get(stage.name);
-				return {
-					id: stage.name,
-					stageName: stage.name,
-					label: def?.displayLabel ?? stage.name,
-					displayLabel: def?.displayLabel ?? stage.name,
-					hexColor: def?.hexColor ?? null,
-					order: stage.order,
-					isTerminal: stage.isTerminal,
-				};
-			});
-
-			return Response.json({ stages, workflow: view.template });
-		} catch (error) {
-			const stages = [
-				{ id: "DRAFT", stageName: "DRAFT", label: "Draft", displayLabel: "Draft", hexColor: null, order: 1, isTerminal: false },
-				{ id: "REVIEW", stageName: "REVIEW", label: "Review", displayLabel: "Review", hexColor: null, order: 2, isTerminal: false },
-				{ id: "DEVELOP", stageName: "DEVELOP", label: "Develop", displayLabel: "Develop", hexColor: null, order: 3, isTerminal: false },
-				{ id: "MERGE", stageName: "MERGE", label: "Merge", displayLabel: "Merge", hexColor: null, order: 4, isTerminal: false },
-				{ id: "COMPLETE", stageName: "COMPLETE", label: "Complete", displayLabel: "Complete", hexColor: null, order: 5, isTerminal: true },
-			];
-			return Response.json({
-				stages,
-				workflow: "Standard RFC",
-				error: error instanceof Error ? error.message : "Registry not loaded",
-			});
-		}
-	}
-
-	private async handleGetBoardColumns(req?: Request): Promise<Response> {
-		try {
-			const url = new URL(req?.url || "http://localhost/?workflowName=Standard+RFC");
-
-			// ?bust=<ts> bypasses cache
-			const bust = url.searchParams.get("bust");
-			const workflowName = url.searchParams.get("workflowName") || "Standard RFC";
-
-			const registry = getRegistry();
-			const view = registry.getView(workflowName);
-
-			let stageDefMap: Map<string, { displayLabel: string; hexColor: string | null; isTerminal: boolean; maturityGate: number | null }> = new Map();
-			try {
-				const raw = await loadStageRegistry();
-				for (const [name, def] of raw) {
-					stageDefMap.set(name, {
-						displayLabel: def.displayLabel,
-						hexColor: def.hexColor,
-						isTerminal: def.isTerminal,
-						maturityGate: null,
-					});
-				}
-			} catch {
-				// non-fatal — proceed with name-only labels
-			}
-
-			// Best-effort dwell stats — omit the field if the view isn't ready yet.
-			let dwellMap = new Map<string, number | null>();
-			try {
-				const { rows } = await query<{ stage_name: string; avg_dwell_days: string | null }>(
-					`SELECT stage_name, avg_dwell_days FROM roadmap_proposal.v_stage_dwell_stats`,
-				);
-				for (const row of rows) {
-					dwellMap.set(row.stage_name, row.avg_dwell_days !== null ? parseFloat(row.avg_dwell_days) : null);
-				}
-			} catch {
-				// non-fatal — view may not exist yet on first boot
-			}
-
-			const columns = view.stages.map((stage, idx) => {
-				const def = stageDefMap.get(stage.name);
-				const avgDwell = dwellMap.get(stage.name) ?? null;
-				return {
-					stage_name:     stage.name,
-					stage_order:    stage.order ?? idx + 1,
-					display_label:  def?.displayLabel ?? stage.name,
-					is_terminal:    stage.isTerminal ?? false,
-					maturity_gate:  def?.maturityGate ?? null,
-					avg_dwell_days: avgDwell,
-				};
-			});
-
-			const headers: Record<string, string> = {
-				"Content-Type": "application/json",
-				"Cache-Control": bust ? "no-cache" : "public, max-age=300",
-			};
-
-			return new Response(JSON.stringify(columns), { status: 200, headers });
-		} catch (error) {
-			const fallback = [
-				{ stage_name: "DRAFT",    stage_order: 1, display_label: "Draft",    is_terminal: false, maturity_gate: null, avg_dwell_days: null },
-				{ stage_name: "REVIEW",   stage_order: 2, display_label: "Review",   is_terminal: false, maturity_gate: null, avg_dwell_days: null },
-				{ stage_name: "DEVELOP",  stage_order: 3, display_label: "Develop",  is_terminal: false, maturity_gate: null, avg_dwell_days: null },
-				{ stage_name: "MERGE",    stage_order: 4, display_label: "Merge",    is_terminal: false, maturity_gate: null, avg_dwell_days: null },
-				{ stage_name: "COMPLETE", stage_order: 5, display_label: "Complete", is_terminal: true,  maturity_gate: null, avg_dwell_days: null },
-			];
-			return new Response(JSON.stringify(fallback), {
-				status: 200,
-				headers: { "Content-Type": "application/json", "Cache-Control": "public, max-age=300" },
-			});
-		}
-	}
-
-	/**
-	 * GET /api/board/live-feed
-	 * P720 Activity Feed — Returns recent events from message_ledger WHERE channel=system:proposal-feed
-	 * Query params:
-	 *   ?proposal_id=<id>  — Filter by proposal_id
-	 *   ?agent_identity=<id> — Filter by from_agent
-	 *   ?limit=50          — Max events to return (default 50)
-	 *   ?cursor=<id>       — Pagination cursor (id of last seen event)
-	 *
-	 * Returns array of activity feed events in reverse-chronological order.
-	 * Latency target: <200ms at 10,000 event table size (AC-5).
-	 */
-	private async handleBoardLiveFeed(req: Request): Promise<Response> {
-		try {
-			const url = new URL(req.url);
-			const proposalId = url.searchParams.get("proposal_id")
-				? Number(url.searchParams.get("proposal_id"))
-				: undefined;
-			const agentIdentity = url.searchParams.get("agent_identity")
-				? String(url.searchParams.get("agent_identity")).trim()
-				: undefined;
-			const limit = Math.min(
-				url.searchParams.get("limit") ? Number(url.searchParams.get("limit")) : 50,
-				200, // Cap at 200 rows per request
-			);
-			const cursor = url.searchParams.get("cursor")
-				? Number(url.searchParams.get("cursor"))
-				: undefined;
-
-			// Build WHERE clause filters
-			const whereParts: string[] = ["channel = 'system:proposal-feed'"];
-			const params: (number | string | undefined)[] = [];
-
-			if (proposalId) {
-				whereParts.push(`proposal_id = $${params.length + 1}`);
-				params.push(proposalId);
-			}
-
-			if (agentIdentity) {
-				// Filter by the actual agent from metadata payload (from_agent is always system:proposal-feed)
-				whereParts.push(`(metadata->'payload'->>'agent' = $${params.length + 1} OR metadata->'payload'->>'agent_identity' = $${params.length + 1})`);
-				params.push(agentIdentity);
-				params.push(agentIdentity);
-			}
-
-			if (cursor) {
-				whereParts.push(`id < $${params.length + 1}`);
-				params.push(cursor);
-			}
-
-			const whereClause = whereParts.join(" AND ");
-
-			// Query activity feed with indexed lookup
-			const { rows } = await query<{
-				id: number;
-				from_agent: string;
-				proposal_id: number | null;
-				message_content: string;
-				created_at: string;
-				metadata: Record<string, unknown>;
-			}>(
-				`SELECT id, from_agent, proposal_id, message_content, created_at, metadata
-				 FROM roadmap.message_ledger
-				 WHERE ${whereClause}
-				 ORDER BY created_at DESC, id DESC
-				 LIMIT $${params.length + 1}`,
-				[...params, limit],
-			);
-
-			// Format response with next cursor if available
-			const events = rows.map((row) => ({
-				id: row.id,
-				actor: row.from_agent,
-				proposal_id: row.proposal_id,
-				message: row.message_content,
-				timestamp: row.created_at,
-				event_type: row.metadata?.event_type ?? "unknown",
-			}));
-
-			const nextCursor = events.length >= limit ? events[events.length - 1]?.id : null;
-
-			return Response.json(
-				{
-					events,
-					cursor: nextCursor,
-					count: events.length,
-				},
-				{
-					status: 200,
-					headers: {
-						"Cache-Control": "no-cache, must-revalidate",
-						"Content-Type": "application/json",
-					},
-				},
-			);
-		} catch (error) {
-			console.error("[P720] board live-feed query failed:", (error as Error).message);
-			return Response.json(
-				{ error: "Failed to fetch activity feed", events: [] },
-				{ status: 500, headers: { "Content-Type": "application/json" } },
-			);
 		}
 	}
 

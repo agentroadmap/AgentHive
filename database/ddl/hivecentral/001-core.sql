@@ -154,6 +154,12 @@ CREATE TABLE IF NOT EXISTS core.runtime_flag (
   scope             TEXT         NOT NULL              -- 'global' | 'host:<id>' | 'agency:<id>' | 'project:<slug>'
                                 CHECK (scope = 'global' OR scope ~ '^(host|agency|project):.+$'),
   value_jsonb       JSONB        NOT NULL,
+  category          TEXT         NOT NULL DEFAULT 'uncategorized'  -- closed taxonomy for grouping/filtering
+                                CHECK (category IN (
+                                  'orchestration','a2a','agency','feature_flag',
+                                  'budget','billing','ui','security','model_routing',
+                                  'system','uncategorized'
+                                )),
   description       TEXT,
   category          TEXT         NOT NULL DEFAULT 'general'
                                 CHECK (category IN (

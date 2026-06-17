@@ -84,10 +84,10 @@ A gate evaluates whether the work for the current state is coherent and ready to
 Example:
 
 ```text
-P300 is Draft/mature and depends on P250.
-D1 evaluates P300's draft quality and ACs; P250 is unresolved but not a gate blocker.
-D1 advances P300 to Review/new. The dependency on P250 remains attached.
-P300 may be blocked from dispatch or later D2 advancement until P250 is resolved.
+P501 is Draft/mature and depends on P250.
+D1 evaluates P501's draft quality and ACs; P250 is unresolved but not a gate blocker.
+D1 advances P501 to Review/new. The dependency on P250 remains attached.
+P501 may be blocked from dispatch or later D2 advancement until P250 is resolved.
 ```
 
 This keeps gate review focused on current-state quality while preserving dependency enforcement for the stages where the dependency actually matters (dispatch, capability availability, etc.).

@@ -20,4 +20,4 @@ VALUES (
   'global',
   'active'
 )
-ON CONFLICT (flag_name) DO NOTHING;
+ON CONFLICT (flag_name, scope) DO NOTHING;
