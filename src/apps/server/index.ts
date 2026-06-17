@@ -43,6 +43,11 @@ import { discordSend } from "../../infra/discord/notify.ts";
 import { runObservabilityAlertTick } from "../../infra/agency/observability-alerting.ts";
 import type { PoolClient, Client as PgClient } from "pg";
 import { hashOperatorToken, requireOperator } from "./operator-auth.ts";
+import {
+	handleSearch as _handleSearch,
+	handleListKnowledge as _handleListKnowledge,
+	handleMarkKnowledgeHelpful as _handleMarkKnowledgeHelpful,
+} from "./routes/search-knowledge.ts";
 import { agentContextStorage, type VerifiedPrincipal } from "../../shared/identity/agent-context.ts";
 import { verifyBoundBearer } from "../../core/identity/principal-identity.ts";
 import {
@@ -75,6 +80,7 @@ import {
 	retireAgencyOperator,
 } from "../../core/orchestration/resolvers/agency-resolver.ts";
 import { agentNotifyChannel } from "../../infra/messaging/a2a-access-control.ts";
+import { AllConfigKeys } from "../../shared/runtime/config-keys.ts";
 
 // Regex pattern to match any prefix (letters followed by dash)
 const PREFIX_PATTERN = /^[a-zA-Z]+-/i;
@@ -1329,6 +1335,14 @@ export class RoadmapServer {
 				if (method === "PUT") return await this.handleUpdateConfig(req);
 			}
 
+			if (pathname === "/api/config/keys" && method === "GET")
+				return await this.handleListConfigKeys(req);
+
+			if (pathname.startsWith("/api/config/keys/") && method === "PUT") {
+				const keyName = decodeURIComponent(pathname.slice("/api/config/keys/".length));
+				return await this.handleSetConfigKey(req, keyName);
+			}
+
 			if (pathname === "/api/docs") {
 				if (method === "GET") return await this.handleListDocs();
 				if (method === "POST") return await this.handleCreateDoc(req);
@@ -1727,113 +1741,8 @@ export class RoadmapServer {
 	}
 
 	private async handleSearch(req: Request): Promise<Response> {
-		try {
-			const searchService = await this.getSearchServiceInstance();
-			const url = new URL(req.url);
-			const query = url.searchParams.get("query") ?? undefined;
-			const limitParam = url.searchParams.get("limit");
-			const typeParams = [
-				...url.searchParams.getAll("type"),
-				...url.searchParams.getAll("types"),
-			];
-			const statusParams = url.searchParams.getAll("status");
-			const priorityParamsRaw = url.searchParams.getAll("priority");
-			const labelParamsRaw = [
-				...url.searchParams.getAll("label"),
-				...url.searchParams.getAll("labels"),
-			];
-			const labelsCsv = url.searchParams.get("labels");
-			if (labelsCsv) {
-				labelParamsRaw.push(...labelsCsv.split(","));
-			}
-
-			let limit: number | undefined;
-			if (limitParam) {
-				const parsed = Number.parseInt(limitParam, 10);
-				if (Number.isNaN(parsed) || parsed <= 0) {
-					return Response.json(
-						{ error: "limit must be a positive integer" },
-						{ status: 400 },
-					);
-				}
-				limit = parsed;
-			}
-
-			let types: SearchResultType[] | undefined;
-			if (typeParams.length > 0) {
-				const allowed: SearchResultType[] = [
-					"proposal",
-					"document",
-					"decision",
-				];
-				const normalizedTypes = typeParams
-					.map((value) => value.toLowerCase())
-					.filter((value): value is SearchResultType => {
-						return allowed.includes(value as SearchResultType);
-					});
-				if (normalizedTypes.length === 0) {
-					return Response.json(
-						{ error: "type must be proposal, document, or decision" },
-						{ status: 400 },
-					);
-				}
-				types = normalizedTypes;
-			}
-
-			const filters: {
-				status?: string | string[];
-				priority?: SearchPriorityFilter | SearchPriorityFilter[];
-				labels?: string | string[];
-			} = {};
-
-			if (statusParams.length === 1) {
-				filters.status = statusParams[0];
-			} else if (statusParams.length > 1) {
-				filters.status = statusParams;
-			}
-
-			if (priorityParamsRaw.length > 0) {
-				const allowedPriorities: SearchPriorityFilter[] = [
-					"high",
-					"medium",
-					"low",
-				];
-				const normalizedPriorities = priorityParamsRaw.map((value) =>
-					value.toLowerCase(),
-				);
-				const invalidPriority = normalizedPriorities.find(
-					(value) => !allowedPriorities.includes(value as SearchPriorityFilter),
-				);
-				if (invalidPriority) {
-					return Response.json(
-						{
-							error: `Unsupported priority '${invalidPriority}'. Use high, medium, or low.`,
-						},
-						{ status: 400 },
-					);
-				}
-				const casted = normalizedPriorities as SearchPriorityFilter[];
-				filters.priority = casted.length === 1 ? casted[0] : casted;
-			}
-
-			if (labelParamsRaw.length > 0) {
-				const normalizedLabels = labelParamsRaw
-					.map((value) => value.trim())
-					.filter((value) => value.length > 0);
-				if (normalizedLabels.length > 0) {
-					filters.labels =
-						normalizedLabels.length === 1
-							? normalizedLabels[0]
-							: normalizedLabels;
-				}
-			}
-
-			const results = searchService.search({ query, limit, types, filters });
-			return Response.json(results);
-		} catch (error) {
-			console.error("Error performing search:", error);
-			return Response.json({ error: "Search failed" }, { status: 500 });
-		}
+		const searchService = await this.getSearchServiceInstance();
+		return _handleSearch(req, searchService);
 	}
 
 	private async handleCreateProposal(req: Request): Promise<Response> {
@@ -5288,66 +5197,11 @@ export class RoadmapServer {
 	}
 
 	private async handleListKnowledge(req: Request): Promise<Response> {
-		try {
-			const url = new URL(req.url);
-			const queryParam = url.searchParams.get("query") ?? "";
-			const typeParam = url.searchParams.get("type") ?? "";
-
-			let sql = `
-				SELECT
-					id, type, content, keywords,
-					source_proposal_id AS source,
-					helpful_count, created_at
-				FROM roadmap.knowledge_entries
-				WHERE 1=1
-			`;
-			const params: unknown[] = [];
-			let idx = 1;
-
-			if (queryParam) {
-				sql += ` AND (content ILIKE $${idx} OR keywords::text ILIKE $${idx} OR title ILIKE $${idx})`;
-				params.push(`%${queryParam}%`);
-				idx++;
-			}
-			if (typeParam) {
-				sql += ` AND type = $${idx}`;
-				params.push(typeParam);
-				idx++;
-			}
-			sql += ` ORDER BY helpful_count DESC, created_at DESC LIMIT 100`;
-
-			const { rows } = await query(sql, params);
-			return Response.json(
-				(rows ?? []).map((row: Record<string, unknown>) => ({
-					...row,
-					keywords: Array.isArray(row.keywords) ? row.keywords : [],
-				})),
-			);
-		} catch (error) {
-			console.error("Error listing knowledge entries:", error);
-			return Response.json(
-				{ error: "Failed to list knowledge entries" },
-				{ status: 500 },
-			);
-		}
+		return _handleListKnowledge(req);
 	}
 
 	private async handleMarkKnowledgeHelpful(id: string): Promise<Response> {
-		try {
-			await query(
-				`UPDATE roadmap.knowledge_entries
-				    SET helpful_count = helpful_count + 1, updated_at = now()
-				  WHERE id = $1`,
-				[id],
-			);
-			return Response.json({ ok: true });
-		} catch (error) {
-			console.error("Error marking knowledge helpful:", error);
-			return Response.json(
-				{ error: "Failed to mark as helpful" },
-				{ status: 500 },
-			);
-		}
+		return _handleMarkKnowledgeHelpful(id);
 	}
 
 	private async handleMcpSse(_req: Request): Promise<Response> {
@@ -6757,6 +6611,122 @@ agenthive_msg_send_rate_limit_violations_by_reason_total{reason="${reason}"} ${c
 		} catch (err) {
 			console.error("[p659] combine failed:", (err as Error).message);
 			return Response.json({ error: "combine action failed" }, { status: 500 });
+		}
+	}
+
+	// P3784: GET /api/config/keys — full registry with live values
+	private async handleListConfigKeys(req: Request): Promise<Response> {
+		const auth = await requireOperator(req, { action: "config.read" });
+		if (auth.rejected) return auth.rejected;
+
+		try {
+			const url = new URL(req.url);
+			const categoryFilter = url.searchParams.get("category") ?? undefined;
+
+			// Fetch all active flag values in one query to avoid N+1
+			const flagRows = await query(
+				`SELECT flag_name, scope, value_jsonb FROM core.runtime_flag WHERE lifecycle_status = 'active'`,
+			);
+			const flagValueMap = new Map<string, unknown>();
+			for (const row of flagRows.rows) {
+				flagValueMap.set(`${row.flag_name}:${row.scope ?? "global"}`, row.value_jsonb);
+			}
+
+			const keys = Object.values(AllConfigKeys)
+				.filter((key) => !categoryFilter || (key as any).category === categoryFilter)
+				.map((key) => {
+					const masked = key.class === "secret";
+					const editable = key.class === "flag" || key.class === "registry";
+					let value: unknown = null;
+					if (!masked) {
+						// For flag keys, prefer DB live value; for structural, use process.env
+						if (key.class === "flag") {
+							value = flagValueMap.get(`${key.name}:global`) ?? (key as any).defaultValue ?? null;
+						} else if (key.class === "structural" || key.class === "registry") {
+							const envVal = process.env[key.name];
+							value = envVal !== undefined ? envVal : ((key as any).defaultValue ?? null);
+						}
+					}
+					return {
+						name: key.name,
+						class: key.class,
+						category: (key as any).category ?? null,
+						description: key.description ?? null,
+						value,
+						default_value: (key as any).defaultValue ?? null,
+						required: key.required,
+						db_table: (key as any).dbTable ?? null,
+						scope: "global",
+						editable,
+						masked,
+					};
+				});
+
+			return Response.json({ keys, count: keys.length, category_filter: categoryFilter ?? null });
+		} catch (error) {
+			console.error("Error listing config keys:", error);
+			return Response.json({ error: "Failed to list config keys" }, { status: 500 });
+		}
+	}
+
+	// P3785: PUT /api/config/keys/:keyName — operator-gated flag mutation
+	private async handleSetConfigKey(req: Request, keyName: string): Promise<Response> {
+		const auth = await requireOperator(req, { action: "config.write" });
+		if (auth.rejected) return auth.rejected;
+
+		try {
+			const keyDef = AllConfigKeys[keyName as keyof typeof AllConfigKeys];
+			if (!keyDef) {
+				return Response.json({ error: `Unknown config key: ${keyName}` }, { status: 404 });
+			}
+			if (keyDef.class !== "flag" && keyDef.class !== "registry") {
+				return Response.json(
+					{ error: `Key ${keyName} (class=${keyDef.class}) is not editable via this endpoint` },
+					{ status: 400 },
+				);
+			}
+
+			let body: Record<string, unknown>;
+			try {
+				body = await req.json();
+			} catch {
+				return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+			}
+
+			if (!("value" in body)) {
+				return Response.json({ error: "value is required" }, { status: 400 });
+			}
+			const scope = typeof body.scope === "string" ? body.scope : "global";
+			const newValue = body.value;
+
+			// For flag keys: upsert into core.runtime_flag
+			if (keyDef.class === "flag") {
+				const { rows } = await query(
+					`INSERT INTO core.runtime_flag (flag_name, scope, value_jsonb, lifecycle_status, category)
+					 VALUES ($1, $2, $3::jsonb, 'active', $4)
+					 ON CONFLICT (flag_name, scope)
+					 DO UPDATE SET value_jsonb = EXCLUDED.value_jsonb, updated_at = NOW()
+					 RETURNING flag_name, scope, value_jsonb, updated_at`,
+					[keyName, scope, JSON.stringify(newValue), (keyDef as any).category ?? "general"],
+				);
+				const row = rows[0];
+				const mutationId = `mut_${Date.now()}`;
+				return Response.json({
+					key_name: keyName,
+					new_value: row?.value_jsonb ?? newValue,
+					mutation_id: mutationId,
+					applied_at: row?.updated_at ?? new Date().toISOString(),
+				});
+			}
+
+			// registry keys: not yet supported without P828 config.set()
+			return Response.json(
+				{ error: `Registry key mutation not yet supported (P828 pending)` },
+				{ status: 501 },
+			);
+		} catch (error) {
+			console.error("Error setting config key:", error);
+			return Response.json({ error: "Failed to set config key" }, { status: 500 });
 		}
 	}
 }

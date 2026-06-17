@@ -31,6 +31,7 @@ const SECONDARY: NavItem[] = [
 	{ href: "/routes", label: "Routes" },
 	{ href: "/statistics", label: "Statistics" },
 	{ href: "/achievements", label: "Achievements" },
+	{ href: "/config", label: "Config" },
 	{ href: "/settings", label: "Settings" },
 ];
 

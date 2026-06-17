@@ -38,6 +38,27 @@ export interface RouteRow {
 	has_host_policy_match: boolean;
 }
 
+export interface ConfigKeyDescriptor {
+	name: string;
+	class: "secret" | "structural" | "registry" | "flag" | "tenant_dsn";
+	category: string | null;
+	description: string | null;
+	value: unknown;
+	default_value: unknown;
+	required: boolean;
+	db_table: string | null;
+	scope: string | null;
+	editable: boolean;
+	masked: boolean;
+}
+
+export interface ConfigMutationResult {
+	key_name: string;
+	new_value: unknown;
+	mutation_id: string;
+	applied_at: string;
+}
+
 export interface ReorderProposalPayload {
 	proposalId: string;
 	targetStatus: string;
@@ -884,6 +905,30 @@ export class ApiClient {
 			`${API_BASE}/operator/control/replay/${dispatchId}`,
 		);
 		return result.events ?? [];
+	}
+
+	// P3784/P3785: Config key registry
+	async fetchConfigKeys(category?: string): Promise<ConfigKeyDescriptor[]> {
+		const url = category
+			? `${API_BASE}/config/keys?category=${encodeURIComponent(category)}`
+			: `${API_BASE}/config/keys`;
+		const result = await this.fetchJson<{ keys: ConfigKeyDescriptor[] }>(url);
+		return result.keys ?? [];
+	}
+
+	async mutateConfigKey(
+		keyName: string,
+		value: unknown,
+		scope?: string,
+	): Promise<ConfigMutationResult> {
+		return this.fetchJson<ConfigMutationResult>(
+			`${API_BASE}/config/keys/${encodeURIComponent(keyName)}`,
+			{
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ value, scope }),
+			},
+		);
 	}
 
 	// P705 Phase 4: Mark notification as seen
