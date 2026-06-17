@@ -1302,6 +1302,257 @@ export const FlagKeys = {
 		dbColumn: "value_jsonb",
 		envOverride: true,
 	} satisfies ConfigKey<"grid" | "stacked">,
+
+	// ─── P3787: First-wave hardcoded constant flags ──────────────────────────────
+
+	DISPATCH_LOOP_THRESHOLD_PER_HOUR: {
+		name: "DISPATCH_LOOP_THRESHOLD_PER_HOUR",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error("must be a positive integer");
+			return n;
+		},
+		required: false,
+		defaultValue: 6,
+		description: "Max unknown-failure squad_dispatch rows per (proposal, role) per hour before the circuit-breaker pauses the proposal (P689).",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	GATE_CONVERGENCE_MAX_BLOCKING: {
+		name: "GATE_CONVERGENCE_MAX_BLOCKING",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error("must be a positive integer");
+			return n;
+		},
+		required: false,
+		defaultValue: 3,
+		description: "Max accumulated blocking reviews before the gate convergence guard pauses a proposal (P1729).",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	GATE_CONVERGENCE_MAX_RUNS_PER_ROLE: {
+		name: "GATE_CONVERGENCE_MAX_RUNS_PER_ROLE",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error("must be a positive integer");
+			return n;
+		},
+		required: false,
+		defaultValue: 8,
+		description: "Max per-role dispatch runs since last state/maturity transition before the gate convergence guard pauses a proposal (P1729).",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	FEDERATION_SYNC_POLL_MS: {
+		name: "FEDERATION_SYNC_POLL_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1000) throw new Error("must be >= 1000 ms");
+			return n;
+		},
+		required: false,
+		defaultValue: 30_000,
+		description: "Federation peer-sync polling interval in milliseconds (P068 AC-13).",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	FEDERATION_QUARANTINE_THRESHOLD: {
+		name: "FEDERATION_QUARANTINE_THRESHOLD",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error("must be a positive integer");
+			return n;
+		},
+		required: false,
+		defaultValue: 3,
+		description: "Consecutive health-check failures before a federation peer is quarantined (P068 AC-9).",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	FEDERATION_PING_TIMEOUT_MS: {
+		name: "FEDERATION_PING_TIMEOUT_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 100) throw new Error("must be >= 100 ms");
+			return n;
+		},
+		required: false,
+		defaultValue: 5_000,
+		description: "Timeout for federation MCP ping requests in milliseconds (P068 AC-12).",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	SAGA_REPAIR_INTERVAL_MS: {
+		name: "SAGA_REPAIR_INTERVAL_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 5000) throw new Error("must be >= 5000 ms");
+			return n;
+		},
+		required: false,
+		defaultValue: 60_000,
+		description: "Saga repair-worker polling interval in milliseconds (P495).",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	SAGA_REPAIR_MAX_ATTEMPTS: {
+		name: "SAGA_REPAIR_MAX_ATTEMPTS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error("must be a positive integer");
+			return n;
+		},
+		required: false,
+		defaultValue: 10,
+		description: "Max retry attempts before a failed saga is escalated to the operator (P495).",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	SAGA_REPAIR_MAX_BACKOFF_HOURS: {
+		name: "SAGA_REPAIR_MAX_BACKOFF_HOURS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error("must be a positive integer");
+			return n;
+		},
+		required: false,
+		defaultValue: 24,
+		description: "Maximum exponential-backoff cap for saga repair retries in hours (P495).",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	NOTIFICATION_POLL_MS: {
+		name: "NOTIFICATION_POLL_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1000) throw new Error("must be >= 1000 ms");
+			return n;
+		},
+		required: false,
+		defaultValue: 30_000,
+		description: "Notification router fallback-poll interval in milliseconds (P674).",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	NOTIFICATION_BATCH_SIZE: {
+		name: "NOTIFICATION_BATCH_SIZE",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1 || n > 500) throw new Error("must be 1–500");
+			return n;
+		},
+		required: false,
+		defaultValue: 25,
+		description: "Max rows claimed per notification-router drain cycle (P674).",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	PROVIDER_HEALTH_TTL_MS: {
+		name: "PROVIDER_HEALTH_TTL_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1000) throw new Error("must be >= 1000 ms");
+			return n;
+		},
+		required: false,
+		defaultValue: 30_000,
+		description: "Provider health-cache TTL in milliseconds.",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	COLLABORATION_LEASE_TTL_MS: {
+		name: "COLLABORATION_LEASE_TTL_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 60_000) throw new Error("must be >= 60000 ms (1 minute)");
+			return n;
+		},
+		required: false,
+		defaultValue: 1_800_000,
+		description: "Default agent-proposal lease TTL in milliseconds (30 min).",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	GATEWAY_WAKE_TIMEOUT_MS: {
+		name: "GATEWAY_WAKE_TIMEOUT_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1000) throw new Error("must be >= 1000 ms");
+			return n;
+		},
+		required: false,
+		defaultValue: 10_000,
+		description: "Transport gateway wake-up timeout in milliseconds (P304).",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	// ─── P3840: Unified dispatch pool ────────────────────────────────────────
+	// When true, scanQueues() draws from v_unified_dispatch_pool (all non-terminal
+	// proposals) instead of v_mature_queue (mature-only), posts work offers for
+	// new/active proposals and gate-review offers for mature proposals.
+	// Standalone implicit-gate and enhancer-revise timers are skipped when enabled.
+	// Default OFF — flip true after v_unified_dispatch_pool view is deployed.
+	ORCHESTRATOR_UNIFIED_POOL_ENABLED: {
+		name: "ORCHESTRATOR_UNIFIED_POOL_ENABLED",
+		class: "flag" as const,
+		parse: (v: string) => {
+			try {
+				return JSON.parse(v) === true;
+			} catch {
+				return v.toLowerCase() === "true" || v === "1";
+			}
+		},
+		required: false,
+		defaultValue: false,
+		description:
+			"P3840: when true, scanQueues() uses v_unified_dispatch_pool for all non-terminal proposals; implicit-gate and enhancer-revise timers are disabled.",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies ConfigKey<boolean>,
 };
 
 /**
