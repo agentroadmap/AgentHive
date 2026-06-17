@@ -48,6 +48,10 @@ import { discordSend } from "../../infra/discord/notify.ts";
 import { runObservabilityAlertTick } from "../../infra/agency/observability-alerting.ts";
 import type { PoolClient, Client as PgClient } from "pg";
 import { hashOperatorToken, requireOperator } from "./operator-auth.ts";
+import type {
+	ProjectScope,
+	ServerContext,
+} from "./server-context.ts";
 import { projectCreate } from "../mcp-server/tools/projects/lifecycle-handlers.ts";
 import { agentContextStorage, type VerifiedPrincipal } from "../../shared/identity/agent-context.ts";
 import { verifyBoundBearer } from "../../core/identity/principal-identity.ts";
@@ -2697,6 +2701,21 @@ export class RoadmapServer {
 		return new Response("Internal Server Error", { status: 500 });
 	}
 
+	/**
+	 * Build the injected dependency bundle handed to extracted router modules
+	 * (P3796). Methods are bound to this instance so router modules can call
+	 * them without holding a reference to the whole server.
+	 */
+	private buildServerContext(): ServerContext {
+		return {
+			core: this.core,
+			searchService: this.searchService,
+			contentStore: this.contentStore,
+			resolveProjectScope: (req: Request) => this.resolveProjectScope(req),
+			handleError: (error: Error) => this.handleError(error),
+		};
+	}
+
 	// Draft handlers
 	private async handleListDrafts(): Promise<Response> {
 		try {
@@ -3667,13 +3686,7 @@ export class RoadmapServer {
 	// against the project table — invalid values fall back to project_id=1
 	// so the UI can never lock itself out by sending garbage. Returns the
 	// resolved id along with metadata used to render the active-scope chip.
-	private async resolveProjectScope(
-		req: Request,
-	): Promise<{
-		project_id: number;
-		project_slug: string;
-		project_name: string;
-	}> {
+	private async resolveProjectScope(req: Request): Promise<ProjectScope> {
 		const url = new URL(req.url);
 		const headerVal = req.headers.get("x-project-id") ?? "";
 		const queryVal = url.searchParams.get("project_id") ?? "";
