@@ -49,6 +49,7 @@ import {
 	reconcileStaleDispatches,
 	reconcileStrandedAdvances,
 } from "./legacy-dispatch.ts";
+import { buildUnifiedPool } from "./unified-pool-builder.ts";
 import * as runtimeConfig from "../../shared/runtime/config.ts";
 import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 import {
@@ -160,6 +161,9 @@ export class Orchestrator {
 	// depend on a DB flag row existing — a deleted/reset flag falls back to
 	// matchmaker-only, not to self-claiming. Live re-enable is the emergency lever.
 	private offerClaimEnabled = false;
+	// P3840: when true, scanQueues() uses v_unified_dispatch_pool instead of the
+	// mature-only gate queue; implicit-gate and enhancer-revise timers are skipped.
+	private unifiedPoolEnabled = false;
 
 	private offerReapTimer: ReturnType<typeof setInterval> | null = null;
 	private pokeWatchdogTimer: ReturnType<typeof setInterval> | null = null;
@@ -275,6 +279,7 @@ export class Orchestrator {
 		this.stuckWorkerMs = await tryFlag("AGENTHIVE_STUCK_WORKER_WATCHDOG_INTERVAL_MS", FlagKeys.ORCHESTRATOR_STUCK_WORKER_MS, 60_000, Number);
 		this.heartbeatMs = await tryFlag("AGENTHIVE_HEARTBEAT_INTERVAL_MS", FlagKeys.ORCHESTRATOR_HEARTBEAT_MS, 60_000, Number);
 		this.offerClaimEnabled = await tryFlag("AGENTHIVE_OFFER_CLAIM_LOOP", FlagKeys.ORCHESTRATOR_OFFER_CLAIM_ENABLED, false, (s) => s !== "0");
+		this.unifiedPoolEnabled = await tryFlag("AGENTHIVE_UNIFIED_POOL_ENABLED", FlagKeys.ORCHESTRATOR_UNIFIED_POOL_ENABLED, false, (s) => s !== "0" && s !== "false");
 
 		// P1144/AC-18: single boot/reload summary of all resolved orchestrator
 		// flags with their env|db|default provenance.
@@ -294,7 +299,8 @@ export class Orchestrator {
 				`staleRowReaperMs=${this.staleRowReaperMs}(${src(FlagKeys.ORCHESTRATOR_STALE_ROW_REAPER_MS)}) ` +
 				`stuckWorkerMs=${this.stuckWorkerMs}(${src(FlagKeys.ORCHESTRATOR_STUCK_WORKER_MS)}) ` +
 				`heartbeatMs=${this.heartbeatMs}(${src(FlagKeys.ORCHESTRATOR_HEARTBEAT_MS)}) ` +
-				`offerClaimEnabled=${this.offerClaimEnabled}(${src(FlagKeys.ORCHESTRATOR_OFFER_CLAIM_ENABLED)})`,
+				`offerClaimEnabled=${this.offerClaimEnabled}(${src(FlagKeys.ORCHESTRATOR_OFFER_CLAIM_ENABLED)}) ` +
+				`unifiedPoolEnabled=${this.unifiedPoolEnabled}(${src(FlagKeys.ORCHESTRATOR_UNIFIED_POOL_ENABLED)})`,
 		);
 	}
 
@@ -377,7 +383,7 @@ export class Orchestrator {
 			);
 		}
 
-		if (this.implicitGatePollMs > 0) {
+		if (this.implicitGatePollMs > 0 && !this.unifiedPoolEnabled) {
 			// Initial drain at boot (matches legacy line 2604).
 			void this.trackInFlight(
 				drainImplicitGateReady("startup", 5).catch((err) =>
@@ -398,18 +404,28 @@ export class Orchestrator {
 			console.log(
 				`[Orchestrator] implicit gate polling every ${this.implicitGatePollMs}ms`,
 			);
+		} else if (this.unifiedPoolEnabled) {
+			console.log(
+				"[Orchestrator] implicit gate polling skipped — unified pool handles gate-review offers",
+			);
 		}
 
-		this.pollTimers.set(
-			"enhancer-revise",
-			setInterval(() => {
-				void this.trackInFlight(
-					this.runEnhancerReviseTick().catch((err) =>
-						console.error("[Orchestrator] enhancer-revise failed:", err),
-					),
-				);
-			}, this.enhancerReviseMs),
-		);
+		if (!this.unifiedPoolEnabled) {
+			this.pollTimers.set(
+				"enhancer-revise",
+				setInterval(() => {
+					void this.trackInFlight(
+						this.runEnhancerReviseTick().catch((err) =>
+							console.error("[Orchestrator] enhancer-revise failed:", err),
+						),
+					);
+				}, this.enhancerReviseMs),
+			);
+		} else {
+			console.log(
+				"[Orchestrator] enhancer-revise polling skipped — unified pool covers DRAFT proposals",
+			);
+		}
 
 		this.pollTimers.set(
 			"reconciler",
@@ -892,6 +908,89 @@ export class Orchestrator {
 	 * Returns the number of proposals that were dispatched (mode ≠ skip).
 	 */
 	async scanQueues(): Promise<number> {
+		// P3840: unified pool path — posts work offers and gate-review offers for
+		// ALL non-terminal proposals in a single scan when the flag is on.
+		if (this.unifiedPoolEnabled) {
+			return this._scanQueuesUnified();
+		}
+		return this._scanQueuesLegacy();
+	}
+
+	/** P3840: unified dispatch path — replaces legacy mature-only gate queue. */
+	private async _scanQueuesUnified(): Promise<number> {
+		const rows = await buildUnifiedPool(this.scanBatchLimit);
+		if (rows.length === 0) return 0;
+
+		let dispatched = 0;
+
+		for (const row of rows) {
+			try {
+				if (row.offer_kind === "gate-review") {
+					// Route mature proposals directly to dispatchImplicitGate — it
+					// handles claimImplicitGateReady re-check, gateRole selection,
+					// cooldown, and postWorkOffer internally.
+					await dispatchImplicitGate(row.id, "unified-pool");
+					console.log(
+						`[Orchestrator] scanQueues(unified): gate-review offer posted for ${row.display_id}`,
+					);
+					dispatched++;
+					continue;
+				}
+
+				// Non-mature: build work offer via resolveQueueContext + assessReadiness.
+				const ctx = await resolveQueueContext({
+					id: row.id,
+					display_id: row.display_id,
+					type: row.type,
+					status: row.status,
+					maturity: row.maturity,
+					title: row.title,
+					hasActiveLease: false,
+				});
+				const detail = await fetchProposalDetail(row.id);
+				if (!detail) {
+					console.warn(
+						`[Orchestrator] scanQueues(unified): proposal ${row.id} not found in detail query, skipping`,
+					);
+					continue;
+				}
+
+				const { mode: rawMode, reasons } = assessReadiness(detail);
+				if (rawMode === "skip") continue;
+				// Force 'prep' for non-mature proposals: assessReadiness may return
+				// 'gate' for a complete-looking RFC even when it is not yet mature.
+				const mode = rawMode === "gate" ? "prep" : rawMode;
+
+				const primaryProfile = ctx.roleProfiles[0] ?? null;
+				const task = buildTaskPrompt(detail, mode, reasons, primaryProfile);
+				const role = primaryProfile?.role ?? "developer";
+
+				await postWorkOffer({
+					proposalId: row.id,
+					squadName: `unified-P${row.id}-${row.offer_kind}`,
+					role,
+					task,
+					stage: detail.status,
+					phase: mode,
+					roleProfileId: primaryProfile?.id ?? null,
+				});
+				console.log(
+					`[Orchestrator] scanQueues(unified): ${row.offer_kind} offer posted for ${row.display_id}`,
+				);
+				dispatched++;
+			} catch (err) {
+				console.error(
+					`[Orchestrator] scanQueues(unified): dispatch failed for ${row.display_id}:`,
+					err instanceof Error ? err.message : err,
+				);
+			}
+		}
+
+		return dispatched;
+	}
+
+	/** Legacy mature-only gate queue scan (used when unifiedPoolEnabled=false). */
+	private async _scanQueuesLegacy(): Promise<number> {
 		const candidates = await getUnlockedGateQueue(this.scanBatchLimit);
 		if (candidates.length === 0) return 0;
 
@@ -919,6 +1018,7 @@ export class Orchestrator {
 				// AC-11 (P1113): pass primary profile so buildTaskPrompt can prepend
 				// role-specific task_prompt when available.
 				const task = buildTaskPrompt(detail, mode, reasons, primaryProfile);
+				const role = primaryProfile?.role ?? "developer";
 
 				// P226: derive tier preference from proposal type + mode so the route
 				// resolver can prefer cheaper routes for routine work and frontier routes
@@ -946,7 +1046,6 @@ export class Orchestrator {
 					proposalId: detail.id,
 					squadName: `scan-P${detail.id}-${mode}`,
 					role,
-					task,
 					stage: detail.status,
 					agentLabel: `${detail.displayId} (${mode})`,
 					activity: mode === "gate" ? "reviewing" : "preparing",
@@ -966,7 +1065,7 @@ export class Orchestrator {
 							: [role],
 				});
 				console.log(
-					`[Orchestrator] scanQueues: posted offer ${dispatchId} for ${detail.displayId} (${mode})`,
+					`[Orchestrator] scanQueues: posted offer for ${detail.displayId} (${mode})`,
 				);
 
 				dispatched++;

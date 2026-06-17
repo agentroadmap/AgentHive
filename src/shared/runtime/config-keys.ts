@@ -1195,6 +1195,28 @@ export const FlagKeys = {
 		envOverride: false,
 	} satisfies ConfigKey<boolean>,
 
+	// P3840: unified dispatch pool. When true, scanQueues() posts work/gate
+	// offers for ALL non-terminal proposals from v_unified_dispatch_pool
+	// (orchestration/unified-pool-builder.ts) rather than only the mature queue.
+	ORCHESTRATOR_UNIFIED_POOL_ENABLED: {
+		name: "ORCHESTRATOR_UNIFIED_POOL_ENABLED",
+		class: "flag" as const,
+		parse: (v: string) => {
+			try {
+				return JSON.parse(v) === true;
+			} catch {
+				return v.toLowerCase() === "true" || v === "1";
+			}
+		},
+		required: false,
+		defaultValue: false,
+		description:
+			"P3840: when true, scanQueues() uses v_unified_dispatch_pool for all non-terminal proposals; implicit-gate and enhancer-revise timers are disabled.",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies ConfigKey<boolean>,
+
 	// V3-C6 (P1438) AC-14: legacy heartbeat-derived "offer_dispatch downlink" push.
 	// After posting an open-pool work offer the orchestrator used to ALSO push a
 	// targeted offer_dispatch to listDispatchableAgencies()[0] — selecting a target

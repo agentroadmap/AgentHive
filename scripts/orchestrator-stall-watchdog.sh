@@ -57,27 +57,58 @@ if ! [[ "$AGE" =~ ^[0-9]+$ ]]; then
   exit 0
 fi
 
-# --- 2. healthy? ---
-if [ "$AGE" -le "$STALE_SECONDS" ]; then
-  log "OK — heartbeat age ${AGE}s (<= ${STALE_SECONDS}s)"
+# --- 2. dispatch-liveness signal ---
+#   Heartbeat-fresh != dispatching. The dispatch loop can wedge while a SEPARATE
+#   heartbeat timer keeps refreshing agent_health, so an age-only check gives a
+#   false OK — observed 2026-06-17: ~3.5h dispatch stall with heartbeat steady at
+#   ~50s the whole time; the watchdog never fired and a human had to restart.
+#   Treat as stalled when there is dispatchable work AND nothing is running AND no
+#   agent_run has started for DISPATCH_STALE_SECONDS. The RUNNING=0 guard ensures
+#   we never kill a fleet of legitimately long-running workers (a busy system has
+#   running rows even if no NEW run started recently).
+DISPATCH_STALE_SECONDS="${ORCH_WATCHDOG_DISPATCH_STALE_SECONDS:-600}"
+DISP=$($PG -F'|' -c "SELECT (SELECT count(*) FROM roadmap_proposal.v_dispatchable_proposal), (SELECT count(*) FROM roadmap_workforce.agent_runs WHERE status='running'), COALESCE((SELECT EXTRACT(EPOCH FROM (now()-max(started_at)))::int FROM roadmap_workforce.agent_runs), 999999);" 2>>"$LOG_FILE")
+DISPATCHABLE=$(echo "$DISP" | cut -d'|' -f1)
+RUNNING=$(echo "$DISP" | cut -d'|' -f2)
+RUN_AGE=$(echo "$DISP" | cut -d'|' -f3)
+
+DISPATCH_STALL=0
+if [[ "$DISPATCHABLE" =~ ^[0-9]+$ ]] && [[ "$RUNNING" =~ ^[0-9]+$ ]] && [[ "$RUN_AGE" =~ ^[0-9]+$ ]]; then
+  if [ "$DISPATCHABLE" -gt 0 ] && [ "$RUNNING" -eq 0 ] && [ "$RUN_AGE" -gt "$DISPATCH_STALE_SECONDS" ]; then
+    DISPATCH_STALL=1
+  fi
+else
+  # Non-numeric => DB read hiccup; fall back to heartbeat-only this tick.
+  DISPATCHABLE="?"; RUNNING="?"; RUN_AGE="?"
+fi
+
+# --- 3. healthy if heartbeat is fresh AND there is no dispatch stall ---
+if [ "$AGE" -le "$STALE_SECONDS" ] && [ "$DISPATCH_STALL" -eq 0 ]; then
+  log "OK — heartbeat ${AGE}s; dispatchable=${DISPATCHABLE} running=${RUNNING} last_run=${RUN_AGE}s"
   exit 0
 fi
 
-# --- 3. stale: check cooldown ---
+if [ "$DISPATCH_STALL" -eq 1 ]; then
+  REASON="DISPATCH STALL — dispatchable=${DISPATCHABLE} running=0 last_run_age=${RUN_AGE}s > ${DISPATCH_STALE_SECONDS}s (heartbeat ${AGE}s, fresh)"
+else
+  REASON="heartbeat age ${AGE}s > ${STALE_SECONDS}s"
+fi
+
+# --- 4. stale: check cooldown ---
 LAST_RESTART=0
 [ -f "$STATE_FILE" ] && LAST_RESTART=$(cat "$STATE_FILE" 2>/dev/null || echo 0)
 NOW_EPOCH=$(date -u '+%s')
 SINCE=$(( NOW_EPOCH - LAST_RESTART ))
 if [ "$LAST_RESTART" -gt 0 ] && [ "$SINCE" -lt "$COOLDOWN_SECONDS" ]; then
-  log "STALE — heartbeat age ${AGE}s but in cooldown (last restart ${SINCE}s ago < ${COOLDOWN_SECONDS}s); NOT restarting"
+  log "STALE (${REASON}) but in cooldown (last restart ${SINCE}s ago < ${COOLDOWN_SECONDS}s); NOT restarting"
   exit 0
 fi
 
-# --- 4. restart ---
-log "STALE — heartbeat age ${AGE}s > ${STALE_SECONDS}s; restarting ${SERVICE}"
+# --- 5. restart ---
+log "STALE — ${REASON}; restarting ${SERVICE}"
 echo "$NOW_EPOCH" > "$STATE_FILE"
 if systemctl restart "$SERVICE" 2>>"$LOG_FILE"; then
-  log "RESTART issued for ${SERVICE} (was stale ${AGE}s)"
+  log "RESTART issued for ${SERVICE} (${REASON})"
 else
   log "RESTART FAILED for ${SERVICE} (systemctl rc=$?)"
 fi
