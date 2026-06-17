@@ -1,9 +1,3 @@
-// Postgres tag / row mapping utilities.
-//
-// Extracted from Core (src/core/roadmap.ts) during the Phase 1 monolith
-// decomposition. These are pure functions that translate the JSONB `tags`
-// column and related proposal rows into the structured Proposal shape.
-
 import type {
 	ProposalAcceptanceCriterionRow,
 	ProposalRow,
@@ -25,9 +19,7 @@ export function getPgTagString(
 ): string | undefined {
 	const metadata = getPgTagMetadata(tags);
 	const value = metadata?.[key];
-	return typeof value === "string" && value.trim().length > 0
-		? value
-		: undefined;
+	return typeof value === "string" && value.trim().length > 0 ? value : undefined;
 }
 
 export function getPgTagStringArray(
@@ -43,9 +35,7 @@ export function getPgTagStringArray(
 	return normalized.length > 0 ? normalized : undefined;
 }
 
-export function buildPgTags(
-	proposal: Proposal,
-): Record<string, unknown> | null {
+export function buildPgTags(proposal: Proposal): Record<string, unknown> | null {
 	const tags: Record<string, unknown> = {};
 
 	if (proposal.labels.length > 0) tags.labels = [...proposal.labels];
@@ -118,6 +108,36 @@ export function mapPgAcceptanceCriteria(
 	}));
 }
 
+export function buildPgRawContent(row: ProposalRow): string {
+	const rawContent = getPgTagString(row.tags, "rawContent");
+	const sections = [
+		["Summary", row.summary],
+		["Motivation", row.motivation],
+		["Design", row.design],
+		["Drawbacks", row.drawbacks],
+		["Alternatives", row.alternatives],
+		["Dependency Note", row.dependency_note],
+	].flatMap(([heading, value]) => {
+		const content = value?.trim();
+		return content ? [[heading, content] as [string, string]] : [];
+	});
+
+	if (sections.length === 0) {
+		return rawContent ?? "";
+	}
+
+	if (sections.length === 1) {
+		return sections[0][1].trim();
+	}
+
+	const built = sections
+		.map(([heading, value]) => `## ${heading}\n\n${value.trim()}`)
+		.join("\n\n");
+	return rawContent && rawContent.trim().length > 0
+		? `${built}\n\n${rawContent.trim()}`
+		: built;
+}
+
 export function mapPgLabels(tags: ProposalRow["tags"]): string[] {
 	const metadataPrefixes = [
 		"labels:",
@@ -169,10 +189,7 @@ export function mapPgLabels(tags: ProposalRow["tags"]): string[] {
 	return sanitizeLabels([String(tags)]);
 }
 
-export function mapPgMaturity(
-	row: ProposalRow,
-): Proposal["maturity"] | undefined {
-	// maturity is now a direct TEXT column — no JSONB parsing needed
+export function mapPgMaturity(row: ProposalRow): Proposal["maturity"] | undefined {
 	const state = row.maturity;
 	if (!state) return undefined;
 	switch (state) {

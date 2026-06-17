@@ -42,9 +42,31 @@ export type ConfigClass =
 	| "flag"
 	| "tenant_dsn";
 
+export type ConfigCategory =
+	| "database"
+	| "connection_pool"
+	| "vault_secret"
+	| "mcp_endpoint"
+	| "orchestrator"
+	| "dispatch"
+	| "liaison"
+	| "pause_backoff"
+	| "provider_quota"
+	| "adaptive_matcher"
+	| "gate_governance"
+	| "multi_tenant"
+	| "model_routing"
+	| "audit"
+	| "ui_ux"
+	| "diagnostic"
+	| "federation"
+	| "saga"
+	| "notifications";
+
 export interface ConfigKey<T> {
 	name: string;
 	class: ConfigClass;
+	category?: ConfigCategory;
 	parse: (raw: string) => T;
 	required: boolean;
 	description?: string;
@@ -61,6 +83,9 @@ export interface ConfigKey<T> {
 	envOverride?: boolean;
 	defaultValue?: T;
 }
+
+/** FlagKeys must declare a category — compile-time enforced via satisfies. */
+export type FlagConfigKey<T> = ConfigKey<T> & { category: ConfigCategory };
 
 /**
  * Scope context for runtime_flag scoped lookups.

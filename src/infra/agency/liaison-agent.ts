@@ -209,7 +209,13 @@ export async function runLiaisonAgent(
 	// agencies even when the global flag is on — enabling a single-agency canary.
 	// Empty allowlist = all agencies (backward-compatible with the pre-allowlist
 	// behavior). Parsed per-call so it composes with the global flag.
-	const selfClaimAllowlist = (process.env.AGENTHIVE_SELF_CLAIM_AGENCIES ?? "")
+	let rawSelfClaimAllowlist = "";
+	try {
+		rawSelfClaimAllowlist = await runtimeConfig.get(FlagKeys.SELF_CLAIM_AGENCIES);
+	} catch {
+		// config unavailable — treat as empty (all agencies allowed)
+	}
+	const selfClaimAllowlist = rawSelfClaimAllowlist
 		.split(",")
 		.map((s) => s.trim())
 		.filter(Boolean);
@@ -218,7 +224,7 @@ export async function runLiaisonAgent(
 	const claimLoopEnabled = claimLoopFlag && allowedByList;
 	if (claimLoopFlag && !allowedByList) {
 		console.log(
-			`${log} self-claim flag on but ${identity} not in AGENTHIVE_SELF_CLAIM_AGENCIES allowlist — staying on orchestrator-dispatch`,
+			`${log} self-claim flag on but ${identity} not in SELF_CLAIM_AGENCIES allowlist — staying on orchestrator-dispatch`,
 		);
 	}
 
@@ -459,7 +465,7 @@ export async function runLiaisonAgent(
 			const prompt = `${systemContext}\n\n---\nIncoming message:\n${msg.message_content}`;
 
 			replyContent = await invokeCliHandler(handler, prompt, {
-				timeoutMs: resolveLiaisonLlmTimeoutMs(provider),
+				timeoutMs: await resolveLiaisonLlmTimeoutMs(provider),
 			});
 		} catch (err) {
 			const errMsg = err instanceof Error ? err.message : String(err);

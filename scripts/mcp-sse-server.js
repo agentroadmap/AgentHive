@@ -397,6 +397,13 @@ function shutdown(sig) {
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
 
+// AC-2 (P3794): hard-exit failsafe — if server.close() hangs (e.g. long-lived
+// SSE connections never drain), force process.exit(1) after 10 000 ms.
+// Called after SIGTERM handler registration so the timer only starts on SIGTERM.
+if (typeof armHardExit === "function") {
+	armHardExit("mcp-sse-server");
+}
+
 process.on("uncaughtException", (err) => {
 	console.error("[MCP] Uncaught exception:", err);
 });

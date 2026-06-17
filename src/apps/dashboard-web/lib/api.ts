@@ -724,24 +724,6 @@ export class ApiClient {
 		});
 	}
 
-	async fetchConfigKeys(category?: string): Promise<ConfigKeyDescriptor[]> {
-		const qs = category ? `?category=${encodeURIComponent(category)}` : "";
-		const result = await this.fetchJson<{ keys: ConfigKeyDescriptor[] }>(
-			`${API_BASE}/config/keys${qs}`,
-		);
-		return result.keys;
-	}
-
-	async mutateConfigKey(
-		keyName: string,
-		value: unknown,
-	): Promise<ConfigMutationResult> {
-		return this.fetchJson<ConfigMutationResult>(
-			`${API_BASE}/config/${encodeURIComponent(keyName)}`,
-			{ method: "PUT", body: JSON.stringify({ value }) },
-		);
-	}
-
 	async fetchDispatches(): Promise<any[]> {
 		const result = await this.fetchJson<{ dispatches: any[] }>(`${API_BASE}/dispatches`);
 		return result.dispatches;
@@ -950,6 +932,26 @@ export class ApiClient {
 		}>(`${API_BASE}/notifications/${encodeURIComponent(notificationId)}/seen`, {
 			method: "PATCH",
 		});
+	}
+
+	// ── P3785: Config key read + write ────────────────────────────────────────
+
+	async fetchConfigKeys(category?: string): Promise<ConfigKeyDescriptor[]> {
+		const params = category ? `?category=${encodeURIComponent(category)}` : "";
+		const result = await this.fetchJson<{ keys: ConfigKeyDescriptor[]; count: number; category_filter: string | null }>(
+			`${API_BASE}/config/keys${params}`,
+		);
+		return result.keys;
+	}
+
+	async mutateConfigKey(keyName: string, value: unknown, scope?: string): Promise<ConfigMutationResult> {
+		return this.fetchJson<ConfigMutationResult>(
+			`${API_BASE}/config/${encodeURIComponent(keyName)}`,
+			{
+				method: "PUT",
+				body: JSON.stringify(scope !== undefined ? { value, scope } : { value }),
+			},
+		);
 	}
 }
 

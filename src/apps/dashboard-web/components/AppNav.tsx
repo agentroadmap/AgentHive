@@ -11,13 +11,18 @@ interface NavItem {
 }
 
 const PRIMARY: NavItem[] = [
-	{ href: "/", label: "Dashboard" },
+	{ href: "/", label: "Portal" },
+	{ href: "/fleet", label: "Fleet" },
+	{ href: "/efficiency", label: "Efficiency" },
+	{ href: "/identity", label: "Identity" },
+	{ href: "/platform", label: "Platform" },
 	{ href: "/board", label: "Board" },
 	{ href: "/proposals", label: "Proposals" },
 	{ href: "/directives", label: "Directives" },
 ];
 
 const SECONDARY: NavItem[] = [
+	{ href: "/agent-dashboard", label: "Dashboard" },
 	{ href: "/agents", label: "Agents" },
 	{ href: "/agencies", label: "Agencies" },
 	{ href: "/teams", label: "Teams" },
@@ -31,6 +36,7 @@ const SECONDARY: NavItem[] = [
 	{ href: "/routes", label: "Routes" },
 	{ href: "/statistics", label: "Statistics" },
 	{ href: "/achievements", label: "Achievements" },
+	{ href: "/config", label: "Config" },
 	{ href: "/settings", label: "Settings" },
 	{ href: "/config", label: "Config" },
 ];

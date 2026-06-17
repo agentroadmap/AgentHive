@@ -373,7 +373,7 @@ const opsRoutes: RouteMap = {
 	config_get: "config_get",
 	config_mutation: "config_mutation",
 	list_config_mutations: "list_config_mutations",
-	// P3784: Config key introspection
+	// P3784: Config key introspection — enumerate all keys
 	config_list: "config_list",
 	// P895: Backup harness
 	backup_take: "backup_take",

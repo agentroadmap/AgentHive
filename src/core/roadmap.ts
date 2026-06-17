@@ -138,10 +138,23 @@ import {
 	resolveProposalConflict,
 } from "./storage/proposal-loader.ts";
 import {
+	addAcceptanceCriteria as acAdd,
+	checkAcceptanceCriteria as acCheck,
+	listAcceptanceCriteria as acList,
+	removeAcceptanceCriteria as acRemove,
+} from "./proposal/criteria.ts";
+import { LegacyConfigMigrator } from "./config-migration.ts";
+import {
+	createDecision as decisionsCreate,
+	updateDecisionFromContent as decisionsUpdateFromContent,
+} from "./proposal/decisions.ts";
+import { buildPgTags } from "./postgres/pg-tag-utils.ts";
+import { hydratePgProposalRow } from "./postgres/proposal-hydrator.ts";
+import {
 	buildLatestProposalMap,
 	filterProposalsByProposalSnapshots,
 	getActiveAndCompletedIdsFromProposalMap,
-} from "./proposal/snapshot-helpers.ts";
+} from "./proposal/id-generation.ts";
 
 interface BlessedScreen {
 	program: {
@@ -518,224 +531,6 @@ export class Core {
 		return resolvedConfig?.database?.provider === "Postgres";
 	}
 
-	private async hydratePgProposalRow(
-		row: ProposalRow,
-		options?: {
-			summary?: ProposalSummary | null;
-			dependencies?: ProposalDependency[];
-			acceptanceCriteria?: ProposalAcceptanceCriterionRow[];
-			parentProposalId?: string;
-			activity?: ProposalActivity | null;
-			activityLog?: ActivityLogEntry[];
-		},
-	): Promise<Proposal> {
-		const summary = options?.summary ?? (await pg.getProposalSummary(row.id));
-		const activity = options?.activity ?? null;
-		const activityLog = options?.activityLog;
-		const dependencies = (options?.dependencies ?? []).filter(
-			(dependency) =>
-				dependency.from_proposal_id === row.id &&
-				dependency.dependency_type === "blocks" &&
-				!dependency.resolved,
-		);
-		const acceptanceCriteria = options?.acceptanceCriteria ?? [];
-		const metadata = getPgTagMetadata(row.tags);
-
-		const id = row.display_id || `#${row.id}`;
-		const labels = mapPgLabels(row.tags);
-		const rawContent = this.buildPgRawContent(row);
-		const maturity = mapPgMaturity(row);
-		const priority = mapPgPriority(row.priority);
-		const leaseActive =
-			Boolean(summary?.leased_by) &&
-			(summary?.lease_expires === null ||
-				summary?.lease_expires === undefined ||
-				new Date(summary.lease_expires) > new Date());
-		// P270: prefer active lease holder, fall back to gate dispatch agent so
-		// the board shows "who's on this" even during gate review when there's
-		// no lease yet.
-		const liveAssignee = leaseActive
-			? (summary?.leased_by ?? activity?.lease_holder ?? null)
-			: (activity?.gate_dispatch_agent ?? null);
-		const assignee = liveAssignee ? [liveAssignee] : [];
-		const claimCreated = summary?.leased_at
-			? formatLocalDateTime(new Date(summary.leased_at))
-			: undefined;
-		const claimExpires = summary?.lease_expires
-			? formatLocalDateTime(new Date(summary.lease_expires))
-			: claimCreated;
-		const parentProposalId =
-			options?.parentProposalId ??
-			(row.parent_id !== null
-				? ((await pg.getProposal(row.parent_id))?.display_id ?? undefined)
-				: undefined);
-
-		return {
-			id,
-			title: row.title || "(no title)",
-			status: row.status,
-			assignee,
-			labels,
-			dependencies: dependencies.map((dependency) => dependency.to_display_id),
-			rawContent,
-			summary: row.summary || undefined,
-			motivation: row.motivation || undefined,
-			design: row.design || undefined,
-			drawbacks: row.drawbacks || undefined,
-			alternatives: row.alternatives || undefined,
-			dependency_note: row.dependency_note || undefined,
-			description: row.summary || undefined,
-			implementationPlan: row.design || undefined,
-			implementationNotes: getPgTagString(row.tags, "implementationNotes"),
-			auditNotes: getPgTagString(row.tags, "auditNotes"),
-			finalSummary: getPgTagString(row.tags, "finalSummary"),
-			scopeSummary: getPgTagString(row.tags, "scopeSummary"),
-			createdDate: row.created_at
-				? new Date(row.created_at)
-						.toISOString()
-						.slice(0, 16)
-						.replace("T", " ")
-				: undefined,
-			updatedDate: row.modified_at || row.created_at
-				? new Date(row.modified_at || row.created_at)
-						.toISOString()
-						.slice(0, 16)
-						.replace("T", " ")
-				: undefined,
-			proposalType: row.type,
-			domainId: getPgTagString(row.tags, "domainId"),
-			category: getPgTagString(row.tags, "category"),
-			directive: getPgTagString(row.tags, "directive"),
-			references: getPgTagStringArray(row.tags, "references"),
-			documentation: getPgTagStringArray(row.tags, "documentation"),
-			proof: getPgTagStringArray(row.tags, "proof"),
-			needs_capabilities: getPgTagStringArray(
-				row.tags,
-				"needs_capabilities",
-			),
-			required_capabilities: getPgTagStringArray(
-				row.tags,
-				"required_capabilities",
-			),
-			external_injections: getPgTagStringArray(
-				row.tags,
-				"external_injections",
-			),
-			unlocks: getPgTagStringArray(row.tags, "unlocks"),
-			rationale: getPgTagString(row.tags, "rationale"),
-			builder: getPgTagString(row.tags, "builder"),
-			auditor: getPgTagString(row.tags, "auditor"),
-			...(parentProposalId && { parentProposalId }),
-			...(acceptanceCriteria.length > 0 && {
-				acceptanceCriteriaItems:
-					mapPgAcceptanceCriteria(acceptanceCriteria),
-			}),
-			...(summary?.leased_by && leaseActive && claimCreated && claimExpires
-				? {
-						claim: {
-							agent: summary.leased_by,
-							created: claimCreated,
-							expires: claimExpires,
-						},
-					}
-				: {}),
-			...(maturity && { maturity }),
-			...(priority && { priority }),
-			...(activityLog && activityLog.length > 0 ? { activityLog } : {}),
-			...(activity
-				? (() => {
-						const live: NonNullable<Proposal["liveActivity"]> = {};
-						if (activity.lease_holder) live.leaseHolder = activity.lease_holder;
-						if (activity.gate_dispatch_agent)
-							live.gateDispatchAgent = activity.gate_dispatch_agent;
-						if (activity.gate_dispatch_role)
-							live.gateDispatchRole = activity.gate_dispatch_role;
-						if (activity.gate_dispatch_status)
-							live.gateDispatchStatus = activity.gate_dispatch_status;
-						if (activity.active_cubic) live.activeCubic = activity.active_cubic;
-						if (activity.active_model) live.activeModel = activity.active_model;
-						if (typeof activity.heartbeat_age_seconds === "number")
-							live.heartbeatAgeSeconds = activity.heartbeat_age_seconds;
-						if (activity.last_event_type)
-							live.lastEventType = activity.last_event_type;
-						if (activity.last_event_at)
-							live.lastEventAt = new Date(activity.last_event_at).toISOString();
-						return Object.keys(live).length > 0 ? { liveActivity: live } : {};
-					})()
-				: {}),
-			...(metadata?.verificationProposalments &&
-			Array.isArray(metadata.verificationProposalments) &&
-			metadata.verificationProposalments.length > 0
-				? {
-						verificationProposalments: metadata.verificationProposalments.map(
-							(item, index) => ({
-								index:
-									typeof item === "object" &&
-									item !== null &&
-									typeof (item as { index?: unknown }).index === "number"
-										? (item as { index: number }).index
-										: index + 1,
-								text:
-									typeof item === "object" &&
-									item !== null &&
-									typeof (item as { text?: unknown }).text === "string"
-										? String((item as { text: string }).text)
-										: String(item),
-								checked:
-									typeof item === "object" &&
-									item !== null &&
-									typeof (item as { checked?: unknown }).checked === "boolean"
-										? Boolean((item as { checked: boolean }).checked)
-										: false,
-								role:
-									typeof item === "object" &&
-									item !== null &&
-									typeof (item as { role?: unknown }).role === "string"
-										? String((item as { role: string }).role)
-										: undefined,
-								evidence:
-									typeof item === "object" &&
-									item !== null &&
-									typeof (item as { evidence?: unknown }).evidence === "string"
-										? String((item as { evidence: string }).evidence)
-										: undefined,
-							}),
-						),
-					}
-				: {}),
-		};
-	}
-
-	private buildPgRawContent(row: ProposalRow): string {
-		const rawContent = getPgTagString(row.tags, "rawContent");
-		const sections = [
-			["Summary", row.summary],
-			["Motivation", row.motivation],
-			["Design", row.design],
-			["Drawbacks", row.drawbacks],
-			["Alternatives", row.alternatives],
-			["Dependency Note", row.dependency_note],
-		].flatMap(([heading, value]) => {
-			const content = value?.trim();
-			return content ? [[heading, content] as [string, string]] : [];
-		});
-
-		if (sections.length === 0) {
-			return rawContent ?? "";
-		}
-
-		if (sections.length === 1) {
-			return sections[0][1].trim();
-		}
-
-		const built = sections
-			.map(([heading, value]) => `## ${heading}\n\n${value.trim()}`)
-			.join("\n\n");
-		return rawContent && rawContent.trim().length > 0
-			? `${built}\n\n${rawContent.trim()}`
-			: built;
-	}
-
 	private async loadPgProposalActivity(
 		proposalId: number,
 		limit = 50,
@@ -970,7 +765,7 @@ export class Core {
 					.then((rows) => rows.find((r) => r.proposal_id === row.id) ?? null)
 					.catch(() => null),
 			]);
-		return await this.hydratePgProposalRow(row, {
+		return await hydratePgProposalRow(pg, row, {
 			summary,
 			dependencies,
 			acceptanceCriteria,
@@ -996,7 +791,7 @@ export class Core {
 						if (diskIds.has(pgId)) {
 							return null;
 						}
-						return await this.hydratePgProposalRow(row);
+						return await hydratePgProposalRow(pg, row);
 					}),
 				)
 			).filter((proposal): proposal is Proposal => proposal !== null);
@@ -1064,7 +859,7 @@ export class Core {
 			const rowById = new Map(rows.map((row) => [row.id, row]));
 			const proposals = await Promise.all(
 				rows.map(async (row) =>
-					this.hydratePgProposalRow(row, {
+					hydratePgProposalRow(pg, row, {
 						summary: summaryById.get(row.id),
 						dependencies: dependencyRows,
 						activity: activityById.get(row.id) ?? null,
@@ -1440,118 +1235,10 @@ export class Core {
 		return this.git;
 	}
 
-	// Config migration
-	private async extractLegacyConfigDirectives(): Promise<string[]> {
-		try {
-			const configPath = this.fs.configFilePath;
-			const content = await readFile(configPath, "utf-8");
-			const lines = content.split("\n");
-			for (let i = 0; i < lines.length; i += 1) {
-				const line = lines[i] ?? "";
-				const match = line.match(/^(\s*)directives\s*:\s*(.*)$/);
-				if (!match) {
-					continue;
-				}
-
-				const directiveIndent = (match[1] ?? "").length;
-				const trailing = stripYamlComment(match[2] ?? "").trim();
-				if (trailing.startsWith("[")) {
-					let combined = trailing;
-					let closed = trailing.endsWith("]");
-					let j = i + 1;
-					while (!closed && j < lines.length) {
-						const segment = stripYamlComment(lines[j] ?? "").trim();
-						combined += segment;
-						if (segment.includes("]")) {
-							closed = true;
-							break;
-						}
-						j += 1;
-					}
-					if (closed) {
-						const openIndex = combined.indexOf("[");
-						const closeIndex = combined.lastIndexOf("]");
-						if (openIndex !== -1 && closeIndex > openIndex) {
-							const parsed = parseLegacyInlineArray(
-								combined.slice(openIndex + 1, closeIndex),
-							);
-							return parsed
-								.map((item) => parseLegacyYamlValue(item))
-								.filter(Boolean);
-						}
-					}
-				}
-				if (trailing.length > 0) {
-					const single = parseLegacyYamlValue(trailing);
-					return single ? [single] : [];
-				}
-
-				const values: string[] = [];
-				for (let j = i + 1; j < lines.length; j += 1) {
-					const nextLine = lines[j] ?? "";
-					if (!nextLine.trim()) {
-						continue;
-					}
-					const nextIndent = nextLine.match(/^\s*/)?.[0].length ?? 0;
-					if (nextIndent <= directiveIndent) {
-						break;
-					}
-					const trimmed = nextLine.trim();
-					if (!trimmed.startsWith("-")) {
-						continue;
-					}
-					const itemValue = parseLegacyYamlValue(trimmed.slice(1));
-					if (itemValue) {
-						values.push(itemValue);
-					}
-				}
-				return values;
-			}
-			return [];
-		} catch {
-			return [];
-		}
-	}
-
-	private async migrateLegacyConfigDirectivesToFiles(
-		legacyDirectives: string[],
-	): Promise<void> {
-		if (legacyDirectives.length === 0) {
-			return;
-		}
-		const existingDirectives = await this.fs.listDirectives();
-		const existingKeys = new Set<string>();
-		for (const directive of existingDirectives) {
-			const idKey = directive.id.trim().toLowerCase();
-			const titleKey = directive.title.trim().toLowerCase();
-			if (idKey) {
-				existingKeys.add(idKey);
-			}
-			if (titleKey) {
-				existingKeys.add(titleKey);
-			}
-		}
-		for (const name of legacyDirectives) {
-			const normalized = name.trim();
-			const key = normalized.toLowerCase();
-			if (!normalized || existingKeys.has(key)) {
-				continue;
-			}
-			const created = await this.fs.createDirective(normalized);
-			const createdIdKey = created.id.trim().toLowerCase();
-			const createdTitleKey = created.title.trim().toLowerCase();
-			if (createdIdKey) {
-				existingKeys.add(createdIdKey);
-			}
-			if (createdTitleKey) {
-				existingKeys.add(createdTitleKey);
-			}
-		}
-	}
-
 	async ensureConfigMigrated(): Promise<void> {
 		await this.ensureConfigLoaded();
-		const legacyDirectives = await this.extractLegacyConfigDirectives();
+		const migrator = new LegacyConfigMigrator(this.fs);
+		const legacyDirectives = await migrator.extractLegacyConfigDirectives();
 		let config = await this.fs.loadConfig();
 		const needsSchemaMigration = !config || needsMigration(config);
 
@@ -1559,7 +1246,7 @@ export class Core {
 			config = migrateConfig(config || {});
 		}
 		if (legacyDirectives.length > 0) {
-			await this.migrateLegacyConfigDirectivesToFiles(legacyDirectives);
+			await migrator.migrateLegacyConfigDirectivesToFiles(legacyDirectives);
 		}
 		if (config && (needsSchemaMigration || legacyDirectives.length > 0)) {
 			// Rewrite config to apply schema defaults and strip legacy directives key after successful migration.
@@ -4777,168 +4464,50 @@ export class Core {
 		return success;
 	}
 
-	/**
-	 * Add acceptance criteria to a proposal
-	 */
 	async addAcceptanceCriteria(
 		proposalId: string,
 		criteria: string[],
 		autoCommit?: boolean,
 	): Promise<void> {
-		const proposal = await this.fs.loadProposal(proposalId);
-		if (!proposal) {
-			throw new Error(`Proposal not found: ${proposalId}`);
-		}
-
-		// Get existing criteria or initialize empty array
-		const current = Array.isArray(proposal.acceptanceCriteriaItems)
-			? [...proposal.acceptanceCriteriaItems]
-			: [];
-
-		// Calculate next index (1-based)
-		let nextIndex =
-			current.length > 0 ? Math.max(...current.map((c) => c.index)) + 1 : 1;
-
-		// Append new criteria
-		const newCriteria = criteria.map((text) => ({
-			index: nextIndex++,
-			text,
-			checked: false,
-		}));
-		proposal.acceptanceCriteriaItems = [...current, ...newCriteria];
-
-		// Save the proposal
-		await this.updateProposal(proposal, autoCommit);
+		return acAdd(this._acDeps(), proposalId, criteria, autoCommit);
 	}
 
-	/**
-	 * Remove acceptance criteria by indices (supports batch operations)
-	 * @returns Array of removed indices
-	 */
 	async removeAcceptanceCriteria(
 		proposalId: string,
 		indices: number[],
 		autoCommit?: boolean,
 	): Promise<number[]> {
-		const proposal = await this.fs.loadProposal(proposalId);
-		if (!proposal) {
-			throw new Error(`Proposal not found: ${proposalId}`);
-		}
-
-		let list = Array.isArray(proposal.acceptanceCriteriaItems)
-			? [...proposal.acceptanceCriteriaItems]
-			: [];
-		const removed: number[] = [];
-
-		// Sort indices in descending order to avoid index shifting issues
-		const sortedIndices = [...indices].sort((a, b) => b - a);
-
-		for (const idx of sortedIndices) {
-			const before = list.length;
-			list = list.filter((c) => c.index !== idx);
-			if (list.length < before) {
-				removed.push(idx);
-			}
-		}
-
-		if (removed.length === 0) {
-			throw new Error(
-				"No criteria were removed. Check that the specified indices exist.",
-			);
-		}
-
-		// Re-index remaining items (1-based)
-		list = list.map((c, i) => ({ ...c, index: i + 1 }));
-		proposal.acceptanceCriteriaItems = list;
-
-		// Save the proposal
-		await this.updateProposal(proposal, autoCommit);
-
-		return removed.sort((a, b) => a - b); // Return in ascending order
+		return acRemove(this._acDeps(), proposalId, indices, autoCommit);
 	}
 
-	/**
-	 * Check or uncheck acceptance criteria by indices (supports batch operations)
-	 * Silently ignores invalid indices and only updates valid ones.
-	 * @returns Array of updated indices
-	 */
 	async checkAcceptanceCriteria(
 		proposalId: string,
 		indices: number[],
 		checked: boolean,
 		autoCommit?: boolean,
 	): Promise<number[]> {
-		const proposal = await this.fs.loadProposal(proposalId);
-		if (!proposal) {
-			throw new Error(`Proposal not found: ${proposalId}`);
-		}
-
-		let list = Array.isArray(proposal.acceptanceCriteriaItems)
-			? [...proposal.acceptanceCriteriaItems]
-			: [];
-		const updated: number[] = [];
-
-		// Filter to only valid indices and update them
-		for (const idx of indices) {
-			if (list.some((c) => c.index === idx)) {
-				list = list.map((c) => {
-					if (c.index === idx) {
-						updated.push(idx);
-						return { ...c, checked };
-					}
-					return c;
-				});
-			}
-		}
-
-		if (updated.length === 0) {
-			throw new Error("No criteria were updated.");
-		}
-
-		proposal.acceptanceCriteriaItems = list;
-
-		// Save the proposal
-		await this.updateProposal(proposal, autoCommit);
-
-		return updated.sort((a, b) => a - b);
+		return acCheck(this._acDeps(), proposalId, indices, checked, autoCommit);
 	}
 
-	/**
-	 * List all acceptance criteria for a proposal
-	 */
 	async listAcceptanceCriteria(
 		proposalId: string,
 	): Promise<AcceptanceCriterion[]> {
-		const proposal = await this.fs.loadProposal(proposalId);
-		if (!proposal) {
-			throw new Error(`Proposal not found: ${proposalId}`);
-		}
+		return acList(this._acDeps(), proposalId);
+	}
 
-		return proposal.acceptanceCriteriaItems || [];
+	private _acDeps() {
+		return {
+			loadProposal: (id: string) => this.fs.loadProposal(id),
+			updateProposal: (p: Proposal, autoCommit?: boolean) =>
+				this.updateProposal(p, autoCommit),
+		};
 	}
 
 	async createDecision(
 		decision: Decision,
 		autoCommit?: boolean,
 	): Promise<void> {
-		await this.fs.saveDecision(decision);
-
-		// Record Pulse event
-		await this.recordPulse({
-			type: "decision_made",
-			id: decision.id,
-			title: decision.title,
-			impact: `Status: ${decision.status}`,
-		});
-
-		if (await this.shouldAutoCommit(autoCommit)) {
-			const roadmapDir = await this.getRoadmapDirectoryName();
-			const repoRoot = await this.git.stageRoadmapDirectory(roadmapDir);
-			await this.git.commitChanges(
-				`roadmap: Add decision ${decision.id}`,
-				repoRoot,
-			);
-		}
+		return decisionsCreate(this._decisionDeps(), decision, autoCommit);
 	}
 
 	async updateDecisionFromContent(
@@ -4946,44 +4515,32 @@ export class Core {
 		content: string,
 		autoCommit?: boolean,
 	): Promise<void> {
-		const existingDecision = await this.fs.loadDecision(decisionId);
-		if (!existingDecision) {
-			throw new Error(`Decision ${decisionId} not found`);
-		}
+		return decisionsUpdateFromContent(
+			this._decisionDeps(),
+			decisionId,
+			content,
+			autoCommit,
+		);
+	}
 
-		// Parse the markdown content to extract the decision data
-		const matter = await import("gray-matter");
-		const { data } = matter.default(content);
-
-		const extractSection = (
-			content: string,
-			sectionName: string,
-		): string | undefined => {
-			const regex = new RegExp(
-				`## ${sectionName}\\s*([\\s\\S]*?)(?=## |$)`,
-				"i",
-			);
-			const match = content.match(regex);
-			return match ? match[1]?.trim() : undefined;
+	private _decisionDeps() {
+		return {
+			saveDecision: (d: Decision) => this.fs.saveDecision(d),
+			loadDecision: (id: string) => this.fs.loadDecision(id),
+			recordPulse: (event: {
+				type: string;
+				id: string;
+				title: string;
+				impact: string;
+			}) => this.recordPulse(event),
+			commitIfNeeded: async (message: string, autoCommit?: boolean) => {
+				if (await this.shouldAutoCommit(autoCommit)) {
+					const roadmapDir = await this.getRoadmapDirectoryName();
+					const repoRoot = await this.git.stageRoadmapDirectory(roadmapDir);
+					await this.git.commitChanges(message, repoRoot);
+				}
+			},
 		};
-
-		const updatedDecision = {
-			...existingDecision,
-			title: data.title || existingDecision.title,
-			status: data.status || existingDecision.status,
-			date: data.date || existingDecision.date,
-			context: extractSection(content, "Context") || existingDecision.context,
-			decision:
-				extractSection(content, "Decision") || existingDecision.decision,
-			consequences:
-				extractSection(content, "Consequences") ||
-				existingDecision.consequences,
-			alternatives:
-				extractSection(content, "Alternatives") ||
-				existingDecision.alternatives,
-		};
-
-		await this.createDecision(updatedDecision, autoCommit);
 	}
 
 	async createDecisionWithTitle(

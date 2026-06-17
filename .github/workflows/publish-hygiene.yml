@@ -78,7 +78,7 @@ jobs:
         env:
           DATABASE_URL: ${{ env.AUDIT_DATABASE_URL }}
           AGENTHIVE_SIGTERM_E2E: "1"
-        run: npm test -- --test-name-pattern 'entrypoint SIGTERM'
+        run: node --import jiti/register --test src/shared/runtime/graceful-exit.test.ts --test-name-pattern 'entrypoint SIGTERM'
 
       # P690: Guard against migrations being placed in the legacy inactive runner
       # directory (database/migrations/) instead of the active path (scripts/migrations/).
