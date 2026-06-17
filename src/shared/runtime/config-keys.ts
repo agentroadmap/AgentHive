@@ -1260,6 +1260,51 @@ export const FlagKeys = {
 		dbColumn: "value_jsonb",
 		envOverride: true,
 	} satisfies ConfigKey<"grid" | "stacked">,
+
+	LIAISON_LLM_TIMEOUT_MS: {
+		name: "AGENTHIVE_LIAISON_LLM_TIMEOUT_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n <= 0) throw new Error("invalid timeout");
+			return n;
+		},
+		required: false,
+		defaultValue: 30000,
+		description:
+			"Global LLM call timeout in ms for liaison agents. Per-provider env overrides (AGENTHIVE_LIAISON_LLM_TIMEOUT_MS_<PROVIDER>) still take precedence.",
+		category: "liaison" as ConfigKeyCategory,
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies ConfigKey<number>,
+
+	LIAISON_SELF_CLAIM_AGENCIES: {
+		name: "AGENTHIVE_SELF_CLAIM_AGENCIES",
+		class: "flag" as const,
+		parse: (v: string) => {
+			// Accepts JSON-encoded string ("\"claude-bot-gary.a,codex-bot.a\"") or bare CSV.
+			let raw: string;
+			try {
+				const decoded = JSON.parse(v);
+				raw = typeof decoded === "string" ? decoded : v;
+			} catch {
+				raw = v;
+			}
+			return raw
+				.split(",")
+				.map((s) => s.trim())
+				.filter(Boolean);
+		},
+		required: false,
+		defaultValue: [] as string[],
+		description:
+			"Comma-separated list of agency identities allowed to use the self-claim loop. Empty = all agencies allowed (when AGENCY_OFFER_CLAIM_ENABLED is true).",
+		category: "liaison" as ConfigKeyCategory,
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies ConfigKey<string[]>,
 };
 
 /**
