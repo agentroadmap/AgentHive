@@ -6,6 +6,12 @@ import express from "express";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = join(__dirname, "..");
 
+// P3794: canonical graceful-exit helpers (armHardExit / dumpActiveHandles).
+const gracefulExitModule = await import(
+	"../src/shared/runtime/graceful-exit.ts"
+);
+const { armHardExit } = gracefulExitModule;
+
 // P1123: protect the shared pool from stray pool.end() in shared CLI/tool code.
 // Tool handlers use src/infra/postgres/pool.ts transitively.
 //
@@ -370,11 +376,10 @@ function shutdown(sig) {
 	console.log(`[MCP] ${sig} received, shutting down gracefully`);
 	clearInterval(keepalive);
 
-	const hardExit = setTimeout(() => {
-		console.warn("[MCP] graceful close exceeded 5s — forcing exit");
-		process.exit(0);
-	}, 5000);
-	hardExit.unref();
+	// P3794 AC-2: canonical failsafe — if shutdown() hangs at any point after
+	// this line, armHardExit fires and force-exits the process rather than
+	// waiting for systemd's SIGKILL (TimeoutStopSec).
+	armHardExit("mcp-sse-server", 8_000);
 
 	server.close(() => {
 		console.log("[MCP] Server closed");

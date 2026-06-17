@@ -67,6 +67,19 @@ jobs:
           DATABASE_URL: ${{ env.AUDIT_DATABASE_URL }}
         run: npm run check:migration-continuity
 
+      # P3794: SIGTERM clean-exit regression guard. Boots each long-running service
+      # entrypoint in CI, sends SIGTERM, and asserts it exits within 10 s — preventing
+      # new services from being added without a graceful shutdown path.
+      # Gated on AUDIT_DATABASE_URL (live DB required); continue-on-error until infra
+      # is confirmed stable in CI.
+      - name: SIGTERM clean-exit e2e
+        if: ${{ env.AUDIT_DATABASE_URL != '' }}
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ env.AUDIT_DATABASE_URL }}
+          AGENTHIVE_SIGTERM_E2E: "1"
+        run: npm test -- --test-name-pattern 'entrypoint SIGTERM'
+
       # P690: Guard against migrations being placed in the legacy inactive runner
       # directory (database/migrations/) instead of the active path (scripts/migrations/).
       # Fails if any .sql file in database/migrations/ appears in the current PR diff.
