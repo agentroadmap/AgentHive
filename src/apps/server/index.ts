@@ -1085,6 +1085,7 @@ export class RoadmapServer {
 					"/activity",
 					"/dispatches",
 					"/control",
+					"/config",
 				].some((p) => pathname === p || pathname.startsWith(`${p}/`)))
 		) {
 			return new Response(indexHtml, {
@@ -1339,6 +1340,10 @@ export class RoadmapServer {
 			// P3784: config-key registry (must precede /api/config to avoid shadowing)
 			if (pathname === "/api/config/keys" && method === "GET")
 				return await this.handleGetConfigKeys(req);
+
+			// P3785: audited config key mutation (must precede /api/config to avoid shadowing)
+			if (pathname.startsWith("/api/config/") && pathname !== "/api/config/keys" && method === "PUT")
+				return await this.handlePutConfigKey(req, pathname.slice("/api/config/".length));
 
 			if (pathname === "/api/config") {
 				if (method === "GET") return await this.handleGetConfig();
@@ -2547,6 +2552,31 @@ export class RoadmapServer {
 				{ error: "Failed to list config keys" },
 				{ status: 500 },
 			);
+		}
+	}
+
+	// P3785: PUT /api/config/:keyName — operator-gated audited config mutation.
+	private async handlePutConfigKey(req: Request, keyName: string): Promise<Response> {
+		const decodedKey = decodeURIComponent(keyName);
+		const auth = await requireOperator(req, { action: "config.write" });
+		if (auth.rejected) return auth.rejected;
+		const principal_id = auth.outcome.operatorName ?? "operator";
+		try {
+			const body = await req.json() as { value: unknown };
+			if (body == null || !("value" in body)) {
+				return Response.json({ error: "Request body must include `value`" }, { status: 400 });
+			}
+			const { configMutation } = await import(
+				"../mcp-server/tools/ops/config-mutation-ops.ts"
+			);
+			const result = await agentContextStorage.run(
+				{ verified: { principal_id, principal_kind: "operator" as const } },
+				() => configMutation({ key_name: decodedKey, value: body.value }),
+			);
+			return Response.json(result);
+		} catch (error) {
+			const msg = error instanceof Error ? error.message : "Unknown error";
+			return Response.json({ error: msg }, { status: 400 });
 		}
 	}
 

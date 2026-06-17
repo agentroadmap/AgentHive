@@ -38,6 +38,27 @@ export interface RouteRow {
 	has_host_policy_match: boolean;
 }
 
+export interface ConfigKeyDescriptor {
+	name: string;
+	class: string;
+	category: string | null;
+	description: string | null;
+	default_value: unknown;
+	required: boolean;
+	db_table: string | null;
+	scope: string;
+	editable: boolean;
+	masked: boolean;
+	value: unknown;
+}
+
+export interface ConfigMutationResult {
+	ok: true;
+	key_name: string;
+	key_class: string;
+	scope: string;
+}
+
 export interface ReorderProposalPayload {
 	proposalId: string;
 	targetStatus: string;
@@ -701,6 +722,24 @@ export class ApiClient {
 			method: "PATCH",
 			body: JSON.stringify({ is_enabled: isEnabled }),
 		});
+	}
+
+	async fetchConfigKeys(category?: string): Promise<ConfigKeyDescriptor[]> {
+		const qs = category ? `?category=${encodeURIComponent(category)}` : "";
+		const result = await this.fetchJson<{ keys: ConfigKeyDescriptor[] }>(
+			`${API_BASE}/config/keys${qs}`,
+		);
+		return result.keys;
+	}
+
+	async mutateConfigKey(
+		keyName: string,
+		value: unknown,
+	): Promise<ConfigMutationResult> {
+		return this.fetchJson<ConfigMutationResult>(
+			`${API_BASE}/config/${encodeURIComponent(keyName)}`,
+			{ method: "PUT", body: JSON.stringify({ value }) },
+		);
 	}
 
 	async fetchDispatches(): Promise<any[]> {
