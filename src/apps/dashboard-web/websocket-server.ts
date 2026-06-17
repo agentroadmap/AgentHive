@@ -6,6 +6,7 @@
  */
 
 import { createServer } from "node:http";
+import { Pool } from "pg";
 import { WebSocket, WebSocketServer } from "ws";
 import {
 	getPool,
@@ -16,6 +17,22 @@ import {
 
 let wss: WebSocketServer | null = null;
 const clients = new Set<WebSocket>();
+
+// Dedicated direct-Postgres pool for LISTEN/NOTIFY — must bypass pgbouncer
+// transaction mode. Kept separate from the shared query pool (getPool()) so
+// the query pool can resolve cleanly to pgbouncer 6432.
+let listenPool: Pool | null = null;
+
+function getListenPool(): Pool {
+	if (!listenPool) {
+		const directPort = Number(process.env.PGPORT_DIRECT ?? "5432");
+		listenPool = new Pool({ port: directPort, max: 1 });
+		listenPool.on("error", (err) => {
+			console.error("[WS] LISTEN pool error:", err.message);
+		});
+	}
+	return listenPool;
+}
 
 // ─── Phase 4: Runtime probe for notification_inbox table ─────────────────────
 
@@ -421,8 +438,7 @@ export function startWebSocketServer(port = 3001): void {
 	// LISTEN client errors out after the fact (idle disconnects, PG restart).
 	void (async () => {
 		const setupListener = async (): Promise<void> => {
-			const pool = getPool();
-			const pgClient = await pool.connect();
+			const pgClient = await getListenPool().connect();
 			pgClient.on("error", (err) => {
 				console.error("[WS] pg_notify client error, will reconnect:", err.message);
 				try { pgClient.release(true); } catch { /* already released */ }
@@ -593,5 +609,9 @@ export function startWebSocketServer(port = 3001): void {
 			snapshotTimer = null;
 		}
 		wss?.close();
+		if (listenPool) {
+			void listenPool.end().catch(() => {});
+			listenPool = null;
+		}
 	});
 }
