@@ -3221,10 +3221,10 @@ export async function createMcpServer(
 		},
 	});
 
-	// P828: Config mutation + audit surface — config_get / config_mutation /
-	// list_config_mutations. Sit on top of ConfigResolver.set() (audited) and
+	// P828/P3784: Config mutation + audit surface — config_get / config_mutation /
+	// list_config_mutations / config_list. Sit on top of ConfigResolver.set() (audited) and
 	// core.config_mutation_log. Routed via mcp_ops in consolidated.ts.
-	const { configGet, configMutation, listConfigMutations } = await import(
+	const { configGet, configMutation, listConfigMutations, configList } = await import(
 		"./tools/ops/config-mutation-ops.ts"
 	);
 	server.addTool({
@@ -3309,6 +3309,32 @@ export async function createMcpServer(
 					content: [{ type: "text", text: JSON.stringify(r, null, 2) }],
 				}),
 			);
+		},
+	});
+
+	// P3784: config_list — enumerate all config keys with metadata + current values.
+	server.addTool({
+		name: "config_list",
+		description:
+			"P3784: enumerate every key in AllConfigKeys with per-key metadata " +
+			"(name, class, category, description, current resolved value, default, required, " +
+			"db_table, scope) plus derived editable/masked booleans. Secret keys and tenant_dsn " +
+			"keys always return value=null. Accepts optional category filter. " +
+			"Args: { category? }.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				category: {
+					type: "string",
+					description:
+						"Optional category filter (e.g. 'orchestration', 'dispatch'). Omit to return all keys.",
+				},
+			},
+		},
+		handler: (args) => {
+			return configList(args as Record<string, unknown> as never).then((r) => ({
+				content: [{ type: "text", text: JSON.stringify(r, null, 2) }],
+			}));
 		},
 	});
 

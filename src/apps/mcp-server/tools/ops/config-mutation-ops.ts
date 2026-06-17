@@ -22,7 +22,10 @@
 
 import { agentContextStorage } from "../../../../shared/identity/agent-context.ts";
 import { query } from "../../../../infra/postgres/pool.ts";
-import { getConfigKeyByName } from "../../../../shared/runtime/config-keys.ts";
+import {
+	AllConfigKeys,
+	getConfigKeyByName,
+} from "../../../../shared/runtime/config-keys.ts";
 import {
 	type ConfigKey,
 	getOptional,
@@ -190,5 +193,86 @@ export async function listConfigMutations(
 		limit,
 		offset,
 		count: result.rows.length,
+	};
+}
+
+export interface ConfigKeyDescriptor {
+	name: string;
+	class: string;
+	category: string | null;
+	description: string | null;
+	value: unknown;
+	default_value: unknown;
+	required: boolean;
+	db_table: string | null;
+	scope: string | null;
+	editable: boolean;
+	masked: boolean;
+}
+
+export interface ConfigListRequest {
+	category?: string;
+}
+
+export interface ConfigListResponse {
+	keys: ConfigKeyDescriptor[];
+	count: number;
+	category_filter: string | null;
+}
+
+/**
+ * P3784: enumerate every key in AllConfigKeys with per-key metadata and the
+ * current resolved value. Secret keys are never read — their value is always
+ * null. tenant_dsn keys are structural pointers and also return null (avoids
+ * leaking DSN strings). All other keys resolve via getOptional; errors → null.
+ * Accepts an optional category filter (currently all categories are null since
+ * ConfigKey has no category field yet — filter is accepted for forward compat).
+ */
+export async function configList(
+	req: ConfigListRequest,
+): Promise<ConfigListResponse> {
+	const categoryFilter = req.category?.trim() || null;
+	const keys = Object.values(AllConfigKeys);
+
+	const descriptors: ConfigKeyDescriptor[] = await Promise.all(
+		keys.map(async (key) => {
+			const masked = key.class === "secret";
+			const isTenantDsn = key.class === "tenant_dsn";
+			const editable = key.class === "registry" || key.class === "flag";
+			const category = (key as Record<string, unknown>).category as string | null ?? null;
+
+			let value: unknown = null;
+			if (!masked && !isTenantDsn) {
+				try {
+					value = (await getOptional(key as ConfigKey<unknown>)) ?? null;
+				} catch {
+					value = null;
+				}
+			}
+
+			return {
+				name: key.name,
+				class: key.class,
+				category,
+				description: key.description ?? null,
+				value: masked ? null : value,
+				default_value: (key as Record<string, unknown>).defaultValue ?? null,
+				required: key.required,
+				db_table: (key as Record<string, unknown>).dbTable as string | null ?? null,
+				scope: null,
+				editable,
+				masked,
+			};
+		}),
+	);
+
+	const filtered = categoryFilter
+		? descriptors.filter((d) => d.category === categoryFilter)
+		: descriptors;
+
+	return {
+		keys: filtered,
+		count: filtered.length,
+		category_filter: categoryFilter,
 	};
 }
