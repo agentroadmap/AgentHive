@@ -66,8 +66,16 @@ fi
 #   agent_run has started for DISPATCH_STALE_SECONDS. The RUNNING=0 guard ensures
 #   we never kill a fleet of legitimately long-running workers (a busy system has
 #   running rows even if no NEW run started recently).
+# IMPORTANT: count only WORK-dispatchable maturities (new/active). A 'mature'
+# proposal is gating-pending — it needs a gate decision, NOT a work offer — so
+# the dispatch loop correctly does not post offers for it while auto-gating is
+# paused (implicitGatePollMs=0) and gating-as-job (P3839/P3840) is not yet live.
+# Counting mature rows here produced a FALSE dispatch-stall that restart-looped
+# the orchestrator every ~16min (observed 2026-06-17: 4 mature props, healthy
+# orchestrator, useless restarts). When gating-as-job lands, revisit to include
+# the maturities the unified pool actually posts as offers.
 DISPATCH_STALE_SECONDS="${ORCH_WATCHDOG_DISPATCH_STALE_SECONDS:-600}"
-DISP=$($PG -F'|' -c "SELECT (SELECT count(*) FROM roadmap_proposal.v_dispatchable_proposal), (SELECT count(*) FROM roadmap_workforce.agent_runs WHERE status='running'), COALESCE((SELECT EXTRACT(EPOCH FROM (now()-max(started_at)))::int FROM roadmap_workforce.agent_runs), 999999);" 2>>"$LOG_FILE")
+DISP=$($PG -F'|' -c "SELECT (SELECT count(*) FROM roadmap_proposal.v_dispatchable_proposal WHERE maturity IN ('new','active')), (SELECT count(*) FROM roadmap_workforce.agent_runs WHERE status='running'), COALESCE((SELECT EXTRACT(EPOCH FROM (now()-max(started_at)))::int FROM roadmap_workforce.agent_runs), 999999);" 2>>"$LOG_FILE")
 DISPATCHABLE=$(echo "$DISP" | cut -d'|' -f1)
 RUNNING=$(echo "$DISP" | cut -d'|' -f2)
 RUN_AGE=$(echo "$DISP" | cut -d'|' -f3)
