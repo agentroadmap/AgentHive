@@ -1336,6 +1336,10 @@ export class RoadmapServer {
 			if (pathname === "/api/statuses" && method === "GET")
 				return await this.handleGetStatuses();
 
+			// P3784: config-key registry (must precede /api/config to avoid shadowing)
+			if (pathname === "/api/config/keys" && method === "GET")
+				return await this.handleGetConfigKeys(req);
+
 			if (pathname === "/api/config") {
 				if (method === "GET") return await this.handleGetConfig();
 				if (method === "PUT") return await this.handleUpdateConfig(req);
@@ -2519,6 +2523,28 @@ export class RoadmapServer {
 			console.error("Error updating decision:", error);
 			return Response.json(
 				{ error: "Failed to update decision" },
+				{ status: 500 },
+			);
+		}
+	}
+
+	// P3784: GET /api/config/keys — operator-gated config-key registry.
+	// Delegates to configList core; does NOT shadow GET /api/config (filesystem RoadmapConfig).
+	private async handleGetConfigKeys(req: Request): Promise<Response> {
+		const auth = await requireOperator(req, { action: "config.read" });
+		if (auth.rejected) return auth.rejected;
+		try {
+			const url = new URL(req.url, "http://localhost");
+			const category = url.searchParams.get("category") ?? undefined;
+			const { configList } = await import(
+				"../mcp-server/tools/ops/config-mutation-ops.ts"
+			);
+			const result = await configList({ category });
+			return Response.json(result);
+		} catch (error) {
+			console.error("Error listing config keys:", error);
+			return Response.json(
+				{ error: "Failed to list config keys" },
 				{ status: 500 },
 			);
 		}

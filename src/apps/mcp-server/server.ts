@@ -3224,7 +3224,8 @@ export async function createMcpServer(
 	// P828: Config mutation + audit surface — config_get / config_mutation /
 	// list_config_mutations. Sit on top of ConfigResolver.set() (audited) and
 	// core.config_mutation_log. Routed via mcp_ops in consolidated.ts.
-	const { configGet, configMutation, listConfigMutations } = await import(
+	// P3784: config_list — enumerate AllConfigKeys with per-key metadata + resolved values.
+	const { configGet, configMutation, listConfigMutations, configList } = await import(
 		"./tools/ops/config-mutation-ops.ts"
 	);
 	server.addTool({
@@ -3309,6 +3310,35 @@ export async function createMcpServer(
 					content: [{ type: "text", text: JSON.stringify(r, null, 2) }],
 				}),
 			);
+		},
+	});
+
+	// P3784: Config key introspection — enumerates AllConfigKeys with metadata,
+	// resolved values (secrets masked), editable/masked affordances, optional
+	// category filter. Routed via mcp_ops in consolidated.ts.
+	server.addTool({
+		name: "config_list",
+		description:
+			"P3784: Enumerate every key in AllConfigKeys with per-key metadata " +
+			"(name, class, category, description, default_value, required, db_table, scope) " +
+			"plus derived editable/masked affordances and the current resolved value. " +
+			"Secret keys are NEVER read — value===null, masked===true. " +
+			"Accepts optional category filter. Args: { category? }.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				category: {
+					type: "string",
+					description:
+						"Optional category filter. Only keys whose category matches are returned. " +
+						"Unknown categories yield count===0. Omit to return all keys.",
+				},
+			},
+		},
+		handler: (args) => {
+			return configList((args ?? {}) as { category?: string }).then((r) => ({
+				content: [{ type: "text", text: JSON.stringify(r, null, 2) }],
+			}));
 		},
 	});
 
