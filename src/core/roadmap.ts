@@ -101,6 +101,7 @@ import {
 import { RateLimiter } from "./infrastructure/rate-limiter.ts";
 import { SearchService } from "./infrastructure/search-service.ts";
 import { getBlockingIssues, loadIssues } from "./pipeline/issue-tracker.ts";
+import { ClaimsService } from "./proposal/claims.ts";
 import {
 	isCompleteStatus,
 	isReachedStatus,
@@ -194,6 +195,8 @@ export class Core {
 	private rateLimiter?: RateLimiter;
 	// Postgres row → Proposal hydration (P3796: extracted to postgres/proposal-mapper.ts)
 	private readonly pgHydrator = new PgProposalHydrator();
+	// Claims lifecycle (P3796 AC-15: extracted to ./proposal/claims.ts)
+	private _claims!: ClaimsService;
 
 	constructor(projectRoot: string, options?: { enableWatchers?: boolean }) {
 		this.projectRoot = projectRoot;
@@ -203,6 +206,7 @@ export class Core {
 		// Interactive modes (TUI, browser, MCP) should explicitly pass enableWatchers: true
 		this.enableWatchers = options?.enableWatchers ?? false;
 		// Note: Config is loaded lazily when needed since constructor can't be async
+		this._claims = new ClaimsService(this);
 	}
 
 	getProjectRoot(): string {
@@ -497,7 +501,8 @@ export class Core {
 		return changedProposals;
 	}
 
-	private async isPostgresProposalBackend(
+	/** @internal Used by ClaimsService and other extracted modules. */
+	async isPostgresProposalBackend(
 		config?: RoadmapConfig | null,
 	): Promise<boolean> {
 		const resolvedConfig = config ?? (await this.filesystem.loadConfig());
@@ -693,8 +698,8 @@ export class Core {
 		}
 	}
 
-	/** Ensure Postgres pool is initialised — needed when CLI has no PGPASSWORD env from systemd. */
-	private async ensurePgPool(): Promise<void> {
+	/** @internal Ensure Postgres pool is initialised — needed when CLI has no PGPASSWORD env from systemd. */
+	async ensurePgPool(): Promise<void> {
 		try {
 			await loadRuntimeEnvFile();
 			const config = await this.filesystem.loadConfig();
@@ -719,7 +724,8 @@ export class Core {
 		return availableTypes[0].type;
 	}
 
-	private async loadPgProposalById(
+	/** @internal Load a full Proposal by display-id from Postgres. */
+	async loadPgProposalById(
 		proposalId: string,
 	): Promise<Proposal | null> {
 		await this.ensurePgPool();
@@ -1188,8 +1194,8 @@ export class Core {
 		}
 	}
 
-	private async getRoadmapDirectoryName(): Promise<string> {
-		// Always use "roadmap" as the directory name
+	/** @internal Returns the roadmap directory name (always "roadmap"). */
+	async getRoadmapDirectoryName(): Promise<string> {
 		return DEFAULT_DIRECTORIES.ROADMAP;
 	}
 
@@ -3472,70 +3478,7 @@ export class Core {
 		timeoutMinutes?: number;
 		autoCommit?: boolean;
 	}): Promise<string[]> {
-		if (await this.isPostgresProposalBackend()) {
-			await this.ensurePgPool();
-			const releasedProposalIds = await pg.releaseExpiredLeases();
-			const recoveredIds = (
-				await Promise.all(
-					releasedProposalIds.map(
-						async (proposalId) =>
-							(
-								await pg.getProposal(proposalId)
-							)?.display_id,
-					),
-				)
-			).filter((proposalId): proposalId is string => Boolean(proposalId));
-			return recoveredIds;
-		}
-
-		const config = await this.fs.loadConfig();
-		const timeout = options?.timeoutMinutes ?? config?.activeBranchDays ?? 30; // Fallback to activeBranchDays or 30
-		const now = new Date();
-		const recoveredIds: string[] = [];
-
-		const proposals = await this.queryProposals({ includeCrossBranch: false });
-		const claimedProposals = proposals.filter((s) => s.claim);
-
-		for (const proposal of claimedProposals) {
-			if (!proposal.claim) continue;
-
-			const lastHeartbeat = proposal.claim.lastHeartbeat
-				? new Date(proposal.claim.lastHeartbeat.replace(" ", "T"))
-				: new Date(proposal.claim.created.replace(" ", "T"));
-
-			const diffMinutes = (now.getTime() - lastHeartbeat.getTime()) / 60000;
-
-			if (diffMinutes > timeout) {
-				await this.releaseClaim(proposal.id, proposal.claim.agent, {
-					force: true,
-					autoCommit: false,
-				});
-				recoveredIds.push(proposal.id);
-
-				await this.recordPulse({
-					type: "proposal_created",
-					id: proposal.id,
-					title: proposal.title,
-					impact: `STALE LEASE RECOVERED: Agent ${proposal.claim.agent} missed heartbeat for ${Math.round(
-						diffMinutes,
-					)} minutes.`,
-				});
-			}
-		}
-
-		if (
-			recoveredIds.length > 0 &&
-			(await this.shouldAutoCommit(options?.autoCommit))
-		) {
-			const roadmapDir = await this.getRoadmapDirectoryName();
-			const repoRoot = await this.git.stageRoadmapDirectory(roadmapDir);
-			await this.git.commitChanges(
-				`roadmap: Recovered ${recoveredIds.length} stale leases: ${recoveredIds.join(", ")}`,
-				repoRoot,
-			);
-		}
-
-		return recoveredIds;
+		return this._claims.pruneClaims(options);
 	}
 
 	async updateProposalsBulk(
@@ -3574,202 +3517,15 @@ export class Core {
 			autoCommit?: boolean;
 		},
 	): Promise<Proposal> {
-		if (await this.isPostgresProposalBackend()) {
-			const proposal = await this.loadPgProposalById(proposalId);
-			if (!proposal) {
-				throw new Error(`Proposal not found: ${proposalId}`);
-			}
-
-			if (!options?.force) {
-				const priority = proposal.priority ?? "medium";
-				const rateLimiter = this.getRateLimiter();
-				const check = rateLimiter.canClaim(agent, proposal.id, priority);
-
-				if (!check.allowed) {
-					throw new Error(
-						check.reason ??
-							`Rate limited: too many claims. Retry after ${check.retryAfter}.`,
-					);
-				}
-
-				rateLimiter.recordClaim(agent, proposal.id, priority);
-			}
-
-			await this.ensurePgPool();
-			const resolvedProposalId = await pg.resolveProposalId(proposalId);
-			if (resolvedProposalId === null) {
-				throw new Error(`Proposal not found: ${proposalId}`);
-			}
-
-			const currentSummary = await pg.getProposalSummary(resolvedProposalId);
-			const activeLeaseHeld =
-				Boolean(currentSummary?.leased_by) &&
-				(currentSummary?.lease_expires === null ||
-					currentSummary?.lease_expires === undefined ||
-					new Date(currentSummary.lease_expires) > new Date());
-			const expiresAt = new Date(
-				Date.now() +
-					(options?.durationMinutes ?? DEFAULT_CLAIM_DURATION_MINUTES) *
-						60 *
-						1000,
-			);
-
-			if (!activeLeaseHeld && currentSummary?.leased_by) {
-				// P934: legacy 'expired' replaced with canonical 'lease_expired'.
-				await pg.releaseLease(
-					resolvedProposalId,
-					currentSummary.leased_by,
-					"lease_expired",
-				);
-			}
-
-			if (
-				activeLeaseHeld &&
-				currentSummary?.leased_by &&
-				currentSummary.leased_by !== agent
-			) {
-				if (!options?.force) {
-					throw new Error(
-						`Proposal ${proposalId} is already claimed by ${currentSummary.leased_by}${currentSummary.lease_expires ? ` until ${currentSummary.lease_expires.toISOString()}` : ""}`,
-					);
-				}
-				await pg.releaseLease(
-					resolvedProposalId,
-					currentSummary.leased_by,
-					"reassigned",
-				);
-			}
-
-			if (activeLeaseHeld && currentSummary?.leased_by === agent) {
-				await pg.renewLease(resolvedProposalId, agent, expiresAt);
-			} else {
-				const claimed = await pg.claimLease(
-					resolvedProposalId,
-					agent,
-					expiresAt,
-				);
-				if (!claimed) {
-					throw new Error(`Proposal ${proposalId} could not be claimed.`);
-				}
-			}
-
-			const refreshed = await this.loadPgProposalById(proposalId);
-			if (!refreshed) {
-				throw new Error(`Proposal not found after claim: ${proposalId}`);
-			}
-
-			await this.recordPulse({
-				type: "proposal_claimed",
-				id: refreshed.id,
-				title: refreshed.title,
-				agent,
-			});
-
-			return refreshed;
-		}
-
-		// Check budget before claiming (unless force=true)
-		if (!options?.force) {
-			const proposal = await this.fs.loadProposal(proposalId);
-
-			// Budget guard: check if proposal has a budget limit and agent can afford it
-			if (proposal?.budgetLimitUsd && proposal.budgetLimitUsd > 0) {
-				const budgetConfig = await this.loadBudgetConfig();
-				if (budgetConfig) {
-					const agentBudget = budgetConfig.agents?.[agent];
-					if (agentBudget?.isFrozen) {
-						throw new Error(`Budget: Agent '${agent}' spending is frozen`);
-					}
-					if (agentBudget && agentBudget.dailyLimitUsd > 0) {
-						const remaining =
-							agentBudget.dailyLimitUsd - agentBudget.totalSpentTodayUsd;
-						if (proposal.budgetLimitUsd > remaining) {
-							throw new Error(
-								`Budget exceeded for '${agent}': $${agentBudget.totalSpentTodayUsd.toFixed(2)} spent of $${agentBudget.dailyLimitUsd.toFixed(2)} daily limit (need $${proposal.budgetLimitUsd.toFixed(2)})`,
-							);
-						}
-					}
-				}
-			}
-
-			// STATE-44: Check rate limit before claiming
-			const priority = proposal?.priority ?? "medium";
-			const rateLimiter = this.getRateLimiter();
-			const check = rateLimiter.canClaim(agent, proposalId, priority);
-
-			if (!check.allowed) {
-				throw new Error(
-					check.reason ??
-						`Rate limited: too many claims. Retry after ${check.retryAfter}.`,
-				);
-			}
-
-			// Record the claim for rate limiting
-			rateLimiter.recordClaim(agent, proposalId, priority);
-		}
-
-		return await FileLock.withLock(
-			this.fs.rootDir,
-			"coordination",
-			async () => await this.executeClaimProposal(proposalId, agent, options),
-		);
+		return this._claims.claimProposal(proposalId, agent, options);
 	}
 
-	/**
-	 * Internal claim logic without lock acquisition (must be called within a lock).
-	 */
-	private async executeClaimProposal(
-		proposalId: string,
-		agent: string,
-		options?: {
-			durationMinutes?: number;
-			message?: string;
-			force?: boolean;
-			autoCommit?: boolean;
-		},
-	): Promise<Proposal> {
-		const proposal = await this.fs.loadProposal(proposalId);
-		if (!proposal) throw new Error(`Proposal not found: ${proposalId}`);
-
-		const now = new Date();
-		if (!options?.force && proposal.claim && proposal.claim.agent !== agent) {
-			const expires = new Date(proposal.claim.expires.replace(" ", "T"));
-			if (expires > now) {
-				throw new Error(
-					`Proposal ${proposalId} is already claimed by ${proposal.claim.agent} until ${proposal.claim.expires}`,
-				);
-			}
-		}
-
-		const duration = options?.durationMinutes || DEFAULT_CLAIM_DURATION_MINUTES;
-		const expiresAt = new Date(now.getTime() + duration * 60000);
-
-		const claim: ProposalClaim = {
-			agent,
-			created: formatLocalDateTime(now),
-			expires: formatLocalDateTime(expiresAt),
-			lastHeartbeat: formatLocalDateTime(now),
-			message: options?.message,
-		};
-
-		return await this.updateProposalFromInput(
-			proposalId,
-			{
-				claim,
-				assignee: [agent],
-			},
-			options?.autoCommit,
-		);
-	}
 	/**
 	 * Release a claim on a proposal.
 	 * Throws if the claim is held by another agent unless force is used.
 	 *
 	 * P934: `releaseReason` MUST be a canonical caller-facing reason from
-	 * `src/core/proposal/release-reasons.ts`. When unspecified AND `force`
-	 * is set, defaults to `"force_reclaimed"` (the operator-took-back
-	 * intent). Otherwise the underlying `pg.releaseLease` call rejects
-	 * with InvalidReleaseReasonError.
+	 * `src/core/proposal/release-reasons.ts`.
 	 */
 	async releaseClaim(
 		proposalId: string,
@@ -3780,69 +3536,7 @@ export class Core {
 			releaseReason?: string;
 		},
 	): Promise<Proposal> {
-		if (await this.isPostgresProposalBackend()) {
-			const proposal = await this.loadPgProposalById(proposalId);
-			if (!proposal) throw new Error(`Proposal not found: ${proposalId}`);
-
-			const resolvedProposalId = await pg.resolveProposalId(proposalId);
-			if (resolvedProposalId === null) {
-				throw new Error(`Proposal not found: ${proposalId}`);
-			}
-
-			const summary = await pg.getProposalSummary(resolvedProposalId);
-			const activeLeaseHeld =
-				Boolean(summary?.leased_by) &&
-				(summary?.lease_expires === null ||
-					summary?.lease_expires === undefined ||
-					new Date(summary.lease_expires) > new Date());
-			if (!activeLeaseHeld || !summary?.leased_by) {
-				return proposal;
-			}
-
-			if (!options?.force && summary.leased_by !== agent) {
-				throw new Error(
-					`Proposal ${proposalId} claim is held by ${summary.leased_by}, not ${agent}`,
-				);
-			}
-
-			// P934: caller-supplied releaseReason takes precedence; otherwise map
-			// from the existing semantic. Force mode → 'force_reclaimed' (admin
-			// reclaimed, incomplete bucket). Plain release → require explicit reason
-			// from the caller (default 'manual_release' as a safe-but-explicit value
-			// that matches the prior 'released' behavior of demoting to maturity='new').
-			const releaseReason =
-				options?.releaseReason ??
-				(options?.force ? "force_reclaimed" : "manual_release");
-			const released = await pg.releaseLease(
-				resolvedProposalId,
-				options?.force ? summary.leased_by : agent,
-				releaseReason,
-			);
-			if (!released) {
-				throw new Error(`Proposal ${proposalId} claim could not be released.`);
-			}
-
-			return (await this.loadPgProposalById(proposalId)) ?? proposal;
-		}
-
-		const proposal = await this.fs.loadProposal(proposalId);
-		if (!proposal) throw new Error(`Proposal not found: ${proposalId}`);
-
-		if (!proposal.claim) {
-			return proposal;
-		}
-
-		if (!options?.force && proposal.claim.agent !== agent) {
-			throw new Error(
-				`Proposal ${proposalId} claim is held by ${proposal.claim.agent}, not ${agent}`,
-			);
-		}
-
-		return await this.updateProposalFromInput(
-			proposalId,
-			{ claim: null },
-			options?.autoCommit,
-		);
+		return this._claims.releaseClaim(proposalId, agent, options);
 	}
 
 	/**
@@ -3853,73 +3547,7 @@ export class Core {
 		agent: string,
 		options?: { durationMinutes?: number; autoCommit?: boolean },
 	): Promise<Proposal> {
-		if (await this.isPostgresProposalBackend()) {
-			const proposal = await this.loadPgProposalById(proposalId);
-			if (!proposal) throw new Error(`Proposal not found: ${proposalId}`);
-
-			const resolvedProposalId = await pg.resolveProposalId(proposalId);
-			if (resolvedProposalId === null) {
-				throw new Error(`Proposal not found: ${proposalId}`);
-			}
-
-			const summary = await pg.getProposalSummary(resolvedProposalId);
-			const activeLeaseHeld =
-				Boolean(summary?.leased_by) &&
-				(summary?.lease_expires === null ||
-					summary?.lease_expires === undefined ||
-					new Date(summary.lease_expires) > new Date());
-			if (!activeLeaseHeld || !summary?.leased_by) {
-				throw new Error(`Proposal ${proposalId} has no active claim to renew`);
-			}
-			if (summary.leased_by !== agent) {
-				throw new Error(
-					`Proposal ${proposalId} claim is held by ${summary.leased_by}, not ${agent}`,
-				);
-			}
-
-			const renewed = await pg.renewLease(
-				resolvedProposalId,
-				agent,
-				new Date(
-					Date.now() +
-						(options?.durationMinutes || DEFAULT_CLAIM_DURATION_MINUTES) *
-							60000,
-				),
-			);
-			if (!renewed) {
-				throw new Error(`Proposal ${proposalId} claim could not be renewed.`);
-			}
-
-			return (await this.loadPgProposalById(proposalId)) ?? proposal;
-		}
-
-		const proposal = await this.fs.loadProposal(proposalId);
-		if (!proposal) throw new Error(`Proposal not found: ${proposalId}`);
-
-		if (!proposal.claim) {
-			throw new Error(`Proposal ${proposalId} has no active claim to renew`);
-		}
-
-		if (proposal.claim.agent !== agent) {
-			throw new Error(
-				`Proposal ${proposalId} claim is held by ${proposal.claim.agent}, not ${agent}`,
-			);
-		}
-
-		const now = new Date();
-		const duration = options?.durationMinutes || DEFAULT_CLAIM_DURATION_MINUTES;
-		const expiresAt = new Date(now.getTime() + duration * 60000);
-
-		const claim: ProposalClaim = {
-			...proposal.claim,
-			expires: formatLocalDateTime(expiresAt),
-			lastHeartbeat: formatLocalDateTime(now),
-		};
-		return await this.updateProposalFromInput(
-			proposalId,
-			{ claim },
-			options?.autoCommit,
-		);
+		return this._claims.renewClaim(proposalId, agent, options);
 	}
 
 	async reorderProposal(params: {
@@ -5317,6 +4945,14 @@ export class Core {
 		const pulsePath = join(this.fs.rootDir, "roadmap", "pulse.log");
 		const line = `${JSON.stringify(event)}\n`;
 		fs.appendFileSync(pulsePath, line);
+	}
+
+	/** Add timestamp and emit a pulse event (alias used by extracted modules). */
+	async recordPulse(event: Omit<PulseEvent, "timestamp">): Promise<void> {
+		await this.emitPulse({
+			...event,
+			timestamp: new Date().toISOString().slice(0, 19).replace("T", " "),
+		});
 	}
 
 	/**
