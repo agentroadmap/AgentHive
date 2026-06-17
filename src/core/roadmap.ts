@@ -16,6 +16,11 @@ import {
 } from "../constants/index.ts";
 import { FileSystem } from "../file-system/operations.ts";
 import { GitOperations } from "../git/operations.ts";
+import {
+	parseLegacyInlineArray,
+	parseLegacyYamlValue,
+	stripYamlComment,
+} from "./config/legacy-migration.ts";
 import * as pgPool from "../postgres/pool.ts";
 import type {
 	ProposalAcceptanceCriterionRow,
@@ -1702,79 +1707,6 @@ export class Core {
 	}
 
 	// Config migration
-	private parseLegacyInlineArray(value: string): string[] {
-		const items: string[] = [];
-		let current = "";
-		let quote: '"' | "'" | null = null;
-
-		const pushCurrent = () => {
-			const normalized = current.trim().replace(/\\(['"])/g, "$1");
-			if (normalized) {
-				items.push(normalized);
-			}
-			current = "";
-		};
-
-		for (let i = 0; i < value.length; i += 1) {
-			const ch = value[i];
-			const prev = i > 0 ? value[i - 1] : "";
-			if (quote) {
-				if (ch === quote && prev !== "\\") {
-					quote = null;
-					continue;
-				}
-				current += ch;
-				continue;
-			}
-			if (ch === '"' || ch === "'") {
-				quote = ch;
-				continue;
-			}
-			if (ch === ",") {
-				pushCurrent();
-				continue;
-			}
-			current += ch;
-		}
-		pushCurrent();
-		return items;
-	}
-
-	private stripYamlComment(value: string): string {
-		let quote: '"' | "'" | null = null;
-		for (let i = 0; i < value.length; i += 1) {
-			const ch = value[i];
-			const prev = i > 0 ? value[i - 1] : "";
-			if (quote) {
-				if (ch === quote && prev !== "\\") {
-					quote = null;
-				}
-				continue;
-			}
-			if (ch === '"' || ch === "'") {
-				quote = ch;
-				continue;
-			}
-			if (ch === "#") {
-				return value.slice(0, i).trimEnd();
-			}
-		}
-		return value;
-	}
-
-	private parseLegacyYamlValue(value: string): string {
-		const trimmed = this.stripYamlComment(value).trim();
-		const singleQuoted = trimmed.match(/^'(.*)'$/);
-		if (singleQuoted?.[1] !== undefined) {
-			return singleQuoted[1].replace(/''/g, "'");
-		}
-		const doubleQuoted = trimmed.match(/^"(.*)"$/);
-		if (doubleQuoted?.[1] !== undefined) {
-			return doubleQuoted[1].replace(/\\"/g, '"').replace(/\\'/g, "'");
-		}
-		return trimmed;
-	}
-
 	private async extractLegacyConfigDirectives(): Promise<string[]> {
 		try {
 			const configPath = this.fs.configFilePath;
@@ -1788,13 +1720,13 @@ export class Core {
 				}
 
 				const directiveIndent = (match[1] ?? "").length;
-				const trailing = this.stripYamlComment(match[2] ?? "").trim();
+				const trailing = stripYamlComment(match[2] ?? "").trim();
 				if (trailing.startsWith("[")) {
 					let combined = trailing;
 					let closed = trailing.endsWith("]");
 					let j = i + 1;
 					while (!closed && j < lines.length) {
-						const segment = this.stripYamlComment(lines[j] ?? "").trim();
+						const segment = stripYamlComment(lines[j] ?? "").trim();
 						combined += segment;
 						if (segment.includes("]")) {
 							closed = true;
@@ -1806,17 +1738,17 @@ export class Core {
 						const openIndex = combined.indexOf("[");
 						const closeIndex = combined.lastIndexOf("]");
 						if (openIndex !== -1 && closeIndex > openIndex) {
-							const parsed = this.parseLegacyInlineArray(
+							const parsed = parseLegacyInlineArray(
 								combined.slice(openIndex + 1, closeIndex),
 							);
 							return parsed
-								.map((item) => this.parseLegacyYamlValue(item))
+								.map((item) => parseLegacyYamlValue(item))
 								.filter(Boolean);
 						}
 					}
 				}
 				if (trailing.length > 0) {
-					const single = this.parseLegacyYamlValue(trailing);
+					const single = parseLegacyYamlValue(trailing);
 					return single ? [single] : [];
 				}
 
@@ -1834,7 +1766,7 @@ export class Core {
 					if (!trimmed.startsWith("-")) {
 						continue;
 					}
-					const itemValue = this.parseLegacyYamlValue(trimmed.slice(1));
+					const itemValue = parseLegacyYamlValue(trimmed.slice(1));
 					if (itemValue) {
 						values.push(itemValue);
 					}
