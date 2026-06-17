@@ -6,6 +6,7 @@
  */
 
 import { createServer } from "node:http";
+import { Pool } from "pg";
 import { WebSocket, WebSocketServer } from "ws";
 import {
 	getPool,
@@ -13,9 +14,14 @@ import {
 	setPoolLifecycleMode,
 	startPoolPoisonWatchdog,
 } from "../../infra/postgres/pool.ts";
+import { ConfigResolver } from "../../shared/runtime/config.ts";
 
 let wss: WebSocketServer | null = null;
 const clients = new Set<WebSocket>();
+
+// Dedicated direct-5432 pool for LISTEN — must NOT go through pgbouncer
+// transaction-mode. Shared getPool() stays on 6432 once this is off it.
+let wsListenPool: Pool | null = null;
 
 // ─── Phase 4: Runtime probe for notification_inbox table ─────────────────────
 
@@ -438,8 +444,21 @@ export function startWebSocketServer(port = 3001): void {
 	// LISTEN client errors out after the fact (idle disconnects, PG restart).
 	void (async () => {
 		const setupListener = async (): Promise<void> => {
-			const pool = getPool();
-			const pgClient = await pool.connect();
+			// P3564: use a dedicated direct-5432 pool for LISTEN so the shared
+			// query pool stays on pgbouncer 6432 and eliminates the dual-signature warn.
+			if (!wsListenPool) {
+				const directPort = Number(process.env.PGPORT_DIRECT ?? "5432");
+				wsListenPool = new Pool(
+					ConfigResolver.buildDirectListenPoolConfig(
+						(getPool() as any).options ?? {},
+						directPort,
+					),
+				);
+				wsListenPool.on("error", (err) => {
+					console.error("[WS] LISTEN pool error:", err.message);
+				});
+			}
+			const pgClient = await wsListenPool.connect();
 			pgClient.on("error", (err) => {
 				console.error("[WS] pg_notify client error, will reconnect:", err.message);
 				try { pgClient.release(true); } catch { /* already released */ }
@@ -610,5 +629,6 @@ export function startWebSocketServer(port = 3001): void {
 			snapshotTimer = null;
 		}
 		wss?.close();
+		wsListenPool?.end().catch(() => {});
 	});
 }
