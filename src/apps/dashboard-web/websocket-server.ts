@@ -6,6 +6,7 @@
  */
 
 import { createServer } from "node:http";
+import { Client } from "pg";
 import { WebSocket, WebSocketServer } from "ws";
 import {
 	getPool,
@@ -421,11 +422,20 @@ export function startWebSocketServer(port = 3001): void {
 	// LISTEN client errors out after the fact (idle disconnects, PG restart).
 	void (async () => {
 		const setupListener = async (): Promise<void> => {
-			const pool = getPool();
-			const pgClient = await pool.connect();
+			// P3564: LISTEN must use a dedicated direct-postgres client (not the shared
+			// getPool()) — pgbouncer transaction-mode drops LISTEN state between txns,
+			// and sharing the pool forces it to 5432-direct, polluting query routing.
+			const pgClient = new Client({
+				host: process.env.PGHOST ?? "127.0.0.1",
+				port: Number(process.env.PGPORT_DIRECT ?? process.env.PGPORT ?? 5432),
+				user: process.env.PGUSER,
+				database: process.env.PGDATABASE ?? "agenthive",
+				keepAlive: true,
+			});
+			await pgClient.connect();
 			pgClient.on("error", (err) => {
 				console.error("[WS] pg_notify client error, will reconnect:", err.message);
-				try { pgClient.release(true); } catch { /* already released */ }
+				try { void pgClient.end(); } catch { /* already ended */ }
 				scheduleRetry();
 			});
 			// P753: transition_queued was retired; proposal_maturity_changed +
