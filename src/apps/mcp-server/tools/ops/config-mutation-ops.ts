@@ -1,7 +1,8 @@
 /**
  * P828: Config mutation + audit surface (MCP).
+ * P3784: Config key introspection (config_list).
  *
- * Three operator/system tools that sit on top of the P474/P828
+ * Operator/system tools that sit on top of the P474/P828
  * ConfigResolver.set() audited-mutation core:
  *
  *   config_get            (AC-22) — read a key's current resolved value + scope
@@ -15,14 +16,18 @@
  *                                    present so the audit row always has a caller.
  *   list_config_mutations (AC-25) — paginated read of core.config_mutation_log
  *                                    filtered by (key_name, scope).
+ *   configList            (P3784) — enumerate every key in AllConfigKeys with
+ *                                    per-key metadata, resolved value (never
+ *                                    secret), editable/masked affordances, and
+ *                                    optional category filter.
  *
- * All three target hiveCentral (control plane) via the shared `query()` helper,
+ * All tools target hiveCentral (control plane) via the shared `query()` helper,
  * which already denies `agent` principals and audits pool access.
  */
 
 import { agentContextStorage } from "../../../../shared/identity/agent-context.ts";
 import { query } from "../../../../infra/postgres/pool.ts";
-import { getConfigKeyByName } from "../../../../shared/runtime/config-keys.ts";
+import { AllConfigKeys, getConfigKeyByName } from "../../../../shared/runtime/config-keys.ts";
 import {
 	type ConfigKey,
 	getOptional,
@@ -190,5 +195,91 @@ export async function listConfigMutations(
 		limit,
 		offset,
 		count: result.rows.length,
+	};
+}
+
+// ─── P3784: Config key introspection ─────────────────────────────────────────
+
+export interface ConfigKeyDescriptor {
+	name: string;
+	class: string;
+	category: string | null;
+	description: string | null;
+	default_value: unknown;
+	required: boolean;
+	db_table: string | null;
+	scope: string;
+	editable: boolean;
+	masked: boolean;
+	value: unknown;
+}
+
+export interface ConfigListRequest {
+	category?: string;
+}
+
+export interface ConfigListResponse {
+	keys: ConfigKeyDescriptor[];
+	count: number;
+	category_filter: string | null;
+}
+
+/**
+ * P3784: Enumerate every key in AllConfigKeys with per-key metadata,
+ * resolved value (secrets are never read), editable/masked affordances,
+ * and optional category filter.
+ *
+ * - Secret keys: masked=true, editable=false, value=null — getOptional is
+ *   never called for them (short-circuit before any DB/env read).
+ * - tenant_dsn keys: editable=false, value=null (pool-bound, not resolvable).
+ * - registry/flag keys: editable=true.
+ * - structural/diagnostic keys: editable=false.
+ * - Unresolved/required-but-unset keys: value=null (no throw).
+ * - P3782 null-degradation: category is null when absent on the ConfigKey
+ *   definition (safe pre-P3782 behaviour).
+ */
+export async function configList(
+	req: ConfigListRequest,
+): Promise<ConfigListResponse> {
+	const categoryFilter = req.category ?? null;
+	const descriptors: ConfigKeyDescriptor[] = [];
+
+	for (const key of Object.values(AllConfigKeys) as ConfigKey<unknown>[]) {
+		const masked = key.class === "secret";
+		const editable = key.class === "registry" || key.class === "flag";
+		const category = ((key as unknown as Record<string, unknown>).category as string | null) ?? null;
+
+		if (categoryFilter !== null && category !== categoryFilter) {
+			continue;
+		}
+
+		let value: unknown = null;
+		if (!masked && key.class !== "tenant_dsn") {
+			try {
+				value = (await getOptional(key)) ?? null;
+			} catch {
+				value = null;
+			}
+		}
+
+		descriptors.push({
+			name: key.name,
+			class: key.class,
+			category,
+			description: key.description ?? null,
+			default_value: key.defaultValue !== undefined ? key.defaultValue : null,
+			required: key.required,
+			db_table: key.dbTable ?? null,
+			scope: "global",
+			editable,
+			masked,
+			value,
+		});
+	}
+
+	return {
+		keys: descriptors,
+		count: descriptors.length,
+		category_filter: categoryFilter,
 	};
 }

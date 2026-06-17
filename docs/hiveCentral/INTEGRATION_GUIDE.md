@@ -159,4 +159,4 @@ All files are designed to be **idempotent** (use `CREATE TABLE IF NOT EXISTS`, `
 | 5 | P429 follow-up: migration plan from current single-DB to two-tier topology | P429 COMPLETE (DDL exists, not yet deployed) |
 | 6 | Data migration script: copy existing `roadmap.*` control-plane rows to hiveCentral schemas | Not yet filed |
 
-**Related proposals:** P429 (hiveCentral DDL, COMPLETE), P601 (project schema), P592-P598 (schema proposals), P3793 (gap analysis).
+**Related proposals:** P429 (hiveCentral DDL, COMPLETE), P601 (project schema), P592-P598 (schema proposals), P3793 (gap analysis), P745 (vNext data model umbrella), P821 (V2 single-database architecture), P823 (database baseline), P757 (B3 control-plane table migration), P756 (B2 DB bootstrap), P430-P436 (control DB boundary series).

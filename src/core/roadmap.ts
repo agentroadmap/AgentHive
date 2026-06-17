@@ -16,6 +16,21 @@ import {
 } from "../constants/index.ts";
 import { FileSystem } from "../file-system/operations.ts";
 import { GitOperations } from "../git/operations.ts";
+import {
+	parseLegacyInlineArray,
+	parseLegacyYamlValue,
+	stripYamlComment,
+} from "./config/legacy-migration.ts";
+import {
+	buildPgTags,
+	getPgTagMetadata,
+	getPgTagString,
+	getPgTagStringArray,
+	mapPgAcceptanceCriteria,
+	mapPgLabels,
+	mapPgMaturity,
+	mapPgPriority,
+} from "./postgres/pg-tag-utils.ts";
 import * as pgPool from "../postgres/pool.ts";
 import type {
 	ProposalAcceptanceCriterionRow,
@@ -122,6 +137,11 @@ import {
 	loadRemoteProposals,
 	resolveProposalConflict,
 } from "./storage/proposal-loader.ts";
+import {
+	buildLatestProposalMap,
+	filterProposalsByProposalSnapshots,
+	getActiveAndCompletedIdsFromProposalMap,
+} from "./proposal/snapshot-helpers.ts";
 
 interface BlessedScreen {
 	program: {
@@ -175,102 +195,6 @@ export interface TuiProposalEditResult {
 	changed: boolean;
 	proposal?: Proposal;
 	reason?: TuiProposalEditFailureReason;
-}
-
-function buildLatestProposalMap(
-	proposalEntries: BranchProposalProposalEntry[] = [],
-	localProposals: Array<
-		Proposal & { lastModified?: Date; updatedDate?: string }
-	> = [],
-	localArchivedProposals: Array<
-		Proposal & { lastModified?: Date; updatedDate?: string }
-	> = [],
-): Map<string, BranchProposalProposalEntry> {
-	const latest = new Map<string, BranchProposalProposalEntry>();
-	const isAuthoritativeLocalTerminal = (
-		entry?: BranchProposalProposalEntry,
-	): boolean =>
-		Boolean(
-			entry &&
-				entry.branch === "local" &&
-				(entry.type === "archived" || entry.type === "completed"),
-		);
-	const update = (entry: BranchProposalProposalEntry) => {
-		const existing = latest.get(entry.id);
-		if (isAuthoritativeLocalTerminal(existing)) {
-			return;
-		}
-		if (
-			isAuthoritativeLocalTerminal(entry) ||
-			!existing ||
-			entry.lastModified > existing.lastModified
-		) {
-			latest.set(entry.id, entry);
-		}
-	};
-
-	for (const entry of proposalEntries) {
-		update(entry);
-	}
-
-	for (const proposal of localProposals) {
-		if (!proposal.id) continue;
-		const lastModified =
-			proposal.lastModified ??
-			(proposal.updatedDate ? new Date(proposal.updatedDate) : new Date(0));
-
-		update({
-			id: proposal.id,
-			type: "proposal",
-			branch: "local",
-			path: "",
-			lastModified,
-		});
-	}
-
-	for (const proposal of localArchivedProposals) {
-		if (!proposal.id) continue;
-		const lastModified =
-			proposal.lastModified ??
-			(proposal.updatedDate ? new Date(proposal.updatedDate) : new Date(0));
-
-		update({
-			id: proposal.id,
-			type: "archived",
-			branch: "local",
-			path: "",
-			lastModified,
-		});
-	}
-
-	return latest;
-}
-
-function filterProposalsByProposalSnapshots(
-	proposals: Proposal[],
-	latestProposal: Map<string, BranchProposalProposalEntry>,
-): Proposal[] {
-	return proposals.filter((proposal) => {
-		const latest = latestProposal.get(proposal.id);
-		if (!latest) return true;
-		return latest.type === "proposal";
-	});
-}
-
-/**
- * Extract IDs from proposal map where latest proposal is "proposal" or "completed" (not "archived" or "draft")
- * Used for ID generation to determine which IDs are in use.
- */
-function getActiveAndCompletedIdsFromProposalMap(
-	latestProposal: Map<string, BranchProposalProposalEntry>,
-): string[] {
-	const ids: string[] = [];
-	for (const [id, entry] of latestProposal) {
-		if (entry.type === "proposal" || entry.type === "completed") {
-			ids.push(id);
-		}
-	}
-	return ids;
 }
 
 export class Core {
@@ -594,112 +518,6 @@ export class Core {
 		return resolvedConfig?.database?.provider === "Postgres";
 	}
 
-	private getPgTagMetadata(
-		tags: ProposalRow["tags"],
-	): Record<string, unknown> | null {
-		if (!tags || Array.isArray(tags) || typeof tags !== "object") {
-			return null;
-		}
-		return tags as Record<string, unknown>;
-	}
-
-	private getPgTagString(
-		tags: ProposalRow["tags"],
-		key: string,
-	): string | undefined {
-		const metadata = this.getPgTagMetadata(tags);
-		const value = metadata?.[key];
-		return typeof value === "string" && value.trim().length > 0
-			? value
-			: undefined;
-	}
-
-	private getPgTagStringArray(
-		tags: ProposalRow["tags"],
-		key: string,
-	): string[] | undefined {
-		const metadata = this.getPgTagMetadata(tags);
-		const value = metadata?.[key];
-		if (!Array.isArray(value)) {
-			return undefined;
-		}
-		const normalized = value.map((item) => String(item).trim()).filter(Boolean);
-		return normalized.length > 0 ? normalized : undefined;
-	}
-
-	private buildPgTags(proposal: Proposal): Record<string, unknown> | null {
-		const tags: Record<string, unknown> = {};
-
-		if (proposal.labels.length > 0) tags.labels = [...proposal.labels];
-		if (proposal.directive?.trim()) tags.directive = proposal.directive.trim();
-		if (proposal.domainId?.trim()) tags.domainId = proposal.domainId.trim();
-		if (proposal.category?.trim()) tags.category = proposal.category.trim();
-		if (proposal.references && proposal.references.length > 0)
-			tags.references = [...proposal.references];
-		if (proposal.documentation && proposal.documentation.length > 0)
-			tags.documentation = [...proposal.documentation];
-		if (proposal.proof && proposal.proof.length > 0)
-			tags.proof = [...proposal.proof];
-		if (proposal.needs_capabilities && proposal.needs_capabilities.length > 0) {
-			tags.needs_capabilities = [...proposal.needs_capabilities];
-		}
-		if (
-			proposal.required_capabilities &&
-			proposal.required_capabilities.length > 0
-		) {
-			tags.required_capabilities = [...proposal.required_capabilities];
-		}
-		if (
-			proposal.external_injections &&
-			proposal.external_injections.length > 0
-		) {
-			tags.external_injections = [...proposal.external_injections];
-		}
-		if (proposal.unlocks && proposal.unlocks.length > 0)
-			tags.unlocks = [...proposal.unlocks];
-		if (proposal.rationale?.trim()) tags.rationale = proposal.rationale.trim();
-		if (proposal.implementationNotes?.trim())
-			tags.implementationNotes = proposal.implementationNotes.trim();
-		if (proposal.auditNotes?.trim())
-			tags.auditNotes = proposal.auditNotes.trim();
-		if (proposal.finalSummary?.trim())
-			tags.finalSummary = proposal.finalSummary.trim();
-		if (proposal.scopeSummary?.trim())
-			tags.scopeSummary = proposal.scopeSummary.trim();
-		if (proposal.builder?.trim()) tags.builder = proposal.builder.trim();
-		if (proposal.auditor?.trim()) tags.auditor = proposal.auditor.trim();
-		if (proposal.rawContent?.trim())
-			tags.rawContent = proposal.rawContent.trim();
-		if (
-			proposal.verificationProposalments &&
-			proposal.verificationProposalments.length > 0
-		) {
-			tags.verificationProposalments = proposal.verificationProposalments.map(
-				(item) => ({
-					index: item.index,
-					text: item.text,
-					checked: item.checked,
-					role: item.role,
-					evidence: item.evidence,
-				}),
-			);
-		}
-
-		return Object.keys(tags).length > 0 ? tags : null;
-	}
-
-	private mapPgAcceptanceCriteria(
-		rows: ProposalAcceptanceCriterionRow[],
-	): AcceptanceCriterion[] {
-		return rows.map((row) => ({
-			index: row.item_number,
-			text: row.criterion_text,
-			checked: row.status === "pass",
-			evidence: row.verification_notes ?? undefined,
-			role: row.verified_by ?? undefined,
-		}));
-	}
-
 	private async hydratePgProposalRow(
 		row: ProposalRow,
 		options?: {
@@ -721,13 +539,13 @@ export class Core {
 				!dependency.resolved,
 		);
 		const acceptanceCriteria = options?.acceptanceCriteria ?? [];
-		const metadata = this.getPgTagMetadata(row.tags);
+		const metadata = getPgTagMetadata(row.tags);
 
 		const id = row.display_id || `#${row.id}`;
-		const labels = this.mapPgLabels(row.tags);
+		const labels = mapPgLabels(row.tags);
 		const rawContent = this.buildPgRawContent(row);
-		const maturity = this.mapPgMaturity(row);
-		const priority = this.mapPgPriority(row.priority);
+		const maturity = mapPgMaturity(row);
+		const priority = mapPgPriority(row.priority);
 		const leaseActive =
 			Boolean(summary?.leased_by) &&
 			(summary?.lease_expires === null ||
@@ -768,10 +586,10 @@ export class Core {
 			dependency_note: row.dependency_note || undefined,
 			description: row.summary || undefined,
 			implementationPlan: row.design || undefined,
-			implementationNotes: this.getPgTagString(row.tags, "implementationNotes"),
-			auditNotes: this.getPgTagString(row.tags, "auditNotes"),
-			finalSummary: this.getPgTagString(row.tags, "finalSummary"),
-			scopeSummary: this.getPgTagString(row.tags, "scopeSummary"),
+			implementationNotes: getPgTagString(row.tags, "implementationNotes"),
+			auditNotes: getPgTagString(row.tags, "auditNotes"),
+			finalSummary: getPgTagString(row.tags, "finalSummary"),
+			scopeSummary: getPgTagString(row.tags, "scopeSummary"),
 			createdDate: row.created_at
 				? new Date(row.created_at)
 						.toISOString()
@@ -785,32 +603,32 @@ export class Core {
 						.replace("T", " ")
 				: undefined,
 			proposalType: row.type,
-			domainId: this.getPgTagString(row.tags, "domainId"),
-			category: this.getPgTagString(row.tags, "category"),
-			directive: this.getPgTagString(row.tags, "directive"),
-			references: this.getPgTagStringArray(row.tags, "references"),
-			documentation: this.getPgTagStringArray(row.tags, "documentation"),
-			proof: this.getPgTagStringArray(row.tags, "proof"),
-			needs_capabilities: this.getPgTagStringArray(
+			domainId: getPgTagString(row.tags, "domainId"),
+			category: getPgTagString(row.tags, "category"),
+			directive: getPgTagString(row.tags, "directive"),
+			references: getPgTagStringArray(row.tags, "references"),
+			documentation: getPgTagStringArray(row.tags, "documentation"),
+			proof: getPgTagStringArray(row.tags, "proof"),
+			needs_capabilities: getPgTagStringArray(
 				row.tags,
 				"needs_capabilities",
 			),
-			required_capabilities: this.getPgTagStringArray(
+			required_capabilities: getPgTagStringArray(
 				row.tags,
 				"required_capabilities",
 			),
-			external_injections: this.getPgTagStringArray(
+			external_injections: getPgTagStringArray(
 				row.tags,
 				"external_injections",
 			),
-			unlocks: this.getPgTagStringArray(row.tags, "unlocks"),
-			rationale: this.getPgTagString(row.tags, "rationale"),
-			builder: this.getPgTagString(row.tags, "builder"),
-			auditor: this.getPgTagString(row.tags, "auditor"),
+			unlocks: getPgTagStringArray(row.tags, "unlocks"),
+			rationale: getPgTagString(row.tags, "rationale"),
+			builder: getPgTagString(row.tags, "builder"),
+			auditor: getPgTagString(row.tags, "auditor"),
 			...(parentProposalId && { parentProposalId }),
 			...(acceptanceCriteria.length > 0 && {
 				acceptanceCriteriaItems:
-					this.mapPgAcceptanceCriteria(acceptanceCriteria),
+					mapPgAcceptanceCriteria(acceptanceCriteria),
 			}),
 			...(summary?.leased_by && leaseActive && claimCreated && claimExpires
 				? {
@@ -889,7 +707,7 @@ export class Core {
 	}
 
 	private buildPgRawContent(row: ProposalRow): string {
-		const rawContent = this.getPgTagString(row.tags, "rawContent");
+		const rawContent = getPgTagString(row.tags, "rawContent");
 		const sections = [
 			["Summary", row.summary],
 			["Motivation", row.motivation],
@@ -916,85 +734,6 @@ export class Core {
 		return rawContent && rawContent.trim().length > 0
 			? `${built}\n\n${rawContent.trim()}`
 			: built;
-	}
-
-	private mapPgLabels(tags: ProposalRow["tags"]): string[] {
-		const metadataPrefixes = [
-			"labels:",
-			"directive:",
-			"domainid:",
-			"category:",
-			"references:",
-			"documentation:",
-			"proof:",
-			"needs_capabilities:",
-			"required_capabilities:",
-			"external_injections:",
-			"unlocks:",
-			"rationale:",
-			"implementationnotes:",
-			"auditnotes:",
-			"finalsummary:",
-			"scopesummary:",
-			"builder:",
-			"auditor:",
-			"rawcontent:",
-		];
-		const sanitizeLabels = (labels: string[]): string[] =>
-			labels
-				.map((label) => label.trim())
-				.filter(
-					(label) =>
-						label.length > 0 &&
-						label !== "[object Object]" &&
-						!label.includes("\n") &&
-						!metadataPrefixes.some((prefix) =>
-							label.toLowerCase().startsWith(prefix),
-						),
-				);
-
-		if (!tags) {
-			return [];
-		}
-
-		const explicitLabels = this.getPgTagStringArray(tags, "labels");
-		if (explicitLabels) {
-			return sanitizeLabels(explicitLabels);
-		}
-
-		if (Array.isArray(tags)) {
-			return sanitizeLabels(tags.map((tag) => String(tag)));
-		}
-
-		return sanitizeLabels([String(tags)]);
-	}
-
-	private mapPgMaturity(row: ProposalRow): Proposal["maturity"] | undefined {
-		// maturity is now a direct TEXT column — no JSONB parsing needed
-		const state = row.maturity;
-		if (!state) return undefined;
-		switch (state) {
-			case "new":
-			case "active":
-			case "mature":
-			case "obsolete":
-				return state;
-			default:
-				return undefined;
-		}
-	}
-
-	private mapPgPriority(
-		priority: string | null,
-	): Proposal["priority"] | undefined {
-		switch (priority?.toLowerCase()) {
-			case "high":
-			case "medium":
-			case "low":
-				return priority.toLowerCase() as Proposal["priority"];
-			default:
-				return undefined;
-		}
 	}
 
 	private async loadPgProposalActivity(
@@ -1702,79 +1441,6 @@ export class Core {
 	}
 
 	// Config migration
-	private parseLegacyInlineArray(value: string): string[] {
-		const items: string[] = [];
-		let current = "";
-		let quote: '"' | "'" | null = null;
-
-		const pushCurrent = () => {
-			const normalized = current.trim().replace(/\\(['"])/g, "$1");
-			if (normalized) {
-				items.push(normalized);
-			}
-			current = "";
-		};
-
-		for (let i = 0; i < value.length; i += 1) {
-			const ch = value[i];
-			const prev = i > 0 ? value[i - 1] : "";
-			if (quote) {
-				if (ch === quote && prev !== "\\") {
-					quote = null;
-					continue;
-				}
-				current += ch;
-				continue;
-			}
-			if (ch === '"' || ch === "'") {
-				quote = ch;
-				continue;
-			}
-			if (ch === ",") {
-				pushCurrent();
-				continue;
-			}
-			current += ch;
-		}
-		pushCurrent();
-		return items;
-	}
-
-	private stripYamlComment(value: string): string {
-		let quote: '"' | "'" | null = null;
-		for (let i = 0; i < value.length; i += 1) {
-			const ch = value[i];
-			const prev = i > 0 ? value[i - 1] : "";
-			if (quote) {
-				if (ch === quote && prev !== "\\") {
-					quote = null;
-				}
-				continue;
-			}
-			if (ch === '"' || ch === "'") {
-				quote = ch;
-				continue;
-			}
-			if (ch === "#") {
-				return value.slice(0, i).trimEnd();
-			}
-		}
-		return value;
-	}
-
-	private parseLegacyYamlValue(value: string): string {
-		const trimmed = this.stripYamlComment(value).trim();
-		const singleQuoted = trimmed.match(/^'(.*)'$/);
-		if (singleQuoted?.[1] !== undefined) {
-			return singleQuoted[1].replace(/''/g, "'");
-		}
-		const doubleQuoted = trimmed.match(/^"(.*)"$/);
-		if (doubleQuoted?.[1] !== undefined) {
-			return doubleQuoted[1].replace(/\\"/g, '"').replace(/\\'/g, "'");
-		}
-		return trimmed;
-	}
-
 	private async extractLegacyConfigDirectives(): Promise<string[]> {
 		try {
 			const configPath = this.fs.configFilePath;
@@ -1788,13 +1454,13 @@ export class Core {
 				}
 
 				const directiveIndent = (match[1] ?? "").length;
-				const trailing = this.stripYamlComment(match[2] ?? "").trim();
+				const trailing = stripYamlComment(match[2] ?? "").trim();
 				if (trailing.startsWith("[")) {
 					let combined = trailing;
 					let closed = trailing.endsWith("]");
 					let j = i + 1;
 					while (!closed && j < lines.length) {
-						const segment = this.stripYamlComment(lines[j] ?? "").trim();
+						const segment = stripYamlComment(lines[j] ?? "").trim();
 						combined += segment;
 						if (segment.includes("]")) {
 							closed = true;
@@ -1806,17 +1472,17 @@ export class Core {
 						const openIndex = combined.indexOf("[");
 						const closeIndex = combined.lastIndexOf("]");
 						if (openIndex !== -1 && closeIndex > openIndex) {
-							const parsed = this.parseLegacyInlineArray(
+							const parsed = parseLegacyInlineArray(
 								combined.slice(openIndex + 1, closeIndex),
 							);
 							return parsed
-								.map((item) => this.parseLegacyYamlValue(item))
+								.map((item) => parseLegacyYamlValue(item))
 								.filter(Boolean);
 						}
 					}
 				}
 				if (trailing.length > 0) {
-					const single = this.parseLegacyYamlValue(trailing);
+					const single = parseLegacyYamlValue(trailing);
 					return single ? [single] : [];
 				}
 
@@ -1834,7 +1500,7 @@ export class Core {
 					if (!trimmed.startsWith("-")) {
 						continue;
 					}
-					const itemValue = this.parseLegacyYamlValue(trimmed.slice(1));
+					const itemValue = parseLegacyYamlValue(trimmed.slice(1));
 					if (itemValue) {
 						values.push(itemValue);
 					}
@@ -2493,7 +2159,7 @@ export class Core {
 							? proposal.dependencies.join(", ")
 							: null),
 					priority: proposal.priority ?? null,
-					tags: this.buildPgTags(proposal),
+					tags: buildPgTags(proposal),
 				},
 				proposal.builder ??
 					proposal.auditor ??
@@ -2652,7 +2318,7 @@ export class Core {
 						? proposal.dependencies.join(", ")
 						: null),
 				priority: proposal.priority ?? null,
-				tags: this.buildPgTags(proposal),
+				tags: buildPgTags(proposal),
 			});
 
 			const dependencyIds = (

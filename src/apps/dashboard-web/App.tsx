@@ -28,6 +28,7 @@ import PlatformView from "./components/PlatformView";
 import PortfolioHome from "./components/PortfolioHome";
 import ProposalDetailsModal from "./components/ProposalDetailsModal";
 import ProposalsPage from "./components/ProposalsPage";
+import ConfigPage from "./components/ConfigPage";
 import RoutesPage from "./components/RoutesPage";
 import SettingsPage from "./components/SettingsPage";
 import StatisticsPage from "./components/StatisticsPage";
@@ -406,6 +407,9 @@ export default function App() {
 						</Route>
 						<Route path="/achievements">
 							<AchievementsView proposals={sharedProposals} />
+						</Route>
+						<Route path="/config">
+							<ConfigPage />
 						</Route>
 						<Route path="*">
 							<NotFoundPage />

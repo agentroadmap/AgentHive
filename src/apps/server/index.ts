@@ -14,22 +14,38 @@ import {
 import { join } from "node:path";
 import type { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { type WebSocket, WebSocketServer } from "ws";
-import { initializeProject } from "../../core/infrastructure/init.ts";
-import { agentNotifyChannel } from "../../infra/messaging/a2a-access-control.ts";
 import type { SearchService } from "../../core/infrastructure/search-service.ts";
-import { getProposalStatistics } from "../../core/infrastructure/statistics.ts";
 import { Core } from "../../core/roadmap.ts";
 import type { ContentStore } from "../../core/storage/content-store.ts";
 import { createMcpServer, type McpServer } from "../../mcp/server.ts";
 import { handleDirectMcpRequest } from "../mcp-server/http-compat.ts";
+import type { ServerContext } from "./server-context.ts";
+import {
+	handleHealthz,
+	handleSmoke,
+	handleGetVersion,
+	handleGetStatus,
+	handleGetStatistics,
+	handleGetStatuses,
+	handleGetConfig,
+	handleUpdateConfig,
+	handleListProjects,
+	handleInit,
+	handleGetArchDocs,
+	handleGetSla,
+	handleMetrics,
+} from "./routes/system.ts";
+import {
+	handleSearch as handleSearchRoute,
+	handleListKnowledge as handleListKnowledgeRoute,
+	handleMarkKnowledgeHelpful as handleMarkKnowledgeHelpfulRoute,
+} from "./routes/search-knowledge.ts";
 import { RfcStates, getView, getRegistry } from "../../core/workflow/state-names.ts";
 import { loadStageRegistry } from "../../core/workflow/stage-registry.ts";
 import type {
 	Proposal,
 	ProposalMaturity,
 	ProposalUpdateInput,
-	SearchPriorityFilter,
-	SearchResultType,
 } from "../../types/index.ts";
 import { watchConfig } from "../../utils/config-watcher.ts";
 import { formatVersionLabel, getVersionInfo } from "../../utils/version.ts";
@@ -54,10 +70,6 @@ import { hashOperatorToken, requireOperator } from "./operator-auth.ts";
 import { projectCreate } from "../mcp-server/tools/projects/lifecycle-handlers.ts";
 import { agentContextStorage, type VerifiedPrincipal } from "../../shared/identity/agent-context.ts";
 import { verifyBoundBearer } from "../../core/identity/principal-identity.ts";
-import {
-	generateArchitectureDocs,
-	checkStale,
-} from "../../core/infrastructure/architecture-reconstructor.ts";
 import {
 	listActiveDispatches,
 	listAgencies as listAgenciesControl,
@@ -1130,6 +1142,7 @@ export class RoadmapServer {
 					"/activity",
 					"/dispatches",
 					"/control",
+					"/config",
 				].some((p) => pathname === p || pathname.startsWith(`${p}/`)))
 		) {
 			return new Response(indexHtml, {
@@ -1383,6 +1396,14 @@ export class RoadmapServer {
 			if (pathname === "/api/statuses" && method === "GET")
 				return await this.handleGetStatuses();
 
+			// P3784: config-key registry (must precede /api/config to avoid shadowing)
+			if (pathname === "/api/config/keys" && method === "GET")
+				return await this.handleGetConfigKeys(req);
+
+			// P3785: audited config key mutation (must precede /api/config to avoid shadowing)
+			if (pathname.startsWith("/api/config/") && pathname !== "/api/config/keys" && method === "PUT")
+				return await this.handlePutConfigKey(req, pathname.slice("/api/config/".length));
+
 			if (pathname === "/api/config") {
 				if (method === "GET") return await this.handleGetConfig();
 				if (method === "PUT") return await this.handleUpdateConfig(req);
@@ -1465,21 +1486,8 @@ export class RoadmapServer {
 				return await this.handleGetStatus();
 
 			// P081: SLA contract endpoint
-			if (pathname === "/api/sla" && method === "GET") {
-				try {
-					const { serveSlaContract } = await import("./sla-metrics.ts");
-					const contract = serveSlaContract();
-					return new Response(JSON.stringify(contract, null, 2), {
-						status: 200,
-						headers: { "Content-Type": "application/json" },
-					});
-				} catch (err) {
-					return new Response(JSON.stringify({ error: "SLA contract unavailable" }), {
-						status: 503,
-						headers: { "Content-Type": "application/json" },
-					});
-				}
-			}
+			if (pathname === "/api/sla" && method === "GET")
+				return await this.handleGetSla();
 			if (pathname === "/api/init" && method === "POST")
 				return await this.handleInit(req);
 			if (pathname === "/api/search" && method === "GET")
@@ -1505,8 +1513,6 @@ export class RoadmapServer {
 				return await this.handleMarkKnowledgeHelpful(id);
 			}
 
-			if (pathname === "/api/sla" && method === "GET")
-				return await this.handleGetSla();
 		}
 
 		// Metrics endpoint (outside /api/ prefix for Prometheus scraping convention)
@@ -1602,86 +1608,75 @@ export class RoadmapServer {
 		}
 	}
 
-	// P446 AC-4: GET /healthz
+	// P446 AC-4: GET /healthz — extracted to routes/system.ts
 	private async handleHealthz(): Promise<Response> {
-		let dbStatus: "ok" | "error" = "error";
-		let schemaVersion: string | null = null;
-		let dbErrorMessage: string | undefined;
-		try {
-			const pool = getPool();
-			const [pingResult, migResult] = await Promise.all([
-				pool.query("SELECT 1"),
-				pool.query<{ filename: string }>(
-					"SELECT filename FROM roadmap.migration_history WHERE status = 'applied' ORDER BY applied_at DESC LIMIT 1",
-				).catch(() => null),
-			]);
-			if (pingResult.rowCount && pingResult.rowCount > 0) dbStatus = "ok";
-			if (migResult && migResult.rows.length > 0) {
-				schemaVersion = migResult.rows[0].filename;
-			}
-		} catch (err) {
-			dbErrorMessage = err instanceof Error ? err.message : String(err);
-		}
-
-		const { version, revision } = await getVersionInfo();
-		const dbHost = process.env.PGHOST ?? "127.0.0.1";
-		const dbName = process.env.PGDATABASE ?? "agenthive";
-		const schema = process.env.PG_SCHEMA ?? "roadmap";
-
-		const body: Record<string, unknown> = {
-			service: "ok",
-			db: dbStatus,
-			schema_version: schemaVersion,
-			git_revision: revision,
-			app_version: version,
-			project_root: this.core.filesystem.rootDir,
-			db_host: dbHost,
-			db_name: dbName,
-			schema,
-			started_at: this._startedAt.toISOString(),
-			mcp_protocol_version: "2024-11-05",
-		};
-		if (dbErrorMessage !== undefined) {
-			body.db_error = dbErrorMessage;
-		}
-
-		return Response.json(body, { status: 200 });
+		return handleHealthz(this.serverContext());
 	}
 
-	// P446 AC-5: POST /smoke
+	// P446 AC-5: POST /smoke — extracted to routes/system.ts
 	private async handleSmoke(): Promise<Response> {
-		if (!this.mcpServer) {
-			return Response.json(
-				{ error: "MCP server not available" },
-				{ status: 503 },
-			);
-		}
+		return handleSmoke(this.serverContext());
+	}
 
-		const smokeServer = this.mcpServer as McpServer;
-		const t0 = Date.now();
-		const steps: Array<{ name: string; elapsed_ms: number; result: "ok" | "error"; detail?: string }> = [];
+	// Extracted to routes/system.ts
+	private async handleGetVersion(): Promise<Response> {
+		return handleGetVersion();
+	}
 
-		const step = async (name: string, payload: unknown) => {
-			const stepStart = Date.now();
-			try {
-				const res = await handleDirectMcpRequest(smokeServer, payload);
-				const elapsed_ms = Date.now() - stepStart;
-				const isError = res.status >= 400 || ("error" in (res.body as object));
-				steps.push({ name, elapsed_ms, result: isError ? "error" : "ok" });
-			} catch (err) {
-				const elapsed_ms = Date.now() - stepStart;
-				const detail = err instanceof Error ? err.message : String(err);
-				steps.push({ name, elapsed_ms, result: "error", detail });
-			}
+	private async handleGetStatus(): Promise<Response> {
+		return handleGetStatus(this.serverContext());
+	}
+
+	private async handleGetStatistics(): Promise<Response> {
+		return handleGetStatistics(this.serverContext());
+	}
+
+	private async handleGetStatuses(): Promise<Response> {
+		return handleGetStatuses(this.serverContext());
+	}
+
+	private async handleGetConfig(): Promise<Response> {
+		return handleGetConfig(this.serverContext());
+	}
+
+	private async handleListProjects(): Promise<Response> {
+		return handleListProjects();
+	}
+
+	private async handleGetArchDocs(): Promise<Response> {
+		return handleGetArchDocs();
+	}
+
+	private async handleGetSla(): Promise<Response> {
+		return handleGetSla();
+	}
+
+	private async handleMetrics(): Promise<Response> {
+		return handleMetrics();
+	}
+
+	private async handleInit(req: Request): Promise<Response> {
+		return handleInit(req, this.serverContext());
+	}
+
+	private async handleUpdateConfig(req: Request): Promise<Response> {
+		return handleUpdateConfig(req, this.serverContext());
+	}
+
+	/** Build the narrow ServerContext passed to extracted route handlers. */
+	private serverContext(): ServerContext {
+		return {
+			core: this.core,
+			startedAt: this._startedAt,
+			mcpServer: this.mcpServer,
+			onProjectInitialized: (name: string) => {
+				this.projectName = name;
+				this.contentStore?.ensureConfigWatcher();
+			},
+			broadcastUpdate: () => {
+				this.broadcastProposalsUpdated();
+			},
 		};
-
-		await step("initialize", { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "smoke", version: "0" } } });
-		await step("tools/list", { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
-		await step("tools/call", { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "mcp_project", arguments: { action: "list_actions" } } });
-
-		const total_ms = Date.now() - t0;
-		const allOk = steps.every((s) => s.result === "ok");
-		return Response.json({ steps, total_ms }, { status: allOk ? 200 : 207 });
 	}
 
 	private async handleRequest(req: Request): Promise<Response> {
@@ -1786,113 +1781,7 @@ export class RoadmapServer {
 	}
 
 	private async handleSearch(req: Request): Promise<Response> {
-		try {
-			const searchService = await this.getSearchServiceInstance();
-			const url = new URL(req.url);
-			const query = url.searchParams.get("query") ?? undefined;
-			const limitParam = url.searchParams.get("limit");
-			const typeParams = [
-				...url.searchParams.getAll("type"),
-				...url.searchParams.getAll("types"),
-			];
-			const statusParams = url.searchParams.getAll("status");
-			const priorityParamsRaw = url.searchParams.getAll("priority");
-			const labelParamsRaw = [
-				...url.searchParams.getAll("label"),
-				...url.searchParams.getAll("labels"),
-			];
-			const labelsCsv = url.searchParams.get("labels");
-			if (labelsCsv) {
-				labelParamsRaw.push(...labelsCsv.split(","));
-			}
-
-			let limit: number | undefined;
-			if (limitParam) {
-				const parsed = Number.parseInt(limitParam, 10);
-				if (Number.isNaN(parsed) || parsed <= 0) {
-					return Response.json(
-						{ error: "limit must be a positive integer" },
-						{ status: 400 },
-					);
-				}
-				limit = parsed;
-			}
-
-			let types: SearchResultType[] | undefined;
-			if (typeParams.length > 0) {
-				const allowed: SearchResultType[] = [
-					"proposal",
-					"document",
-					"decision",
-				];
-				const normalizedTypes = typeParams
-					.map((value) => value.toLowerCase())
-					.filter((value): value is SearchResultType => {
-						return allowed.includes(value as SearchResultType);
-					});
-				if (normalizedTypes.length === 0) {
-					return Response.json(
-						{ error: "type must be proposal, document, or decision" },
-						{ status: 400 },
-					);
-				}
-				types = normalizedTypes;
-			}
-
-			const filters: {
-				status?: string | string[];
-				priority?: SearchPriorityFilter | SearchPriorityFilter[];
-				labels?: string | string[];
-			} = {};
-
-			if (statusParams.length === 1) {
-				filters.status = statusParams[0];
-			} else if (statusParams.length > 1) {
-				filters.status = statusParams;
-			}
-
-			if (priorityParamsRaw.length > 0) {
-				const allowedPriorities: SearchPriorityFilter[] = [
-					"high",
-					"medium",
-					"low",
-				];
-				const normalizedPriorities = priorityParamsRaw.map((value) =>
-					value.toLowerCase(),
-				);
-				const invalidPriority = normalizedPriorities.find(
-					(value) => !allowedPriorities.includes(value as SearchPriorityFilter),
-				);
-				if (invalidPriority) {
-					return Response.json(
-						{
-							error: `Unsupported priority '${invalidPriority}'. Use high, medium, or low.`,
-						},
-						{ status: 400 },
-					);
-				}
-				const casted = normalizedPriorities as SearchPriorityFilter[];
-				filters.priority = casted.length === 1 ? casted[0] : casted;
-			}
-
-			if (labelParamsRaw.length > 0) {
-				const normalizedLabels = labelParamsRaw
-					.map((value) => value.trim())
-					.filter((value) => value.length > 0);
-				if (normalizedLabels.length > 0) {
-					filters.labels =
-						normalizedLabels.length === 1
-							? normalizedLabels[0]
-							: normalizedLabels;
-				}
-			}
-
-			const results = searchService.search({ query, limit, types, filters });
-			return Response.json(results);
-		} catch (error) {
-			console.error("Error performing search:", error);
-			return Response.json({ error: "Search failed" }, { status: 500 });
-		}
+		return handleSearchRoute(req, this.serverContext());
 	}
 
 	private async handleCreateProposal(req: Request): Promise<Response> {
@@ -2374,18 +2263,6 @@ export class RoadmapServer {
 		}
 	}
 
-	private async handleGetStatuses(): Promise<Response> {
-		const config = await this.core.filesystem.loadConfig();
-		const statuses = config?.statuses || [
-			"Draft",
-			"Review",
-			"Develop",
-			"Merge",
-			"Complete",
-		];
-		return Response.json(statuses);
-	}
-
 	// Documentation handlers
 	private async handleListDocs(): Promise<Response> {
 		try {
@@ -2571,65 +2448,50 @@ export class RoadmapServer {
 		}
 	}
 
-	private async handleGetConfig(): Promise<Response> {
+	// P3784: GET /api/config/keys — operator-gated config-key registry.
+	// Delegates to configList core; does NOT shadow GET /api/config (filesystem RoadmapConfig).
+	private async handleGetConfigKeys(req: Request): Promise<Response> {
+		const auth = await requireOperator(req, { action: "config.read" });
+		if (auth.rejected) return auth.rejected;
 		try {
-			const config = await this.core.filesystem.loadConfig();
-			if (!config) {
-				return Response.json(
-					{ error: "Configuration not found" },
-					{ status: 404 },
-				);
-			}
-			return Response.json(config);
+			const url = new URL(req.url, "http://localhost");
+			const category = url.searchParams.get("category") ?? undefined;
+			const { configList } = await import(
+				"../mcp-server/tools/ops/config-mutation-ops.ts"
+			);
+			const result = await configList({ category });
+			return Response.json(result);
 		} catch (error) {
-			console.error("Error loading config:", error);
+			console.error("Error listing config keys:", error);
 			return Response.json(
-				{ error: "Failed to load configuration" },
+				{ error: "Failed to list config keys" },
 				{ status: 500 },
 			);
 		}
 	}
 
-	private async handleUpdateConfig(req: Request): Promise<Response> {
+	// P3785: PUT /api/config/:keyName — operator-gated audited config mutation.
+	private async handlePutConfigKey(req: Request, keyName: string): Promise<Response> {
+		const decodedKey = decodeURIComponent(keyName);
+		const auth = await requireOperator(req, { action: "config.write" });
+		if (auth.rejected) return auth.rejected;
+		const principal_id = auth.outcome.operatorName ?? "operator";
 		try {
-			const updatedConfig = await req.json();
-
-			// Validate configuration
-			if (!updatedConfig.projectName?.trim()) {
-				return Response.json(
-					{ error: "Project name is required" },
-					{ status: 400 },
-				);
+			const body = await req.json() as { value: unknown };
+			if (body == null || !("value" in body)) {
+				return Response.json({ error: "Request body must include `value`" }, { status: 400 });
 			}
-
-			if (
-				updatedConfig.defaultPort &&
-				(updatedConfig.defaultPort < 1 || updatedConfig.defaultPort > 65535)
-			) {
-				return Response.json(
-					{ error: "Port must be between 1 and 65535" },
-					{ status: 400 },
-				);
-			}
-
-			// Save configuration
-			await this.core.filesystem.saveConfig(updatedConfig);
-
-			// Update local project name if changed
-			if (updatedConfig.projectName !== this.projectName) {
-				this.projectName = updatedConfig.projectName;
-			}
-
-			// Notify connected clients so that they refresh configuration-dependent data (e.g., statuses)
-			this.broadcastProposalsUpdated();
-
-			return Response.json(updatedConfig);
-		} catch (error) {
-			console.error("Error updating config:", error);
-			return Response.json(
-				{ error: "Failed to update configuration" },
-				{ status: 500 },
+			const { configMutation } = await import(
+				"../mcp-server/tools/ops/config-mutation-ops.ts"
 			);
+			const result = await agentContextStorage.run(
+				{ verified: { principal_id, principal_kind: "operator" as const } },
+				() => configMutation({ key_name: decodedKey, value: body.value }),
+			);
+			return Response.json(result);
+		} catch (error) {
+			const msg = error instanceof Error ? error.message : "Unknown error";
+			return Response.json({ error: msg }, { status: 400 });
 		}
 	}
 
@@ -2787,17 +2649,6 @@ export class RoadmapServer {
 				error instanceof Error ? error.message : "Failed to archive directive";
 			console.error("Error archiving directive:", error);
 			return Response.json({ error: message }, { status: 500 });
-		}
-	}
-
-	private async handleGetVersion(): Promise<Response> {
-		try {
-			const versionInfo = await getVersionInfo();
-			const version = formatVersionLabel(versionInfo);
-			return Response.json({ version });
-		} catch (error) {
-			console.error("Error getting version:", error);
-			return Response.json({ error: "Failed to get version" }, { status: 500 });
 		}
 	}
 
@@ -3008,114 +2859,6 @@ export class RoadmapServer {
 		} catch (error) {
 			const message = (error as Error)?.message || "Invalid request";
 			return Response.json({ error: message }, { status: 400 });
-		}
-	}
-
-	private async handleGetStatistics(): Promise<Response> {
-		try {
-			// Load proposals using the same logic as CLI overview
-			const { proposals, drafts, statuses } =
-				await this.core.loadAllProposalsForStatistics();
-
-			// Calculate statistics using the exact same function as CLI
-			const statistics = getProposalStatistics(proposals, drafts, statuses);
-
-			// Convert Maps to objects for JSON serialization
-			const response = {
-				...statistics,
-				statusCounts: Object.fromEntries(statistics.statusCounts),
-				priorityCounts: Object.fromEntries(statistics.priorityCounts),
-			};
-
-			return Response.json(response);
-		} catch (error) {
-			console.error("Error getting statistics:", error);
-			return Response.json(
-				{ error: "Failed to get statistics" },
-				{ status: 500 },
-			);
-		}
-	}
-
-	private async handleGetStatus(): Promise<Response> {
-		try {
-			const config = await this.core.filesystem.loadConfig();
-			return Response.json({
-				initialized: !!config,
-				projectPath: this.core.filesystem.rootDir,
-			});
-		} catch (error) {
-			console.error("Error getting status:", error);
-			return Response.json({
-				initialized: false,
-				projectPath: this.core.filesystem.rootDir,
-			});
-		}
-	}
-
-	private async handleInit(req: Request): Promise<Response> {
-		try {
-			const body = await req.json();
-			const projectName =
-				typeof body.projectName === "string" ? body.projectName.trim() : "";
-			const integrationMode = body.integrationMode as
-				| "mcp"
-				| "cli"
-				| "none"
-				| undefined;
-			const mcpClients = Array.isArray(body.mcpClients) ? body.mcpClients : [];
-			const agentInstructions = Array.isArray(body.agentInstructions)
-				? body.agentInstructions
-				: [];
-			const installClaudeAgentFlag = Boolean(body.installClaudeAgent);
-			const advancedConfig = body.advancedConfig || {};
-
-			// Input validation (browser layer responsibility)
-			if (!projectName) {
-				return Response.json(
-					{ error: "Project name is required" },
-					{ status: 400 },
-				);
-			}
-
-			// Check if already initialized (for browser, we don't allow re-init)
-			const existingConfig = await this.core.filesystem.loadConfig();
-			if (existingConfig) {
-				return Response.json(
-					{ error: "Project is already initialized" },
-					{ status: 400 },
-				);
-			}
-
-			// Call shared core init function
-			const result = await initializeProject(this.core, {
-				projectName,
-				integrationMode: integrationMode || "none",
-				mcpClients,
-				agentInstructions,
-				installClaudeAgent: installClaudeAgentFlag,
-				advancedConfig,
-				existingConfig: null,
-			});
-
-			// Update server's project name
-			this.projectName = result.projectName;
-
-			// Ensure config watcher is set up now that config file exists
-			if (this.contentStore) {
-				this.contentStore.ensureConfigWatcher();
-			}
-
-			return Response.json({
-				success: result.success,
-				projectName: result.projectName,
-				mcpResults: result.mcpResults,
-			});
-		} catch (error) {
-			console.error("Error initializing project:", error);
-			const message =
-				error instanceof Error ? error.message : "Failed to initialize project";
-			return Response.json({ error: message }, { status: 500 });
 		}
 	}
 
@@ -3561,39 +3304,6 @@ export class RoadmapServer {
 	}
 
 	// P477 AC-2: list active projects so the UI can show a switcher.
-	// Read-only, unauthenticated (parity with /api/agents). Operators see
-	// every active project; archived ones are hidden by default.
-	private async handleListProjects(): Promise<Response> {
-		try {
-			const { rows } = await query<{
-				project_id: number;
-				slug: string;
-				name: string;
-				worktree_root: string;
-				bootstrap_status: string;
-				host: string;
-				port: number;
-				db_name: string | null;
-			}>(
-				`SELECT project_id, slug, name, worktree_root,
-				        bootstrap_status, host, port, db_name
-				   FROM roadmap.project
-				  WHERE status = 'active'
-				  ORDER BY project_id ASC`,
-			);
-			return Response.json({
-				projects: rows,
-				default_project_id: rows[0]?.project_id ?? null,
-			});
-		} catch (err) {
-			console.error("[projects] list failed:", (err as Error).message);
-			return Response.json(
-				{ error: "Failed to list projects" },
-				{ status: 500 },
-			);
-		}
-	}
-
 	// P3508 AC-8: Create a new project (POST /api/projects).
 	// Requires operator bearer token with 'project.create' or '*' in allowed_actions.
 	// Delegates to projectCreate() from the MCP lifecycle handler.
@@ -3632,6 +3342,7 @@ export class RoadmapServer {
 			return Response.json({ error: "project create failed" }, { status: 500 });
 		}
 	}
+
 
 	// P477 AC-2: resolve the operator's chosen project for a request.
 	// Reads X-Project-Id header (or ?project_id=NN query param). Validates
@@ -4877,53 +4588,6 @@ export class RoadmapServer {
 		}
 	}
 
-	private async handleGetArchDocs(): Promise<Response> {
-		const { generateArchitectureDocs, checkStale, getLatestArchDocs } =
-			await import("../../core/infrastructure/architecture-reconstructor.ts");
-		try {
-			if (process.env.ARCH_RECONSTRUCTOR_DISABLED === "true") {
-				return Response.json(
-					{ error: "arch_reconstructor_disabled" },
-					{ status: 503 },
-				);
-			}
-			const views = await generateArchitectureDocs({
-				projectRoot: process.cwd(),
-			});
-			const { staleSince } = await checkStale(views);
-			const headers: Record<string, string> = {
-				"X-Generated-At": views.generatedAt.toISOString(),
-			};
-			if (staleSince) {
-				headers["X-Arch-Stale"] = `true; since=${staleSince.toISOString()}`;
-			}
-			return Response.json(views, { headers });
-		} catch (error) {
-			console.error("[arch-docs] DB query failed:", error);
-			const fallback = getLatestArchDocs(process.cwd());
-			if (fallback) {
-				return Response.json(
-					{
-						error: "db_unavailable",
-						fallback: "last_generated",
-						...fallback,
-					},
-					{
-						status: 503,
-						headers: {
-							"X-Generated-At": fallback.generatedAt.toISOString(),
-							"X-Arch-Stale": `true; since=unknown`,
-						},
-					},
-				);
-			}
-			return Response.json(
-				{ error: "db_unavailable", fallback: "last_generated" },
-				{ status: 503 },
-			);
-		}
-	}
-
 	private async handleListRoutes(): Promise<Response> {
 		try {
 			const { rows } = await query(
@@ -5630,66 +5294,11 @@ export class RoadmapServer {
 	}
 
 	private async handleListKnowledge(req: Request): Promise<Response> {
-		try {
-			const url = new URL(req.url);
-			const queryParam = url.searchParams.get("query") ?? "";
-			const typeParam = url.searchParams.get("type") ?? "";
-
-			let sql = `
-				SELECT
-					id, type, content, keywords,
-					source_proposal_id AS source,
-					helpful_count, created_at
-				FROM roadmap.knowledge_entries
-				WHERE 1=1
-			`;
-			const params: unknown[] = [];
-			let idx = 1;
-
-			if (queryParam) {
-				sql += ` AND (content ILIKE $${idx} OR keywords::text ILIKE $${idx} OR title ILIKE $${idx})`;
-				params.push(`%${queryParam}%`);
-				idx++;
-			}
-			if (typeParam) {
-				sql += ` AND type = $${idx}`;
-				params.push(typeParam);
-				idx++;
-			}
-			sql += ` ORDER BY helpful_count DESC, created_at DESC LIMIT 100`;
-
-			const { rows } = await query(sql, params);
-			return Response.json(
-				(rows ?? []).map((row: Record<string, unknown>) => ({
-					...row,
-					keywords: Array.isArray(row.keywords) ? row.keywords : [],
-				})),
-			);
-		} catch (error) {
-			console.error("Error listing knowledge entries:", error);
-			return Response.json(
-				{ error: "Failed to list knowledge entries" },
-				{ status: 500 },
-			);
-		}
+		return handleListKnowledgeRoute(req);
 	}
 
 	private async handleMarkKnowledgeHelpful(id: string): Promise<Response> {
-		try {
-			await query(
-				`UPDATE roadmap.knowledge_entries
-				    SET helpful_count = helpful_count + 1, updated_at = now()
-				  WHERE id = $1`,
-				[id],
-			);
-			return Response.json({ ok: true });
-		} catch (error) {
-			console.error("Error marking knowledge helpful:", error);
-			return Response.json(
-				{ error: "Failed to mark as helpful" },
-				{ status: 500 },
-			);
-		}
+		return handleMarkKnowledgeHelpfulRoute(id);
 	}
 
 	private async handleMcpSse(_req: Request): Promise<Response> {
@@ -6050,162 +5659,6 @@ export class RoadmapServer {
 		} catch (err) {
 			console.error("[P846] Failed to start notify relay:", err);
 		}
-	}
-
-	private async handleGetSla(): Promise<Response> {
-		try {
-			const slaPath = join(
-				import.meta.dirname,
-				"../../../../docs/sla-contract.json",
-			);
-			const slaContent = readFileSync(slaPath, "utf-8");
-			const slaParsed = JSON.parse(slaContent);
-			return Response.json(slaParsed, {
-				headers: {
-					"Content-Type": "application/json",
-					"Cache-Control": "max-age=3600",
-				},
-			});
-		} catch (error) {
-			console.error("Error reading SLA contract:", error);
-			return Response.json(
-				{ error: "SLA contract not found" },
-				{ status: 404 },
-			);
-		}
-	}
-
-	private async handleMetrics(): Promise<Response> {
-		try {
-			const pool = getPool();
-
-			// Query trace_span for current state and tool call counts
-			let slaState = 0; // default to 0 (down)
-			let toolCallCount = 0;
-			let rateLimitViolationsTotal = 0;
-			let rateLimitViolationsByReason: Record<string, number> = {};
-
-			try {
-				// Check if system is in normal state by counting recent spans
-				const spanResult = await pool.query(`
-					SELECT COUNT(*) as count
-					FROM roadmap.trace_span
-					WHERE created_at > NOW() - INTERVAL '5 minutes'
-				`);
-				toolCallCount = spanResult.rows[0]?.count || 0;
-
-				// Simple heuristic: if we have spans in last 5 min, state is normal
-				slaState = toolCallCount > 0 ? 1 : 0;
-			} catch (err) {
-				console.warn("Error querying trace_span:", err);
-				slaState = 0;
-			}
-
-			// P1100 AC-11: Query rate limit violations for observability
-			try {
-				// Total rate limit violations across all senders and channels
-				const totalResult = await pool.query(`
-					SELECT COUNT(*) as count
-					FROM roadmap.msg_send_rate_limit_violation
-					WHERE violation_at > NOW() - INTERVAL '1 hour'
-				`);
-				rateLimitViolationsTotal = parseInt(totalResult.rows[0]?.count || "0", 10);
-
-				// Violations broken down by reason
-				const byReasonResult = await pool.query(`
-					SELECT reason, COUNT(*) as count
-					FROM roadmap.msg_send_rate_limit_violation
-					WHERE violation_at > NOW() - INTERVAL '1 hour'
-					GROUP BY reason
-				`);
-				for (const row of byReasonResult.rows) {
-					rateLimitViolationsByReason[row.reason] = parseInt(row.count || "0", 10);
-				}
-			} catch (err) {
-				console.warn("Error querying rate limit violations:", err);
-				// Non-fatal: metrics endpoint continues without rate limit data
-			}
-
-			// Build Prometheus text format response
-			let metrics = `# HELP agenthive_sla_state Current SLA state (1=normal, 0=down)
-# TYPE agenthive_sla_state gauge
-agenthive_sla_state{state="normal"} ${slaState}
-
-# HELP agenthive_mcp_tool_calls_total Total MCP tool calls in last 5 minutes
-# TYPE agenthive_mcp_tool_calls_total counter
-agenthive_mcp_tool_calls_total ${toolCallCount}
-
-# HELP agenthive_msg_send_rate_limit_violations_total Total msg_send rate limit violations in last hour
-# TYPE agenthive_msg_send_rate_limit_violations_total counter
-agenthive_msg_send_rate_limit_violations_total ${rateLimitViolationsTotal}
-`;
-
-			// P1100 AC-11: Per-reason breakdown of rate limit violations
-			for (const [reason, count] of Object.entries(rateLimitViolationsByReason)) {
-				metrics += `# HELP agenthive_msg_send_rate_limit_violations_by_reason_total Rate limit violations by reason
-# TYPE agenthive_msg_send_rate_limit_violations_by_reason_total counter
-agenthive_msg_send_rate_limit_violations_by_reason_total{reason="${reason}"} ${count}
-`;
-			}
-
-			metrics += `
-# Note: install prom-client for full histogram support
-`;
-
-			return new Response(metrics, {
-				headers: {
-					"Content-Type": "text/plain; version=0.0.4",
-					"Cache-Control": "no-cache, no-store, must-revalidate",
-				},
-			});
-		} catch (error) {
-			console.error("Error generating metrics:", error);
-			return new Response("# error generating metrics\n", {
-				status: 500,
-				headers: { "Content-Type": "text/plain" },
-			});
-		}
-	}
-
-	private async handleGetArchDocs(): Promise<Response> {
-		if (process.env.ARCH_RECONSTRUCTOR_DISABLED === "true") {
-			return Response.json(
-				{ error: "arch_reconstructor_disabled", fallback: "env_var_set" },
-				{ status: 503 },
-			);
-		}
-		let views;
-		try {
-			views = await generateArchitectureDocs();
-		} catch (err) {
-			console.error("[arch-docs] DB query failed:", err);
-			return Response.json(
-				{ error: "db_unavailable", fallback: "last_generated" },
-				{ status: 503 },
-			);
-		}
-		const staleResult = await checkStale(views).catch(() => ({}));
-		const staleSince = (staleResult as { staleSince?: Date }).staleSince;
-
-		const headers: Record<string, string> = {
-			"Content-Type": "application/json",
-			"X-Generated-At": views.generatedAt.toISOString(),
-		};
-		if (staleSince) {
-			headers["X-Arch-Stale"] = `true; since=${staleSince.toISOString()}`;
-		}
-
-		return new Response(
-			JSON.stringify({
-				...views,
-				generatedAt: views.generatedAt.toISOString(),
-				timeline: views.timeline.map((e) => ({
-					...e,
-					transitionedAt: e.transitionedAt.toISOString(),
-				})),
-			}),
-			{ status: 200, headers },
-		);
 	}
 
 	// ── P435: Operator Control API handlers ──────────────────────────────────────
