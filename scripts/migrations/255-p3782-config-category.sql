@@ -13,11 +13,14 @@
 BEGIN;
 
 ALTER TABLE core.runtime_flag
-  ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'diagnostic';
+  ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'general';
 
 -- Drop and recreate the CHECK so this migration is idempotent on re-run.
+-- 'general' is included as a backward-compat catch-all for flags not yet classified.
 ALTER TABLE core.runtime_flag
   DROP CONSTRAINT IF EXISTS runtime_flag_category_chk;
+ALTER TABLE core.runtime_flag
+  DROP CONSTRAINT IF EXISTS runtime_flag_category_check;
 
 ALTER TABLE core.runtime_flag
   ADD CONSTRAINT runtime_flag_category_chk CHECK (category IN (
@@ -36,7 +39,8 @@ ALTER TABLE core.runtime_flag
     'model_routing',
     'audit',
     'ui_ux',
-    'diagnostic'
+    'diagnostic',
+    'general'
   ));
 
 -- Backfill: set category for all known flag names.
@@ -124,13 +128,36 @@ SET category = CASE flag_name
   -- ── ui_ux ─────────────────────────────────────────────────────────────────
   WHEN 'AGENTHIVE_COCKPIT_LAYOUT'            THEN 'ui_ux'
 
+  -- ── gate_governance (extended) ────────────────────────────────────────────
+  WHEN 'AGENTHIVE_GATE_AC_INVARIANT_ENABLED'  THEN 'gate_governance'
+  WHEN 'PROPOSAL_STATE_MONITOR_GRACE_PERIOD_SEC' THEN 'gate_governance'
+
+  -- ── orchestrator (extended) ───────────────────────────────────────────────
+  WHEN 'ORCHESTRATOR_TARGET_QUOTA_PCT'        THEN 'orchestrator'
+
+  -- ── dispatch (extended) ──────────────────────────────────────────────────
+  WHEN 'COLLABORATION_LEASE_TTL_MS'           THEN 'dispatch'
+  WHEN 'NOTIFICATION_POLL_INTERVAL_MS'        THEN 'dispatch'
+  WHEN 'SAGA_REPAIR_MAX_ATTEMPTS'             THEN 'pause_backoff'
+  WHEN 'SAGA_REPAIR_MAX_BACKOFF_HOURS'        THEN 'pause_backoff'
+
+  -- ── multi_tenant (extended) ───────────────────────────────────────────────
+  WHEN 'FEDERATION_HEALTH_QUARANTINE_THRESHOLD' THEN 'multi_tenant'
+  WHEN 'FEDERATION_SYNC_POLL_INTERVAL_MS'     THEN 'multi_tenant'
+
+  -- ── mcp_endpoint (extended) ──────────────────────────────────────────────
+  WHEN 'TRANSPORT_WAKE_TIMEOUT_MS'            THEN 'mcp_endpoint'
+
+  -- ── provider_quota (extended) ─────────────────────────────────────────────
+  WHEN 'PROVIDER_HEALTH_TTL_MS'               THEN 'provider_quota'
+
   -- ── diagnostic ────────────────────────────────────────────────────────────
   WHEN 'FEDERATION_SYNC_POLL_MS'             THEN 'diagnostic'
   WHEN 'FEDERATION_QUARANTINE_THRESHOLD'     THEN 'diagnostic'
   WHEN 'FEDERATION_STALE_PEER_MS'            THEN 'diagnostic'
   WHEN 'FEDERATION_PING_TIMEOUT_MS'          THEN 'diagnostic'
 
-  ELSE category  -- preserve any existing category value (or DEFAULT 'diagnostic')
+  ELSE category  -- preserve any existing category value (or DEFAULT 'general')
 END;
 
 COMMIT;
