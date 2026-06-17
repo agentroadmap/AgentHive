@@ -59,6 +59,12 @@ import {
 	filterProposalsByProposalSnapshots,
 	getActiveAndCompletedIdsFromProposalMap,
 } from "./proposal/id-generation.ts";
+import {
+	addAcceptanceCriteria as _addAcceptanceCriteria,
+	checkAcceptanceCriteria as _checkAcceptanceCriteria,
+	listAcceptanceCriteria as _listAcceptanceCriteria,
+	removeAcceptanceCriteria as _removeAcceptanceCriteria,
+} from "./proposal/criteria.ts";
 import { normalizeAssignee } from "../utils/assignee.ts";
 import { formatLocalDateTime } from "../utils/date-time.ts";
 import { documentIdsEqual } from "../utils/document-id.ts";
@@ -4265,30 +4271,10 @@ export class Core {
 		criteria: string[],
 		autoCommit?: boolean,
 	): Promise<void> {
-		const proposal = await this.fs.loadProposal(proposalId);
-		if (!proposal) {
-			throw new Error(`Proposal not found: ${proposalId}`);
-		}
-
-		// Get existing criteria or initialize empty array
-		const current = Array.isArray(proposal.acceptanceCriteriaItems)
-			? [...proposal.acceptanceCriteriaItems]
-			: [];
-
-		// Calculate next index (1-based)
-		let nextIndex =
-			current.length > 0 ? Math.max(...current.map((c) => c.index)) + 1 : 1;
-
-		// Append new criteria
-		const newCriteria = criteria.map((text) => ({
-			index: nextIndex++,
-			text,
-			checked: false,
-		}));
-		proposal.acceptanceCriteriaItems = [...current, ...newCriteria];
-
-		// Save the proposal
-		await this.updateProposal(proposal, autoCommit);
+		return _addAcceptanceCriteria(
+			{ loadProposal: (id) => this.fs.loadProposal(id), updateProposal: (p, ac) => this.updateProposal(p, ac) },
+			proposalId, criteria, autoCommit,
+		);
 	}
 
 	/**
@@ -4300,41 +4286,10 @@ export class Core {
 		indices: number[],
 		autoCommit?: boolean,
 	): Promise<number[]> {
-		const proposal = await this.fs.loadProposal(proposalId);
-		if (!proposal) {
-			throw new Error(`Proposal not found: ${proposalId}`);
-		}
-
-		let list = Array.isArray(proposal.acceptanceCriteriaItems)
-			? [...proposal.acceptanceCriteriaItems]
-			: [];
-		const removed: number[] = [];
-
-		// Sort indices in descending order to avoid index shifting issues
-		const sortedIndices = [...indices].sort((a, b) => b - a);
-
-		for (const idx of sortedIndices) {
-			const before = list.length;
-			list = list.filter((c) => c.index !== idx);
-			if (list.length < before) {
-				removed.push(idx);
-			}
-		}
-
-		if (removed.length === 0) {
-			throw new Error(
-				"No criteria were removed. Check that the specified indices exist.",
-			);
-		}
-
-		// Re-index remaining items (1-based)
-		list = list.map((c, i) => ({ ...c, index: i + 1 }));
-		proposal.acceptanceCriteriaItems = list;
-
-		// Save the proposal
-		await this.updateProposal(proposal, autoCommit);
-
-		return removed.sort((a, b) => a - b); // Return in ascending order
+		return _removeAcceptanceCriteria(
+			{ loadProposal: (id) => this.fs.loadProposal(id), updateProposal: (p, ac) => this.updateProposal(p, ac) },
+			proposalId, indices, autoCommit,
+		);
 	}
 
 	/**
@@ -4348,53 +4303,19 @@ export class Core {
 		checked: boolean,
 		autoCommit?: boolean,
 	): Promise<number[]> {
-		const proposal = await this.fs.loadProposal(proposalId);
-		if (!proposal) {
-			throw new Error(`Proposal not found: ${proposalId}`);
-		}
-
-		let list = Array.isArray(proposal.acceptanceCriteriaItems)
-			? [...proposal.acceptanceCriteriaItems]
-			: [];
-		const updated: number[] = [];
-
-		// Filter to only valid indices and update them
-		for (const idx of indices) {
-			if (list.some((c) => c.index === idx)) {
-				list = list.map((c) => {
-					if (c.index === idx) {
-						updated.push(idx);
-						return { ...c, checked };
-					}
-					return c;
-				});
-			}
-		}
-
-		if (updated.length === 0) {
-			throw new Error("No criteria were updated.");
-		}
-
-		proposal.acceptanceCriteriaItems = list;
-
-		// Save the proposal
-		await this.updateProposal(proposal, autoCommit);
-
-		return updated.sort((a, b) => a - b);
+		return _checkAcceptanceCriteria(
+			{ loadProposal: (id) => this.fs.loadProposal(id), updateProposal: (p, ac) => this.updateProposal(p, ac) },
+			proposalId, indices, checked, autoCommit,
+		);
 	}
 
-	/**
-	 * List all acceptance criteria for a proposal
-	 */
 	async listAcceptanceCriteria(
 		proposalId: string,
 	): Promise<AcceptanceCriterion[]> {
-		const proposal = await this.fs.loadProposal(proposalId);
-		if (!proposal) {
-			throw new Error(`Proposal not found: ${proposalId}`);
-		}
-
-		return proposal.acceptanceCriteriaItems || [];
+		return _listAcceptanceCriteria(
+			{ loadProposal: (id) => this.fs.loadProposal(id), updateProposal: (p, ac) => this.updateProposal(p, ac) },
+			proposalId,
+		);
 	}
 
 	async createDecision(
