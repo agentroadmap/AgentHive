@@ -27,6 +27,7 @@
 
 import { Client } from "pg";
 import type { Pool, PoolClient } from "pg";
+import { type ConfigCategory } from "./config-categories.js";
 
 export type ConfigClass =
 	| "secret"
@@ -35,18 +36,8 @@ export type ConfigClass =
 	| "flag"
 	| "tenant_dsn";
 
-export type ConfigKeyCategory =
-	| "orchestration"
-	| "a2a"
-	| "agency"
-	| "feature_flag"
-	| "budget"
-	| "billing"
-	| "ui"
-	| "security"
-	| "model_routing"
-	| "system"
-	| "uncategorized";
+/** @deprecated Use ConfigCategory from config-categories.ts instead */
+export type ConfigKeyCategory = ConfigCategory;
 
 export interface ConfigKey<T> {
 	name: string;
@@ -54,7 +45,8 @@ export interface ConfigKey<T> {
 	parse: (raw: string) => T;
 	required: boolean;
 	description?: string;
-	category?: ConfigKeyCategory;
+	/** Category from the closed 16-member taxonomy in config-categories.ts. Required for FlagKeys. */
+	category?: ConfigCategory;
 	yamlPath?: string;
 	/**
 	 * Optional yaml-assembly function for keys whose value is derived from

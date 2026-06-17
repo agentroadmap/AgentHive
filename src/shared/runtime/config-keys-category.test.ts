@@ -1,20 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { FlagKeys } from "./config-keys";
+import { CONFIG_CATEGORIES } from "./config-categories";
 
-const VALID_CATEGORIES = new Set([
-  "orchestration",
-  "a2a",
-  "agency",
-  "feature_flag",
-  "budget",
-  "billing",
-  "ui",
-  "security",
-  "model_routing",
-  "system",
-  "uncategorized",
-]);
+const VALID_CATEGORIES = new Set(CONFIG_CATEGORIES);
 
 describe("FlagKeys categories", () => {
   it("every FlagKey has a defined category", () => {
@@ -37,7 +26,7 @@ describe("FlagKeys categories", () => {
     assert.deepEqual(invalid, [], `FlagKeys with invalid category: ${invalid.join(", ")}`);
   });
 
-  it("ORCHESTRATOR_HEARTBEAT_MS has category orchestration (AC-16 spot-check)", () => {
-    assert.equal(FlagKeys.ORCHESTRATOR_HEARTBEAT_MS.category, "orchestration");
+  it("ORCHESTRATOR_HEARTBEAT_MS has category orchestrator (AC-16 spot-check)", () => {
+    assert.equal(FlagKeys.ORCHESTRATOR_HEARTBEAT_MS.category, "orchestrator");
   });
 });
