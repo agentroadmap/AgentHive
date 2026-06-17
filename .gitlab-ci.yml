@@ -79,6 +79,36 @@ workflow-states-check:
     paths:
       - node_modules/
 
+scan-multi-tenant:
+  stage: check
+  script:
+    - npm ci
+    - npm run scan:multi-tenant
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
+
+scan-agenthive:
+  stage: check
+  script:
+    - npm ci
+    - npm run scan:agenthive
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
+
+scan-secrets:
+  stage: security
+  script:
+    - npm ci
+    - npm run scan:secrets
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
+
 migration-schema-lint:
   stage: check
   script:
