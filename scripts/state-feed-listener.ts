@@ -12,6 +12,11 @@
  */
 import { Client } from "pg";
 import { readFileSync, existsSync } from "node:fs";
+import {
+	statusVerb,
+	statusEmoji,
+	normalizeAgent,
+} from "../src/core/feed/event-grammar.ts";
 
 const WEBHOOK_URL =
 	process.env.DISCORD_WEBHOOK_STATEFEED ??
@@ -124,26 +129,6 @@ async function fetchLatestGateRationale(
 
 // ─── Stage / maturity label maps ──────────────────────────────────────────────
 
-const STATUS_VERB_RFC: Record<string, string> = {
-	DRAFT: "drafting",
-	REVIEW: "reviewing",
-	DEVELOP: "developing",
-	MERGE: "merge-ready",
-	COMPLETE: "shipped",
-};
-const STATUS_VERB_HOTFIX: Record<string, string> = {
-	TRIAGE: "triaging",
-	FIX: "fixing",
-	DEPLOYED: "deployed",
-};
-function statusVerb(type: string | null, status: string): string {
-	const upper = (status ?? "").toUpperCase();
-	if ((type ?? "").toLowerCase() === "hotfix") {
-		return STATUS_VERB_HOTFIX[upper] ?? upper.toLowerCase();
-	}
-	return STATUS_VERB_RFC[upper] ?? upper.toLowerCase();
-}
-
 const STATE_IMPLICATIONS_RFC: Record<string, Record<string, string>> = {
 	DRAFT: { REVIEW: "Ready for gate review — architecture validation, feasibility check" },
 	REVIEW: { DEVELOP: "Approved — coding can begin, agents can claim implementation work" },
@@ -170,16 +155,6 @@ const MATURITY_IMPL: Record<string, string> = {
 	mature: "Ready for gate decision — work is complete enough to advance",
 	obsolete: "Marked obsolete — work cancelled or superseded",
 };
-
-// ─── Agent identity normalization ─────────────────────────────────────────────
-
-function normalizeAgent(raw: string | null | undefined): string {
-	const s = (raw ?? "").trim();
-	if (!s) return "agent";
-	const m = /^worker-\d+\s+\(([^)]+)\)@(.+)$/i.exec(s);
-	if (m) return `${m[2]}/${m[1]}`;
-	return s;
-}
 
 // ─── Suppression / dedupe state ───────────────────────────────────────────────
 
@@ -310,17 +285,7 @@ async function renderStatusChanged(
 	const fromVerb = from ? statusVerb(p.type, from) : "?";
 	const toVerb = statusVerb(p.type, to);
 	const impl = stateImplication(p.type, from, to);
-	const emojiMap: Record<string, string> = {
-		COMPLETE: "🏁",
-		DEPLOYED: "🚀",
-		MERGE: "🔀",
-		DEVELOP: "🔨",
-		FIX: "🔧",
-		REVIEW: "🔍",
-		TRIAGE: "🔎",
-		DRAFT: "📝",
-	};
-	const icon = emojiMap[to] ?? "🔄";
+	const icon = statusEmoji(to);
 	const lead = agent === "system"
 		? `${icon} **${p.display_id}** advanced ${fromVerb} → **${toVerb}** (${from || "?"} → ${to})`
 		: `${icon} **${agent}** advanced **${p.display_id}** ${fromVerb} → **${toVerb}** (${from || "?"} → ${to})`;

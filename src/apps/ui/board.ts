@@ -43,6 +43,19 @@ import {
 	getStatusIcon,
 	getStatusStyle,
 } from "./status-icon.ts";
+import {
+	CREATED_EMOJI,
+	DECISION_EMOJI,
+	DECISION_EMOJI_DEFAULT,
+	LEASE_CLAIMED_EMOJI,
+	LEASE_RELEASED_DEFAULT,
+	LEASE_RELEASED_EMOJI,
+	MATURITY_EMOJI,
+	REVIEW_EMOJI,
+	RUN_EMOJI,
+	STATUS_EMOJI_DEFAULT,
+	statusEmoji,
+} from "../../core/feed/event-grammar.ts";
 import { createScreen } from "./tui.ts";
 
 // Stub implementations for move/undo (to be fully implemented later)
@@ -2739,55 +2752,38 @@ export async function renderBoardTui(
 			rejected: "✖", discard: "●", replaced: "⇄", building: "◒",
 			accepted: "▣", abandoned: "●", obsolete: "✖", blocked: "●",
 		};
-		const maturityIconMap: Record<string, string> = {
-			new: "○", active: "▶", mature: "✓", obsolete: "✖",
-		};
-		const stateColorMap: Record<string, string> = {
-			draft: "white", review: "yellow", develop: "cyan", merge: "magenta", complete: "green",
-			rejected: "red", discard: "gray", replaced: "blue", building: "cyan",
-		};
-		const maturityColorMap: Record<string, string> = {
-			new: "white", active: "cyan", mature: "green", obsolete: "red",
-		};
 		const getFeedIcon = (e: StreamEvent): string => {
-			// Discord-style action emoji, detected from the message content so
-			// lease/review/decision events (which arrive as 'message'/'custom'
-			// stream types) read like the Discord state feed. These take
-			// precedence over the generic type map below.
-			const msg = e.message;
-			if (/\blease claimed\b/.test(msg)) return "🔒";
-			if (/\blease released\b/.test(msg)) return "🔓";
-			if (/\breview by\b|\bposted review\b/.test(msg)) return "💬";
-			if (/\bdecision\b/.test(msg) && msg.includes("]")) return "⚖️";
-			if (/\bcreated\b/.test(msg)) return "✨";
-			// State transition: "P289 state draft -> review"
-			if (e.message.includes(" state ")) {
-				const m = e.message.match(/state\s+\S+\s+->\s+(\S+)/);
-				if (m) {
-					const state = m[1].toLowerCase();
-					const icon = stateIconMap[state] ?? "S";
-					const color = stateColorMap[state] ?? "white";
-					return `{${color}-fg}${icon}{/}`;
-				}
-				return "S";
+			// Shared event-grammar vocabulary (src/core/feed/event-grammar.ts) so
+			// the TUI feed speaks the same emoji as the Discord state feed
+			// (scripts/state-feed-listener.ts). Lease/review/decision/created
+			// events arrive as 'message'/'custom' stream types, so they are
+			// detected from the message content and take precedence.
+			// Match only the event text BEFORE the " — <title>" suffix: titles can
+			// contain trigger words ("maturity", "state", "review") that would
+			// otherwise mis-key the glyph.
+			const msg = e.message.split(" — ")[0];
+			if (/\blease claimed\b/.test(msg)) return LEASE_CLAIMED_EMOJI;
+			if (/\blease released\b/.test(msg)) {
+				const r = msg.match(/\(([a-z_]+)\)/);
+				return (r && LEASE_RELEASED_EMOJI[r[1]]) || LEASE_RELEASED_DEFAULT;
 			}
-			// Maturity transition: "P289 maturity new -> active"
-			if (e.message.includes(" maturity ")) {
-				const m = e.message.match(/maturity\s+\S+\s+->\s+(\S+)/);
-				if (m) {
-					const mat = m[1].toLowerCase();
-					const icon = maturityIconMap[mat] ?? "M";
-					const color = maturityColorMap[mat] ?? "white";
-					return `{${color}-fg}${icon}{/}`;
-				}
-				return "M";
+			if (/\breview by\b|\bposted review\b/.test(msg)) return REVIEW_EMOJI;
+			if (/\bdecision\b/.test(msg) && msg.includes("]")) {
+				const d = msg.match(/decision(?:\s*\([^)]*\))?\s+([a-z]+)/i);
+				return (d && DECISION_EMOJI[d[1].toLowerCase()]) || DECISION_EMOJI_DEFAULT;
 			}
-			// Other event types with colors
-			// Run outcomes carry the model name (e.g. "… (anthropic/claude) [148s]")
-			// — give them Discord-style emoji so the combined feed reads at a glance.
-			if (e.type === "review_passed") return "✅";
-			if (e.type === "review_failed") return "❌";
-			if (e.type === "proposal_coding") return "⚙️";
+			if (/\bcreated\b/.test(msg)) return CREATED_EMOJI;
+			// State transition ("P289 state draft -> review") — emoji by target state.
+			if (msg.includes(" state ")) {
+				const m = msg.match(/state\s+\S+\s+->\s+(\S+)/);
+				return m ? statusEmoji(m[1]) : STATUS_EMOJI_DEFAULT;
+			}
+			// Maturity transition ("P289 maturity new -> active").
+			if (msg.includes(" maturity ")) return MATURITY_EMOJI;
+			// Agent-run outcomes carry the provider/model (e.g. "(anthropic/claude) [148s]").
+			if (e.type === "review_passed") return RUN_EMOJI.passed;
+			if (e.type === "review_failed") return RUN_EMOJI.failed;
+			if (e.type === "proposal_coding") return RUN_EMOJI.running;
 			const typeMap: Record<string, [string, string]> = {
 				proposal_accepted: ["▣", "green"], proposal_claimed: ["◆", "yellow"],
 				review_requested: ["?", "yellow"],
