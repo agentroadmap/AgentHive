@@ -21,6 +21,16 @@ import {
 	parseLegacyYamlValue,
 	stripYamlComment,
 } from "./config/legacy-migration.ts";
+import {
+	buildPgTags,
+	getPgTagMetadata,
+	getPgTagString,
+	getPgTagStringArray,
+	mapPgAcceptanceCriteria,
+	mapPgLabels,
+	mapPgMaturity,
+	mapPgPriority,
+} from "./postgres/pg-tag-utils.ts";
 import * as pgPool from "../postgres/pool.ts";
 import type {
 	ProposalAcceptanceCriterionRow,
@@ -599,112 +609,6 @@ export class Core {
 		return resolvedConfig?.database?.provider === "Postgres";
 	}
 
-	private getPgTagMetadata(
-		tags: ProposalRow["tags"],
-	): Record<string, unknown> | null {
-		if (!tags || Array.isArray(tags) || typeof tags !== "object") {
-			return null;
-		}
-		return tags as Record<string, unknown>;
-	}
-
-	private getPgTagString(
-		tags: ProposalRow["tags"],
-		key: string,
-	): string | undefined {
-		const metadata = this.getPgTagMetadata(tags);
-		const value = metadata?.[key];
-		return typeof value === "string" && value.trim().length > 0
-			? value
-			: undefined;
-	}
-
-	private getPgTagStringArray(
-		tags: ProposalRow["tags"],
-		key: string,
-	): string[] | undefined {
-		const metadata = this.getPgTagMetadata(tags);
-		const value = metadata?.[key];
-		if (!Array.isArray(value)) {
-			return undefined;
-		}
-		const normalized = value.map((item) => String(item).trim()).filter(Boolean);
-		return normalized.length > 0 ? normalized : undefined;
-	}
-
-	private buildPgTags(proposal: Proposal): Record<string, unknown> | null {
-		const tags: Record<string, unknown> = {};
-
-		if (proposal.labels.length > 0) tags.labels = [...proposal.labels];
-		if (proposal.directive?.trim()) tags.directive = proposal.directive.trim();
-		if (proposal.domainId?.trim()) tags.domainId = proposal.domainId.trim();
-		if (proposal.category?.trim()) tags.category = proposal.category.trim();
-		if (proposal.references && proposal.references.length > 0)
-			tags.references = [...proposal.references];
-		if (proposal.documentation && proposal.documentation.length > 0)
-			tags.documentation = [...proposal.documentation];
-		if (proposal.proof && proposal.proof.length > 0)
-			tags.proof = [...proposal.proof];
-		if (proposal.needs_capabilities && proposal.needs_capabilities.length > 0) {
-			tags.needs_capabilities = [...proposal.needs_capabilities];
-		}
-		if (
-			proposal.required_capabilities &&
-			proposal.required_capabilities.length > 0
-		) {
-			tags.required_capabilities = [...proposal.required_capabilities];
-		}
-		if (
-			proposal.external_injections &&
-			proposal.external_injections.length > 0
-		) {
-			tags.external_injections = [...proposal.external_injections];
-		}
-		if (proposal.unlocks && proposal.unlocks.length > 0)
-			tags.unlocks = [...proposal.unlocks];
-		if (proposal.rationale?.trim()) tags.rationale = proposal.rationale.trim();
-		if (proposal.implementationNotes?.trim())
-			tags.implementationNotes = proposal.implementationNotes.trim();
-		if (proposal.auditNotes?.trim())
-			tags.auditNotes = proposal.auditNotes.trim();
-		if (proposal.finalSummary?.trim())
-			tags.finalSummary = proposal.finalSummary.trim();
-		if (proposal.scopeSummary?.trim())
-			tags.scopeSummary = proposal.scopeSummary.trim();
-		if (proposal.builder?.trim()) tags.builder = proposal.builder.trim();
-		if (proposal.auditor?.trim()) tags.auditor = proposal.auditor.trim();
-		if (proposal.rawContent?.trim())
-			tags.rawContent = proposal.rawContent.trim();
-		if (
-			proposal.verificationProposalments &&
-			proposal.verificationProposalments.length > 0
-		) {
-			tags.verificationProposalments = proposal.verificationProposalments.map(
-				(item) => ({
-					index: item.index,
-					text: item.text,
-					checked: item.checked,
-					role: item.role,
-					evidence: item.evidence,
-				}),
-			);
-		}
-
-		return Object.keys(tags).length > 0 ? tags : null;
-	}
-
-	private mapPgAcceptanceCriteria(
-		rows: ProposalAcceptanceCriterionRow[],
-	): AcceptanceCriterion[] {
-		return rows.map((row) => ({
-			index: row.item_number,
-			text: row.criterion_text,
-			checked: row.status === "pass",
-			evidence: row.verification_notes ?? undefined,
-			role: row.verified_by ?? undefined,
-		}));
-	}
-
 	private async hydratePgProposalRow(
 		row: ProposalRow,
 		options?: {
@@ -726,13 +630,13 @@ export class Core {
 				!dependency.resolved,
 		);
 		const acceptanceCriteria = options?.acceptanceCriteria ?? [];
-		const metadata = this.getPgTagMetadata(row.tags);
+		const metadata = getPgTagMetadata(row.tags);
 
 		const id = row.display_id || `#${row.id}`;
-		const labels = this.mapPgLabels(row.tags);
+		const labels = mapPgLabels(row.tags);
 		const rawContent = this.buildPgRawContent(row);
-		const maturity = this.mapPgMaturity(row);
-		const priority = this.mapPgPriority(row.priority);
+		const maturity = mapPgMaturity(row);
+		const priority = mapPgPriority(row.priority);
 		const leaseActive =
 			Boolean(summary?.leased_by) &&
 			(summary?.lease_expires === null ||
@@ -773,10 +677,10 @@ export class Core {
 			dependency_note: row.dependency_note || undefined,
 			description: row.summary || undefined,
 			implementationPlan: row.design || undefined,
-			implementationNotes: this.getPgTagString(row.tags, "implementationNotes"),
-			auditNotes: this.getPgTagString(row.tags, "auditNotes"),
-			finalSummary: this.getPgTagString(row.tags, "finalSummary"),
-			scopeSummary: this.getPgTagString(row.tags, "scopeSummary"),
+			implementationNotes: getPgTagString(row.tags, "implementationNotes"),
+			auditNotes: getPgTagString(row.tags, "auditNotes"),
+			finalSummary: getPgTagString(row.tags, "finalSummary"),
+			scopeSummary: getPgTagString(row.tags, "scopeSummary"),
 			createdDate: row.created_at
 				? new Date(row.created_at)
 						.toISOString()
@@ -790,32 +694,32 @@ export class Core {
 						.replace("T", " ")
 				: undefined,
 			proposalType: row.type,
-			domainId: this.getPgTagString(row.tags, "domainId"),
-			category: this.getPgTagString(row.tags, "category"),
-			directive: this.getPgTagString(row.tags, "directive"),
-			references: this.getPgTagStringArray(row.tags, "references"),
-			documentation: this.getPgTagStringArray(row.tags, "documentation"),
-			proof: this.getPgTagStringArray(row.tags, "proof"),
-			needs_capabilities: this.getPgTagStringArray(
+			domainId: getPgTagString(row.tags, "domainId"),
+			category: getPgTagString(row.tags, "category"),
+			directive: getPgTagString(row.tags, "directive"),
+			references: getPgTagStringArray(row.tags, "references"),
+			documentation: getPgTagStringArray(row.tags, "documentation"),
+			proof: getPgTagStringArray(row.tags, "proof"),
+			needs_capabilities: getPgTagStringArray(
 				row.tags,
 				"needs_capabilities",
 			),
-			required_capabilities: this.getPgTagStringArray(
+			required_capabilities: getPgTagStringArray(
 				row.tags,
 				"required_capabilities",
 			),
-			external_injections: this.getPgTagStringArray(
+			external_injections: getPgTagStringArray(
 				row.tags,
 				"external_injections",
 			),
-			unlocks: this.getPgTagStringArray(row.tags, "unlocks"),
-			rationale: this.getPgTagString(row.tags, "rationale"),
-			builder: this.getPgTagString(row.tags, "builder"),
-			auditor: this.getPgTagString(row.tags, "auditor"),
+			unlocks: getPgTagStringArray(row.tags, "unlocks"),
+			rationale: getPgTagString(row.tags, "rationale"),
+			builder: getPgTagString(row.tags, "builder"),
+			auditor: getPgTagString(row.tags, "auditor"),
 			...(parentProposalId && { parentProposalId }),
 			...(acceptanceCriteria.length > 0 && {
 				acceptanceCriteriaItems:
-					this.mapPgAcceptanceCriteria(acceptanceCriteria),
+					mapPgAcceptanceCriteria(acceptanceCriteria),
 			}),
 			...(summary?.leased_by && leaseActive && claimCreated && claimExpires
 				? {
@@ -894,7 +798,7 @@ export class Core {
 	}
 
 	private buildPgRawContent(row: ProposalRow): string {
-		const rawContent = this.getPgTagString(row.tags, "rawContent");
+		const rawContent = getPgTagString(row.tags, "rawContent");
 		const sections = [
 			["Summary", row.summary],
 			["Motivation", row.motivation],
@@ -921,85 +825,6 @@ export class Core {
 		return rawContent && rawContent.trim().length > 0
 			? `${built}\n\n${rawContent.trim()}`
 			: built;
-	}
-
-	private mapPgLabels(tags: ProposalRow["tags"]): string[] {
-		const metadataPrefixes = [
-			"labels:",
-			"directive:",
-			"domainid:",
-			"category:",
-			"references:",
-			"documentation:",
-			"proof:",
-			"needs_capabilities:",
-			"required_capabilities:",
-			"external_injections:",
-			"unlocks:",
-			"rationale:",
-			"implementationnotes:",
-			"auditnotes:",
-			"finalsummary:",
-			"scopesummary:",
-			"builder:",
-			"auditor:",
-			"rawcontent:",
-		];
-		const sanitizeLabels = (labels: string[]): string[] =>
-			labels
-				.map((label) => label.trim())
-				.filter(
-					(label) =>
-						label.length > 0 &&
-						label !== "[object Object]" &&
-						!label.includes("\n") &&
-						!metadataPrefixes.some((prefix) =>
-							label.toLowerCase().startsWith(prefix),
-						),
-				);
-
-		if (!tags) {
-			return [];
-		}
-
-		const explicitLabels = this.getPgTagStringArray(tags, "labels");
-		if (explicitLabels) {
-			return sanitizeLabels(explicitLabels);
-		}
-
-		if (Array.isArray(tags)) {
-			return sanitizeLabels(tags.map((tag) => String(tag)));
-		}
-
-		return sanitizeLabels([String(tags)]);
-	}
-
-	private mapPgMaturity(row: ProposalRow): Proposal["maturity"] | undefined {
-		// maturity is now a direct TEXT column — no JSONB parsing needed
-		const state = row.maturity;
-		if (!state) return undefined;
-		switch (state) {
-			case "new":
-			case "active":
-			case "mature":
-			case "obsolete":
-				return state;
-			default:
-				return undefined;
-		}
-	}
-
-	private mapPgPriority(
-		priority: string | null,
-	): Proposal["priority"] | undefined {
-		switch (priority?.toLowerCase()) {
-			case "high":
-			case "medium":
-			case "low":
-				return priority.toLowerCase() as Proposal["priority"];
-			default:
-				return undefined;
-		}
 	}
 
 	private async loadPgProposalActivity(
@@ -2425,7 +2250,7 @@ export class Core {
 							? proposal.dependencies.join(", ")
 							: null),
 					priority: proposal.priority ?? null,
-					tags: this.buildPgTags(proposal),
+					tags: buildPgTags(proposal),
 				},
 				proposal.builder ??
 					proposal.auditor ??
@@ -2584,7 +2409,7 @@ export class Core {
 						? proposal.dependencies.join(", ")
 						: null),
 				priority: proposal.priority ?? null,
-				tags: this.buildPgTags(proposal),
+				tags: buildPgTags(proposal),
 			});
 
 			const dependencyIds = (
