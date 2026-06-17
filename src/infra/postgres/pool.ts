@@ -431,6 +431,12 @@ export function getPool(config?: AgentHivePoolConfig): Pool {
 			statement_timeout: resolvedConfig.statementTimeoutMillis,
 			max: resolvedConfig.max,
 			allowExitOnIdle: true,
+			// P3564: prune idle sockets so a post-restart checkout never surfaces a
+			// dead socket. keepAlive keeps the TCP connection validated by the OS;
+			// idleTimeoutMillis evicts a socket that has been idle past one PG
+			// idle_in_transaction_session_timeout cycle.
+			keepAlive: true,
+			idleTimeoutMillis: 30000,
 		});
 		installPoolEndGuard(pool);
 		poolSignature = nextSignature;

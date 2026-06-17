@@ -6,6 +6,7 @@
  */
 
 import { createServer } from "node:http";
+import { Pool } from "pg";
 import { WebSocket, WebSocketServer } from "ws";
 import {
 	getPool,
@@ -437,9 +438,19 @@ export function startWebSocketServer(port = 3001): void {
 	// of falling back to poll-only mode forever. Also re-attaches if the
 	// LISTEN client errors out after the fact (idle disconnects, PG restart).
 	void (async () => {
+		// P3564: dedicated direct (5432) pool for LISTEN — never shares with the
+		// query pool so the shared getPool() stays on pgbouncer 6432.
+		const directListenPool = new Pool({
+			host: process.env.PGHOST ?? "127.0.0.1",
+			port: Number(process.env.PGPORT_DIRECT ?? 5432),
+			user: process.env.PGUSER ?? "xiaomi",
+			database: process.env.PGDATABASE ?? "agenthive",
+			keepAlive: true,
+			max: 1,
+		});
+
 		const setupListener = async (): Promise<void> => {
-			const pool = getPool();
-			const pgClient = await pool.connect();
+			const pgClient = await directListenPool.connect();
 			pgClient.on("error", (err) => {
 				console.error("[WS] pg_notify client error, will reconnect:", err.message);
 				try { pgClient.release(true); } catch { /* already released */ }
