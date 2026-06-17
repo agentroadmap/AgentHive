@@ -908,11 +908,12 @@ export class FederationSync extends EventEmitter {
 		return results;
 	}
 
-	start(): void {
+	async start(): Promise<void> {
 		this.stopped = false;
+		const pollIntervalMs = await resolveFederationPollIntervalMs();
 		this.pollTimer = setInterval(
 			() => this.runSyncCycle().catch((err) => this.emit("error", err)),
-			this.config.pollIntervalMs,
+			pollIntervalMs,
 		);
 	}
 
