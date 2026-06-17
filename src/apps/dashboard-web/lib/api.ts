@@ -912,6 +912,49 @@ export class ApiClient {
 			method: "PATCH",
 		});
 	}
+
+	// ── P3785: Config key read + write ────────────────────────────────────────
+
+	async fetchConfigKeys(category?: string): Promise<ConfigKeyDescriptor[]> {
+		const params = category ? `?category=${encodeURIComponent(category)}` : "";
+		const result = await this.fetchJson<{ keys: ConfigKeyDescriptor[]; count: number; category_filter: string | null }>(
+			`${API_BASE}/config/keys${params}`,
+		);
+		return result.keys;
+	}
+
+	async mutateConfigKey(keyName: string, value: unknown, scope?: string): Promise<ConfigMutationResult> {
+		return this.fetchJson<ConfigMutationResult>(
+			`${API_BASE}/config/${encodeURIComponent(keyName)}`,
+			{
+				method: "PUT",
+				body: JSON.stringify(scope !== undefined ? { value, scope } : { value }),
+			},
+		);
+	}
 }
 
 export const apiClient = new ApiClient();
+
+// ── P3785: Config key types ───────────────────────────────────────────────────
+
+export interface ConfigKeyDescriptor {
+	name: string;
+	class: "secret" | "structural" | "registry" | "flag" | "tenant_dsn";
+	category: string | null;
+	description: string | null;
+	value: unknown;
+	default_value: unknown;
+	required: boolean;
+	db_table: string | null;
+	scope: string | null;
+	editable: boolean;
+	masked: boolean;
+}
+
+export interface ConfigMutationResult {
+	key_name: string;
+	new_value: unknown;
+	mutation_id: string;
+	applied_at: string;
+}

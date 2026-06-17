@@ -1343,6 +1343,21 @@ export class RoadmapServer {
 				if (method === "PUT") return await this.handleUpdateConfig(req);
 			}
 
+			// P3785: PUT /api/config/:keyName — must come AFTER exact /api/config/keys check
+			const configKeyMatch = pathname.match(/^\/api\/config\/([^/]+)$/);
+			if (configKeyMatch && configKeyMatch[1] !== "keys") {
+				if (method === "PUT") return await this.handlePutConfigKey(req, configKeyMatch[1]);
+			}
+
+			if (pathname === "/api/flags") {
+				if (method === "GET") return await this.handleGetFlags();
+			}
+
+			const flagMatch = pathname.match(/^\/api\/flags\/([^/]+)$/);
+			if (flagMatch) {
+				if (method === "PATCH") return await this.handlePatchFlag(req, flagMatch[1]);
+			}
+
 			if (pathname === "/api/docs") {
 				if (method === "GET") return await this.handleListDocs();
 				if (method === "POST") return await this.handleCreateDoc(req);
@@ -2538,6 +2553,171 @@ export class RoadmapServer {
 		} catch (error) {
 			console.error("Error listing config keys:", error);
 			return Response.json({ error: "Failed to list config keys" }, { status: 500 });
+		}
+	}
+
+	private async handleGetFlags(): Promise<Response> {
+		try {
+			const ctrl = getControlPool();
+			const result = await ctrl.query<{
+				flag_name: string;
+				value_jsonb: unknown;
+				description: string | null;
+				category: string;
+				updated_at: string;
+			}>(
+				`SELECT flag_name, value_jsonb, description, category, updated_at
+				 FROM core.runtime_flag
+				 WHERE lifecycle_status = 'active'
+				 ORDER BY category, flag_name`,
+			);
+			return Response.json({ flags: result.rows, count: result.rows.length });
+		} catch (error) {
+			console.error("Error fetching flags:", error);
+			return Response.json({ error: "Failed to fetch flags" }, { status: 500 });
+		}
+	}
+
+	private async handlePatchFlag(req: Request, flagName: string): Promise<Response> {
+		const auth = await requireOperator(req, { action: "flag_patch" });
+		if (auth.rejected) return auth.rejected;
+		try {
+			const body = await req.json() as { value: unknown; scope?: string };
+			if (!("value" in body)) {
+				return Response.json({ error: "Missing required field: value" }, { status: 400 });
+			}
+
+			const { FlagKeys } = await import("../../shared/runtime/config-keys.ts");
+			const matchingKey = Object.values(FlagKeys).find((k) => k.name === flagName);
+			if (!matchingKey) {
+				return Response.json({ error: `Unknown flag: ${flagName}` }, { status: 404 });
+			}
+
+			// Validate via the key's parse function
+			const rawValue = typeof body.value === "string" ? body.value : JSON.stringify(body.value);
+			try {
+				matchingKey.parse(rawValue);
+			} catch (parseErr) {
+				return Response.json(
+					{ error: `Invalid value for ${flagName}: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}` },
+					{ status: 400 },
+				);
+			}
+
+			const scope = body.scope ?? "global";
+			const valueJsonb = typeof body.value === "string" ? JSON.stringify(body.value) : JSON.stringify(body.value);
+
+			const ctrl = getControlPool();
+			await ctrl.query(
+				`INSERT INTO core.runtime_flag (flag_name, scope, value_jsonb, description, category, modified_by_did, owner_did)
+				 VALUES ($1, $2, $3::jsonb, $4, $5, $6, $6)
+				 ON CONFLICT (flag_name, scope) DO UPDATE
+				   SET value_jsonb = EXCLUDED.value_jsonb,
+				       modified_at = now(),
+				       modified_by_did = EXCLUDED.modified_by_did`,
+				[
+					flagName,
+					scope,
+					valueJsonb,
+					matchingKey.description ?? null,
+					(matchingKey as Record<string, unknown>).category as string ?? "general",
+					"api:flag_patch",
+				],
+			);
+
+			await ctrl.query(`SELECT pg_notify('runtime_flag_changed', $1)`, [
+				JSON.stringify({ flag_name: flagName, scope }),
+			]);
+
+			return Response.json({ ok: true, flag_name: flagName, scope });
+		} catch (error) {
+			console.error("Error patching flag:", error);
+			return Response.json({ error: "Failed to patch flag" }, { status: 500 });
+		}
+	}
+
+	private async handlePutConfigKey(req: Request, keyName: string): Promise<Response> {
+		const auth = await requireOperator(req, { action: "config.write" });
+		if (auth.rejected) return auth.rejected;
+
+		try {
+			let body: unknown;
+			try {
+				body = await req.json();
+			} catch {
+				return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+			}
+			if (body === null || typeof body !== "object" || !("value" in (body as object))) {
+				return Response.json({ error: "Missing required field: value" }, { status: 400 });
+			}
+
+			const { value, scope: rawScope } = body as { value: unknown; scope?: string };
+			const scope = typeof rawScope === "string" ? rawScope : "global";
+
+			const { AllConfigKeys } = await import("../../shared/runtime/config-keys.ts");
+			const matchingKey = Object.values(AllConfigKeys).find((k) => k.name === keyName);
+			if (!matchingKey) {
+				return Response.json({ error: `Unknown config key: ${keyName}` }, { status: 404 });
+			}
+
+			const editable = matchingKey.class === "registry" || matchingKey.class === "flag";
+			if (!editable) {
+				return Response.json(
+					{ error: `Key "${keyName}" is not editable (class: ${matchingKey.class})`, reason: "not_editable" },
+					{ status: 422 },
+				);
+			}
+
+			if (matchingKey.class === "registry") {
+				return Response.json(
+					{ error: "Registry key mutation not yet supported (requires P828)", reason: "p828_pending" },
+					{ status: 501 },
+				);
+			}
+
+			// Flag keys: write to core.runtime_flag
+			const rawValue = typeof value === "string" ? value : JSON.stringify(value);
+			try {
+				matchingKey.parse(rawValue);
+			} catch (parseErr) {
+				return Response.json(
+					{ error: `Invalid value for ${keyName}: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`, reason: "parse_error" },
+					{ status: 400 },
+				);
+			}
+
+			const valueJsonb = JSON.stringify(value);
+			const ctrl = getControlPool();
+			await ctrl.query(
+				`INSERT INTO core.runtime_flag (flag_name, scope, value_jsonb, description, category, modified_by_did, owner_did)
+				 VALUES ($1, $2, $3::jsonb, $4, $5, $6, $6)
+				 ON CONFLICT (flag_name, scope) DO UPDATE
+				   SET value_jsonb = EXCLUDED.value_jsonb,
+				       modified_at = now(),
+				       modified_by_did = EXCLUDED.modified_by_did`,
+				[
+					keyName,
+					scope,
+					valueJsonb,
+					matchingKey.description ?? null,
+					(matchingKey as Record<string, unknown>).category as string ?? "general",
+					"api:config.write",
+				],
+			);
+
+			await ctrl.query(`SELECT pg_notify('runtime_flag_changed', $1)`, [
+				JSON.stringify({ flag_name: keyName, scope }),
+			]);
+
+			return Response.json({
+				key_name: keyName,
+				new_value: value,
+				mutation_id: crypto.randomUUID(),
+				applied_at: new Date().toISOString(),
+			});
+		} catch (error) {
+			console.error("Error updating config key:", error);
+			return Response.json({ error: "Failed to update config key" }, { status: 500 });
 		}
 	}
 
