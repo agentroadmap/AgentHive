@@ -47,6 +47,12 @@ const EXCLUDED_DIRS = new Set([
 	"scripts",
 	"integrations",
 	"finance",
+	// Divisions added upstream after the P1358 spec — excluded to keep the
+	// import at the spec'd scope and let AC-17 reconciliation pass. (The
+	// security-engineer persona still imports via the 'engineering' division.)
+	// Opt these in later by moving them to IMPORTABLE_DIVISIONS.
+	"gis",
+	"security",
 ]);
 
 /** Clamp a string to `max` chars (DB CHECK: vibe ≤160, communication ≤500). */
