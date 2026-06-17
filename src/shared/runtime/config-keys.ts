@@ -1712,6 +1712,28 @@ export const FlagKeys = {
 		envOverride: false,
 	} satisfies ConfigKey<number>,
 
+	// P3795: hard routing gate on provider health. When true (default), dispatch
+	// to a provider whose cached health status is "timeout" or "error" is blocked.
+	PROVIDER_HEALTH_GATE_ENABLED: {
+		name: "PROVIDER_HEALTH_GATE_ENABLED",
+		class: "flag" as const,
+		parse: (v: string) => {
+			try {
+				return JSON.parse(v) === true;
+			} catch {
+				return v.toLowerCase() === "true" || v === "1";
+			}
+		},
+		required: false,
+		defaultValue: true,
+		description:
+			"P3795: block dispatch to providers whose cached health status is 'timeout' or 'error'. Default ON.",
+		category: "provider_quota" as ConfigKeyCategory,
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies ConfigKey<boolean>,
+
 	AGENT_PROPOSAL_LEASE_TTL_MS: {
 		name: "AGENT_PROPOSAL_LEASE_TTL_MS",
 		class: "flag" as const,

@@ -51,6 +51,7 @@ import { validateProposal } from "../../core/orchestration/d4-validator.ts";
 import { verifyDeliverables } from "../../core/orchestration/deliverable-verifier.ts";
 import { evaluateCostQuota } from "./cost-quota-admission.ts";
 import { incrementDebt, resetDebt } from "./fair-share-debt.ts";
+import { isProviderHealthyForDispatch } from "../../core/provider-health/routing-gate.ts";
 
 const obs = new ObservabilityWriter("agency:offer-dispatch-handler");
 
@@ -569,6 +570,47 @@ async function runSpawn(args: {
 			logger.warn(
 				`[OfferDispatchHandler] ${agencyId}: no preferred_provider in agent_registry; falling back to route_hint='${payload.route_hint}'`,
 			);
+		}
+
+		// P3795: hard provider health gate — block dispatch to providers whose
+		// cached health status is "timeout" or "error". Fails open when no probe
+		// result exists (cold start or stale) to preserve availability.
+		if (agencyProvider) {
+			const healthCheck = await isProviderHealthyForDispatch(agencyProvider, null);
+			if (!healthCheck.allowed) {
+				logger.warn(
+					`[OfferDispatchHandler] ${agencyId}: provider '${agencyProvider}' blocked by health gate (status=${healthCheck.status}, checkedAt=${healthCheck.checkedAt}) for offer ${payload.offer_id}`,
+				);
+				try {
+					await exec(
+						`INSERT INTO roadmap.escalation_log
+						 (obstacle_type, agent_identity, severity, resolution_note)
+						 VALUES ($1, $2, $3, $4)`,
+						[
+							"PROVIDER_HEALTH_GATE",
+							agencyId,
+							"low",
+							`Provider ${agencyProvider} blocked: health status=${healthCheck.status} at ${healthCheck.checkedAt}`,
+						],
+					);
+				} catch (escErr) {
+					logger.warn(
+						`[OfferDispatchHandler] ${agencyId}: escalation_log INSERT failed for PROVIDER_HEALTH_GATE:`,
+						escErr instanceof Error ? escErr.message : escErr,
+					);
+				}
+				clearInterval(renewalTimer);
+				await exec(
+					`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, $4)`,
+					[claimToken, agencyId, "failed", dispatchId],
+				).catch((err) => {
+					logger.warn(
+						`[OfferDispatchHandler] ${agencyId}: fn_complete_work_offer failed on health-gate-block:`,
+						err instanceof Error ? err.message : err,
+					);
+				});
+				return;
+			}
 		}
 
 		// P1113/P1392: resolve persona and build the enriched task string.
