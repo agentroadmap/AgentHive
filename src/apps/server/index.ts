@@ -1334,6 +1334,10 @@ export class RoadmapServer {
 			if (pathname === "/api/statuses" && method === "GET")
 				return await this.handleGetStatuses();
 
+			if (pathname === "/api/config/keys") {
+				if (method === "GET") return await this.handleGetConfigKeys(req);
+			}
+
 			if (pathname === "/api/config") {
 				if (method === "GET") return await this.handleGetConfig();
 				if (method === "PUT") return await this.handleUpdateConfig(req);
@@ -2519,6 +2523,21 @@ export class RoadmapServer {
 				{ error: "Failed to update decision" },
 				{ status: 500 },
 			);
+		}
+	}
+
+	private async handleGetConfigKeys(req: Request): Promise<Response> {
+		const auth = await requireOperator(req, { action: "config_list" });
+		if (auth.rejected) return auth.rejected;
+		try {
+			const url = new URL(req.url);
+			const category = url.searchParams.get("category") ?? undefined;
+			const { configList } = await import("../mcp-server/tools/ops/config-list.ts");
+			const result = await configList({ category });
+			return Response.json(result);
+		} catch (error) {
+			console.error("Error listing config keys:", error);
+			return Response.json({ error: "Failed to list config keys" }, { status: 500 });
 		}
 	}
 

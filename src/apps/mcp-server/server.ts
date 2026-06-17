@@ -2896,6 +2896,32 @@ export async function createMcpServer(
 			}),
 	});
 
+	// P3784: Config introspection
+	server.addTool({
+		name: "config_list",
+		description:
+			"P3784: Enumerate every AllConfigKeys entry with its metadata and current resolved value. " +
+			"Secret-class keys are never resolved — value=null, masked=true. " +
+			"tenant_dsn keys are also returned with value=null. " +
+			"Optional `category` filter narrows results (pre-P3782 all categories are null).",
+		inputSchema: {
+			type: "object",
+			properties: {
+				category: {
+					type: "string",
+					description: "Optional category filter. Only keys matching this category are returned.",
+				},
+			},
+		},
+		handler: async (args: Record<string, unknown>) => {
+			const { configList } = await import("./tools/ops/config-list.ts");
+			const result = await configList({
+				category: args.category ? String(args.category) : undefined,
+			});
+			return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+		},
+	});
+
 	// Start background maintenance tasks
 	const MAINTENANCE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 	setInterval(async () => {
