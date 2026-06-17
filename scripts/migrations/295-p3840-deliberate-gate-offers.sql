@@ -39,24 +39,20 @@
 
 BEGIN;
 
--- ─── (A) Remove the remaining mature WORK roles (templates 14 + 37) ──────────
--- Exactly the mature rows from the canonical seed (139-p748-agent-role-profile.sql)
--- that survived migration 294. Scoped by (workflow_template_id, maturity, role)
--- so we never touch new/active build roles or project-scoped overrides.
+-- ─── (A) Remove ALL remaining global mature WORK roles ───────────────────────
+-- Mature = "finished, waiting for a gate decision" — it must NOT be re-worked.
+-- Remove EVERY existing global mature work role (the live set after migration 294
+-- is: developer, qa, skeptic-beta, drafter, enrichment_agent, maintainer,
+-- architect, reviewer, skeptic-alpha across templates 14+37). Excluding
+-- role='gate-review' future-proofs re-runs; at this point (pre-(B)) there are no
+-- gate-review rows yet, so this clears the full mature work set. Scoped to
+-- scope='global' so project-scoped overrides and all new/active build roles are
+-- untouched.
 
 DELETE FROM roadmap.agent_role_profile
 WHERE scope = 'global'
   AND maturity = 'mature'
-  AND (
-        -- Standard RFC (14)
-        (workflow_template_id = 14 AND stage = 'DRAFT'   AND role = 'architect')
-     OR (workflow_template_id = 14 AND stage = 'REVIEW'  AND role IN ('skeptic-alpha', 'architect'))
-     OR (workflow_template_id = 14 AND stage = 'DEVELOP' AND role IN ('skeptic-beta', 'qa'))
-     OR (workflow_template_id = 14 AND stage = 'MERGE'   AND role IN ('qa', 'maintainer'))
-        -- Hotfix (37)
-     OR (workflow_template_id = 37 AND stage = 'DRAFT'   AND role = 'architect')
-     OR (workflow_template_id = 37 AND stage = 'DEVELOP' AND role IN ('skeptic-beta', 'qa'))
-      );
+  AND role <> 'gate-review';
 
 -- ─── (B) Add deliberate gate-review roles (maturity='mature') ────────────────
 -- required_capabilities = ['gate_review'] (jsonb-array semantics; stored in the
@@ -89,7 +85,12 @@ VALUES
     ('global', NULL, 37, 'DEVELOP', 'mature', 'gate-review', ARRAY['gate_review'],
      '{"gate":"D3","from_stage":"DEVELOP","to_stage":"DEPLOYED","mode":"deliberate_gate","system":"You are a DELIBERATE D3 hotfix gate (FIX->DEPLOYED). Confirm the patch landed, the regression test passes, and the fix is deployable. Record ONE gate_decision (advance/request_for_change/reject) per P1391 with evidence. Never advance automatically."}',
      5)
-ON CONFLICT ON CONSTRAINT agent_role_profile_unique DO UPDATE SET
+-- Conflict target is the PARTIAL unique index uq_agent_role_profile_global
+-- (workflow_template_id, stage, maturity, role) WHERE scope='global' AND
+-- project_id IS NULL — inferred via the column list + matching predicate.
+ON CONFLICT (workflow_template_id, stage, maturity, role)
+    WHERE scope = 'global' AND project_id IS NULL
+DO UPDATE SET
     required_capabilities = EXCLUDED.required_capabilities,
     prompt_template       = EXCLUDED.prompt_template,
     priority              = EXCLUDED.priority,
