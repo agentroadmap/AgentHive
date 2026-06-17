@@ -45,8 +45,9 @@ import type { PoolClient, Client as PgClient } from "pg";
 import { hashOperatorToken, requireOperator } from "./operator-auth.ts";
 import { projectCreate } from "../mcp-server/tools/projects/lifecycle-handlers.ts";
 import { agentContextStorage, type VerifiedPrincipal } from "../../shared/identity/agent-context.ts";
-import { AllConfigKeys, getConfigKeyByName } from "../../shared/runtime/config-keys.ts";
+import { getConfigKeyByName } from "../../shared/runtime/config-keys.ts";
 import { set as configSet } from "../../shared/runtime/config.ts";
+import { configList } from "../mcp-server/tools/ops/config-list-ops.ts";
 import { verifyBoundBearer } from "../../core/identity/principal-identity.ts";
 import {
 	generateArchitectureDocs,
@@ -1342,6 +1343,15 @@ export class RoadmapServer {
 				if (method === "PUT") return await this.handleMutateConfigKey(req, keyName);
 			}
 
+			if (pathname === "/api/flags") {
+				if (method === "GET") return await this.handleGetFlags();
+			}
+
+			if (pathname.startsWith("/api/flags/")) {
+				const flagName = pathname.slice("/api/flags/".length);
+				if (method === "PATCH") return await this.handleMutateConfigKey(req, flagName);
+			}
+
 			if (pathname === "/api/docs") {
 				if (method === "GET") return await this.handleListDocs();
 				if (method === "POST") return await this.handleCreateDoc(req);
@@ -2532,44 +2542,38 @@ export class RoadmapServer {
 		const url = new URL(req.url, "http://localhost");
 		const categoryFilter = url.searchParams.get("category") ?? undefined;
 
-		const descriptors = Object.values(AllConfigKeys)
-			.filter((key) => !categoryFilter || key.category === categoryFilter)
-			.map((key) => {
-				const masked = key.class === "secret";
-				const editable = key.class === "flag" || key.class === "registry";
-				let value: unknown = null;
-				if (!masked) {
-					const envVal = process.env[key.name];
-					if (envVal !== undefined) {
-						try {
-							value = key.parse(envVal);
-						} catch {
-							value = envVal;
-						}
-					} else if ("defaultValue" in key) {
-						value = (key as { defaultValue?: unknown }).defaultValue ?? null;
-					}
-				}
-				return {
-					name: key.name,
-					class: key.class,
-					category: (key as { category?: string }).category ?? null,
-					description: key.description ?? null,
-					value,
-					default_value: ("defaultValue" in key ? (key as { defaultValue?: unknown }).defaultValue : null) ?? null,
-					required: key.required,
-					db_table: (key as { dbTable?: string }).dbTable ?? null,
-					scope: null,
-					editable,
-					masked,
-				};
-			});
+		const result = await configList({ category: categoryFilter });
+		return Response.json(result);
+	}
 
-		return Response.json({
-			keys: descriptors,
-			count: descriptors.length,
-			category_filter: categoryFilter ?? null,
-		});
+	private async handleGetFlags(): Promise<Response> {
+		try {
+			const { rows } = await query<{
+				flag_name: string;
+				value_jsonb: string;
+				description: string | null;
+				category: string;
+				updated_at: string;
+			}>(
+				`SELECT flag_name, value_jsonb::text, description, category, updated_at
+				   FROM core.runtime_flag
+				  WHERE scope = 'global'
+				  ORDER BY category, flag_name`,
+			);
+			return Response.json({
+				flags: rows.map((r) => ({
+					name: r.flag_name,
+					value_jsonb: r.value_jsonb,
+					description: r.description,
+					category: r.category,
+					updated_at: r.updated_at,
+				})),
+				count: rows.length,
+			});
+		} catch (err) {
+			console.error("[GET /api/flags]", err);
+			return Response.json({ error: "Failed to query flags" }, { status: 500 });
+		}
 	}
 
 	private async handleMutateConfigKey(req: Request, keyName: string): Promise<Response> {

@@ -3264,6 +3264,39 @@ export async function createMcpServer(
 			}),
 	});
 
+	// P3784: Config key registry introspection (operator-only read surface)
+	server.addTool({
+		name: "config_list",
+		description:
+			"P3784: Enumerate every registered config key with metadata (name, class, category, " +
+			"description, current resolved value, default, required, db_table, scope) plus derived " +
+			"editable/masked affordance booleans. Secret keys always return value=null and masked=true " +
+			"(getOptional is never called for them). Optional category filter narrows the result. " +
+			"Requires operator principal (agent principals denied).",
+		inputSchema: {
+			type: "object",
+			properties: {
+				category: {
+					type: "string",
+					description:
+						"Optional category filter (e.g. 'orchestrator', 'dispatch', 'liaison'). " +
+						"Omit to return all keys.",
+				},
+			},
+		},
+		handler: async (args: Record<string, unknown>) => {
+			const { configList } = await import("./tools/ops/config-list-ops.ts");
+			const category =
+				args.category && typeof args.category === "string"
+					? args.category
+					: undefined;
+			const result = await configList({ category });
+			return {
+				content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+			};
+		},
+	});
+
 	// Start background maintenance tasks
 	const MAINTENANCE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 	setInterval(async () => {

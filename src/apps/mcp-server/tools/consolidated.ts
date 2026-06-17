@@ -388,6 +388,8 @@ const opsRoutes: RouteMap = {
 	health_check: "health_check",
 	// P1124: D4 merge-gate validator
 	d4_validate: "d4_validate",
+	// P3784: Config key registry introspection
+	config_list: "config_list",
 };
 
 const projectRoutes: RouteMap = {
