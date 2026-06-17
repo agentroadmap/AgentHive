@@ -17,6 +17,11 @@ const projectRoot = join(__dirname, "..");
 const poolModule = await import("../src/infra/postgres/pool.ts");
 const setPoolLifecycleMode =
 	poolModule.setPoolLifecycleMode || poolModule.default?.setPoolLifecycleMode;
+
+// P3794 AC-2: load armHardExit for use after the SIGTERM handler is registered (below).
+const gracefulExitModule = await import("../src/shared/runtime/graceful-exit.ts");
+const armHardExit =
+	gracefulExitModule.armHardExit || gracefulExitModule.default?.armHardExit;
 if (typeof setPoolLifecycleMode !== "function") {
 	console.error("[MCP] Failed to load setPoolLifecycleMode from pool module");
 	process.exit(1);
@@ -372,6 +377,13 @@ process.on("SIGINT", () => {
 		process.exit(0);
 	});
 });
+
+// AC-2 (P3794): hard-exit failsafe — if server.close() hangs (e.g. long-lived
+// SSE connections never drain), force process.exit(1) after 10 000 ms.
+// Called after SIGTERM handler registration so the timer only starts on SIGTERM.
+if (typeof armHardExit === "function") {
+	armHardExit("mcp-sse-server");
+}
 
 process.on("uncaughtException", (err) => {
 	console.error("[MCP] Uncaught exception:", err);
