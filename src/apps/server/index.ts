@@ -36,7 +36,7 @@ import {
 	handleMetrics,
 } from "./routes/system.ts";
 import {
-	handleSearch as handleSearchRoute,
+	handleSearch as _handleSearch,
 	handleListKnowledge as handleListKnowledgeRoute,
 	handleMarkKnowledgeHelpful as handleMarkKnowledgeHelpfulRoute,
 } from "./routes/search-knowledge.ts";
@@ -95,6 +95,8 @@ import {
 	resumeAgencyOperator,
 	retireAgencyOperator,
 } from "../../core/orchestration/resolvers/agency-resolver.ts";
+import { agentNotifyChannel } from "../../infra/messaging/a2a-access-control.ts";
+import { AllConfigKeys } from "../../shared/runtime/config-keys.ts";
 
 // Regex pattern to match any prefix (letters followed by dash)
 const PREFIX_PATTERN = /^[a-zA-Z]+-/i;
@@ -1405,6 +1407,13 @@ export class RoadmapServer {
 				if (method === "PUT") return await this.handleUpdateConfig(req);
 			}
 
+			// P3785 (branch): PUT /api/config/keys/:keyName — must come BEFORE the
+			// single-segment /api/config/:keyName matcher to avoid being shadowed.
+			if (pathname.startsWith("/api/config/keys/") && method === "PUT") {
+				const keyName = decodeURIComponent(pathname.slice("/api/config/keys/".length));
+				return await this.handleSetConfigKey(req, keyName);
+			}
+
 			// P3785: PUT /api/config/:keyName — must come AFTER exact /api/config/keys check
 			const configKeyMatch = pathname.match(/^\/api\/config\/([^/]+)$/);
 			if (configKeyMatch && configKeyMatch[1] !== "keys") {
@@ -1792,7 +1801,8 @@ export class RoadmapServer {
 	}
 
 	private async handleSearch(req: Request): Promise<Response> {
-		return handleSearchRoute(req, this.serverContext());
+		const searchService = await this.getSearchServiceInstance();
+		return _handleSearch(req, searchService);
 	}
 
 	private async handleCreateProposal(req: Request): Promise<Response> {
@@ -6679,6 +6689,122 @@ export class RoadmapServer {
 		} catch (err) {
 			console.error("[p659] combine failed:", (err as Error).message);
 			return Response.json({ error: "combine action failed" }, { status: 500 });
+		}
+	}
+
+	// P3784: GET /api/config/keys — full registry with live values
+	private async handleListConfigKeys(req: Request): Promise<Response> {
+		const auth = await requireOperator(req, { action: "config.read" });
+		if (auth.rejected) return auth.rejected;
+
+		try {
+			const url = new URL(req.url);
+			const categoryFilter = url.searchParams.get("category") ?? undefined;
+
+			// Fetch all active flag values in one query to avoid N+1
+			const flagRows = await query(
+				`SELECT flag_name, scope, value_jsonb FROM core.runtime_flag WHERE lifecycle_status = 'active'`,
+			);
+			const flagValueMap = new Map<string, unknown>();
+			for (const row of flagRows.rows) {
+				flagValueMap.set(`${row.flag_name}:${row.scope ?? "global"}`, row.value_jsonb);
+			}
+
+			const keys = Object.values(AllConfigKeys)
+				.filter((key) => !categoryFilter || (key as any).category === categoryFilter)
+				.map((key) => {
+					const masked = key.class === "secret";
+					const editable = key.class === "flag" || key.class === "registry";
+					let value: unknown = null;
+					if (!masked) {
+						// For flag keys, prefer DB live value; for structural, use process.env
+						if (key.class === "flag") {
+							value = flagValueMap.get(`${key.name}:global`) ?? (key as any).defaultValue ?? null;
+						} else if (key.class === "structural" || key.class === "registry") {
+							const envVal = process.env[key.name];
+							value = envVal !== undefined ? envVal : ((key as any).defaultValue ?? null);
+						}
+					}
+					return {
+						name: key.name,
+						class: key.class,
+						category: (key as any).category ?? null,
+						description: key.description ?? null,
+						value,
+						default_value: (key as any).defaultValue ?? null,
+						required: key.required,
+						db_table: (key as any).dbTable ?? null,
+						scope: "global",
+						editable,
+						masked,
+					};
+				});
+
+			return Response.json({ keys, count: keys.length, category_filter: categoryFilter ?? null });
+		} catch (error) {
+			console.error("Error listing config keys:", error);
+			return Response.json({ error: "Failed to list config keys" }, { status: 500 });
+		}
+	}
+
+	// P3785: PUT /api/config/keys/:keyName — operator-gated flag mutation
+	private async handleSetConfigKey(req: Request, keyName: string): Promise<Response> {
+		const auth = await requireOperator(req, { action: "config.write" });
+		if (auth.rejected) return auth.rejected;
+
+		try {
+			const keyDef = AllConfigKeys[keyName as keyof typeof AllConfigKeys];
+			if (!keyDef) {
+				return Response.json({ error: `Unknown config key: ${keyName}` }, { status: 404 });
+			}
+			if (keyDef.class !== "flag" && keyDef.class !== "registry") {
+				return Response.json(
+					{ error: `Key ${keyName} (class=${keyDef.class}) is not editable via this endpoint` },
+					{ status: 400 },
+				);
+			}
+
+			let body: Record<string, unknown>;
+			try {
+				body = await req.json();
+			} catch {
+				return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+			}
+
+			if (!("value" in body)) {
+				return Response.json({ error: "value is required" }, { status: 400 });
+			}
+			const scope = typeof body.scope === "string" ? body.scope : "global";
+			const newValue = body.value;
+
+			// For flag keys: upsert into core.runtime_flag
+			if (keyDef.class === "flag") {
+				const { rows } = await query(
+					`INSERT INTO core.runtime_flag (flag_name, scope, value_jsonb, lifecycle_status, category)
+					 VALUES ($1, $2, $3::jsonb, 'active', $4)
+					 ON CONFLICT (flag_name, scope)
+					 DO UPDATE SET value_jsonb = EXCLUDED.value_jsonb, updated_at = NOW()
+					 RETURNING flag_name, scope, value_jsonb, updated_at`,
+					[keyName, scope, JSON.stringify(newValue), (keyDef as any).category ?? "general"],
+				);
+				const row = rows[0];
+				const mutationId = `mut_${Date.now()}`;
+				return Response.json({
+					key_name: keyName,
+					new_value: row?.value_jsonb ?? newValue,
+					mutation_id: mutationId,
+					applied_at: row?.updated_at ?? new Date().toISOString(),
+				});
+			}
+
+			// registry keys: not yet supported without P828 config.set()
+			return Response.json(
+				{ error: `Registry key mutation not yet supported (P828 pending)` },
+				{ status: 501 },
+			);
+		} catch (error) {
+			console.error("Error setting config key:", error);
+			return Response.json({ error: "Failed to set config key" }, { status: 500 });
 		}
 	}
 }

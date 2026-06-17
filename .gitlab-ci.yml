@@ -171,6 +171,16 @@ binary-bundle-check:
     paths:
       - node_modules/
 
+migration-continuity-check:
+  stage: check
+  script:
+    - npm ci
+    - npm run check:migration-continuity
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
+
 message-type-drift:
   stage: check
   script:

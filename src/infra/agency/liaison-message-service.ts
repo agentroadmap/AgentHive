@@ -8,11 +8,14 @@ import { Client as PgClient } from 'pg';
 import { query } from '../postgres/pool.js';
 import { agentNotifyChannel } from '../messaging/a2a-access-control.js';
 import type { LiaisonMessage, LiaisonMessageAckOutcome } from './liaison-message-types.js';
+import { agentNotifyChannel } from '../messaging/a2a-access-control.js';
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 
 const MESSAGE_SEQUENCE_WINDOW = 100; // Buffer out-of-order messages up to this window
 const SIGNED_AT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+// P1456 AC-14/AC-17: channel naming routed through agentNotifyChannel() (msg_ prefix).
+// The LISTEN_CHANNEL_PREFIX constant is removed; use agentNotifyChannel(agencyId) directly.
 
 // Signing key: shared secret from env, falls back to deterministic dev sentinel.
 // P208 RSA key-pair integration is separate; HMAC-SHA256 is the wire implementation.

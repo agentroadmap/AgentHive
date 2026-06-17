@@ -20,6 +20,7 @@ import {
 import { agentNotifyChannel } from "../../../../infra/messaging/a2a-access-control.ts";
 import { getPool, query } from "../../../../postgres/pool.ts";
 import type { CallToolResult } from "../../types.ts";
+import { agentNotifyChannel } from "../../../../infra/messaging/a2a-access-control.ts";
 
 function errorResult(msg: string, err: unknown): CallToolResult {
 	return {

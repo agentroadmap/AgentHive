@@ -154,6 +154,15 @@ CREATE TABLE IF NOT EXISTS core.runtime_flag (
   scope             TEXT         NOT NULL              -- 'global' | 'host:<id>' | 'agency:<id>' | 'project:<slug>'
                                 CHECK (scope = 'global' OR scope ~ '^(host|agency|project):.+$'),
   value_jsonb       JSONB        NOT NULL,
+  category          TEXT         NOT NULL DEFAULT 'general'
+                                CHECK (category IN (
+                                  'database', 'connection_pool', 'vault_secret',
+                                  'mcp_endpoint', 'orchestrator', 'dispatch',
+                                  'liaison', 'pause_backoff', 'provider_quota',
+                                  'adaptive_matcher', 'gate_governance', 'multi_tenant',
+                                  'model_routing', 'audit', 'ui_ux', 'diagnostic',
+                                  'general'
+                                )),
   description       TEXT,
   category          TEXT         NOT NULL DEFAULT 'general'
                                 CHECK (category IN (

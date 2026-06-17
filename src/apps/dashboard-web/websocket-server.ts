@@ -644,5 +644,9 @@ export function startWebSocketServer(port = 3001): void {
 			snapshotTimer = null;
 		}
 		wss?.close();
+		if (listenPool) {
+			void listenPool.end().catch(() => {});
+			listenPool = null;
+		}
 	});
 }

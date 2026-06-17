@@ -1088,6 +1088,8 @@ hive dispatch list --proposal P123 --state new
 
 ### Current Implementation Status (as of 2026-06-16)
 
+> **Status as of 2026-06-17:** `bin/hive` shim and `jiti` runtime are present. No prebuilt `dist/hive-cli.cjs.js` bundle exists yet. Dependency proposals P453, P410, P411, P446, P454 are all COMPLETE.
+
 | Phase | Status | Duration | Deliverables | Depends On |
 | --- | --- | --- | --- | --- |
 | **Phase 1: Core Scaffolding** | COMPLETE | 1 week | Domain module template, context resolution, formatters, mcp-client wrapper, control-plane-client | — |

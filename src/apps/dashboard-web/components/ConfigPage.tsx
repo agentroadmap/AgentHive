@@ -1,425 +1,342 @@
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiClient, type ConfigKeyDescriptor } from "../lib/api";
+import { apiClient, type ConfigKeyDescriptor, type ConfigMutationResult } from "../lib/api";
 
-type EditState = { value: string; saving: boolean; error: string | null };
+const CLASS_BADGE: Record<string, string> = {
+	flag: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
+	registry: "bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300",
+	structural: "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300",
+	secret: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
+	tenant_dsn: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300",
+};
 
-function groupByCategory(keys: ConfigKeyDescriptor[]): Map<string, ConfigKeyDescriptor[]> {
-	const map = new Map<string, ConfigKeyDescriptor[]>();
-	for (const key of keys) {
-		const cat = key.category ?? "General";
-		const bucket = map.get(cat) ?? [];
-		bucket.push(key);
-		map.set(cat, bucket);
-	}
-	// Sort categories: General last, rest alphabetical
-	const sorted = new Map<string, ConfigKeyDescriptor[]>();
-	const cats = [...map.keys()].sort((a, b) => {
-		if (a === "General") return 1;
-		if (b === "General") return -1;
-		return a.localeCompare(b);
-	});
-	for (const cat of cats) sorted.set(cat, map.get(cat)!);
-	return sorted;
+// Known enum values for specific keys
+const ENUM_OPTIONS: Record<string, string[]> = {
+	AGENTHIVE_COCKPIT_LAYOUT: ["grid", "stacked"],
+};
+
+interface KeyMutationState {
+	saving: boolean;
+	error: string | null;
+	flash: boolean;
 }
 
-function inferInputType(key: ConfigKeyDescriptor): "boolean" | "number" | "text" {
-	if (key.class === "flag") return "boolean";
+function inferEditType(key: ConfigKeyDescriptor): "masked" | "readonly" | "boolean" | "number" | "enum" | "text" {
+	if (key.masked || key.class === "secret") return "masked";
+	if (key.class === "structural" || key.class === "tenant_dsn") return "readonly";
+	if (!key.editable) return "readonly";
+	if (ENUM_OPTIONS[key.name]) return "enum";
+	if (typeof key.default_value === "boolean" || key.value === true || key.value === false) return "boolean";
 	if (typeof key.default_value === "number") return "number";
 	return "text";
 }
 
-function displayValue(key: ConfigKeyDescriptor): string {
-	if (key.masked) return "••••••••";
-	if (key.value == null) return "";
-	if (typeof key.value === "boolean") return key.value ? "true" : "false";
-	return String(key.value);
+interface ConfigKeyRowProps {
+	keyDef: ConfigKeyDescriptor;
+	mutState: KeyMutationState;
+	onMutate: (keyName: string, value: unknown) => Promise<void>;
 }
 
-const ConfigPage: React.FC = () => {
-	const [keys, setKeys] = useState<ConfigKeyDescriptor[]>([]);
-	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
-	const [filterClass, setFilterClass] = useState<string>("");
-	const [filterText, setFilterText] = useState<string>("");
-	const [refreshing, setRefreshing] = useState(false);
-	const [editStates, setEditStates] = useState<Map<string, EditState>>(new Map());
-	const inputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
-
-	const fetchData = useCallback(async (isRefresh = false) => {
-		try {
-			setError(null);
-			if (isRefresh) setRefreshing(true);
-			const data = await apiClient.fetchConfigKeys();
-			setKeys(data);
-		} catch (err) {
-			console.error("Failed to fetch config keys:", err);
-			setError("Failed to load config keys");
-		} finally {
-			setLoading(false);
-			setRefreshing(false);
-		}
-	}, []);
-
-	useEffect(() => {
-		void fetchData();
-	}, [fetchData]);
-
-	const startEdit = useCallback((key: ConfigKeyDescriptor) => {
-		if (!key.editable) return;
-		setEditStates((prev) => {
-			const next = new Map(prev);
-			if (!next.has(key.name)) {
-				next.set(key.name, {
-					value: displayValue(key),
-					saving: false,
-					error: null,
-				});
-			}
-			return next;
-		});
-		setTimeout(() => inputRefs.current.get(key.name)?.focus(), 0);
-	}, []);
-
-	const cancelEdit = useCallback((keyName: string) => {
-		setEditStates((prev) => {
-			const next = new Map(prev);
-			next.delete(keyName);
-			return next;
-		});
-	}, []);
-
-	const saveEdit = useCallback(
-		async (key: ConfigKeyDescriptor) => {
-			const state = editStates.get(key.name);
-			if (!state) return;
-
-			let parsedValue: unknown = state.value;
-			if (inferInputType(key) === "boolean") {
-				parsedValue = state.value === "true" || state.value === "1";
-			} else if (inferInputType(key) === "number") {
-				const n = Number(state.value);
-				if (Number.isNaN(n)) {
-					setEditStates((prev) => {
-						const next = new Map(prev);
-						next.set(key.name, { ...state, error: "Must be a number" });
-						return next;
-					});
-					return;
-				}
-				parsedValue = n;
-			}
-
-			setEditStates((prev) => {
-				const next = new Map(prev);
-				next.set(key.name, { ...state, saving: true, error: null });
-				return next;
-			});
-
-			// Optimistic update
-			const prevValue = key.value;
-			setKeys((prev) =>
-				prev.map((k) => (k.name === key.name ? { ...k, value: parsedValue } : k)),
-			);
-
-			try {
-				await apiClient.mutateConfigKey(key.name, parsedValue);
-				setEditStates((prev) => {
-					const next = new Map(prev);
-					next.delete(key.name);
-					return next;
-				});
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : "Save failed";
-				setKeys((prev) =>
-					prev.map((k) => (k.name === key.name ? { ...k, value: prevValue } : k)),
-				);
-				setEditStates((prev) => {
-					const next = new Map(prev);
-					next.set(key.name, { ...state, saving: false, error: msg });
-					return next;
-				});
-			}
-		},
-		[editStates],
-	);
-
-	const classes = [...new Set(keys.map((k) => k.class))].sort();
-
-	const filtered = keys.filter((k) => {
-		if (filterClass && k.class !== filterClass) return false;
-		if (filterText) {
-			const q = filterText.toLowerCase();
-			return (
-				k.name.toLowerCase().includes(q) ||
-				(k.description ?? "").toLowerCase().includes(q) ||
-				(k.category ?? "").toLowerCase().includes(q)
-			);
-		}
-		return true;
+const ConfigKeyRow: React.FC<ConfigKeyRowProps> = ({ keyDef, mutState, onMutate }) => {
+	const editType = inferEditType(keyDef);
+	const [pendingText, setPendingText] = useState<string>(() => {
+		if (keyDef.value === null || keyDef.value === undefined) return "";
+		return String(keyDef.value);
 	});
+	const pendingRef = useRef(pendingText);
+	pendingRef.current = pendingText;
 
-	const grouped = groupByCategory(filtered);
+	const handleBlur = useCallback(() => {
+		const val = pendingRef.current;
+		if (val === String(keyDef.value ?? "")) return;
+		const parsed = editType === "number" ? Number(val) : val;
+		onMutate(keyDef.name, parsed);
+	}, [keyDef.name, keyDef.value, editType, onMutate]);
 
-	if (loading) {
-		return (
-			<div className="flex items-center justify-center h-64">
-				<div className="text-gray-500">Loading config keys…</div>
-			</div>
+	const handleBoolToggle = useCallback(() => {
+		onMutate(keyDef.name, !(keyDef.value));
+	}, [keyDef.name, keyDef.value, onMutate]);
+
+	const handleSelectChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
+		onMutate(keyDef.name, e.target.value);
+	}, [keyDef.name, onMutate]);
+
+	let valueCell: React.ReactNode;
+	if (editType === "masked") {
+		valueCell = <span className="text-gray-400 dark:text-gray-500 italic text-xs">(hidden)</span>;
+	} else if (editType === "readonly") {
+		valueCell = (
+			<span className="font-mono text-xs text-gray-700 dark:text-gray-300 break-all">
+				{keyDef.value !== null && keyDef.value !== undefined ? String(keyDef.value) : "—"}
+				<span className="ml-2 text-gray-400 dark:text-gray-500 text-xs italic">
+					(deploy config)
+				</span>
+			</span>
+		);
+	} else if (editType === "boolean") {
+		valueCell = (
+			<input
+				type="checkbox"
+				checked={!!keyDef.value}
+				disabled={mutState.saving}
+				onChange={handleBoolToggle}
+				className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+			/>
+		);
+	} else if (editType === "enum") {
+		valueCell = (
+			<select
+				value={String(keyDef.value ?? "")}
+				disabled={mutState.saving}
+				onChange={handleSelectChange}
+				className="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm px-2 py-1 font-mono"
+			>
+				{(ENUM_OPTIONS[keyDef.name] ?? []).map((opt) => (
+					<option key={opt} value={opt}>{opt}</option>
+				))}
+			</select>
+		);
+	} else if (editType === "number") {
+		valueCell = (
+			<input
+				type="number"
+				value={pendingText}
+				disabled={mutState.saving}
+				onChange={(e) => setPendingText(e.target.value)}
+				onBlur={handleBlur}
+				className="w-28 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm px-2 py-1 font-mono"
+			/>
+		);
+	} else {
+		valueCell = (
+			<input
+				type="text"
+				value={pendingText}
+				disabled={mutState.saving}
+				onChange={(e) => setPendingText(e.target.value)}
+				onBlur={handleBlur}
+				className="w-48 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm px-2 py-1 font-mono"
+			/>
 		);
 	}
 
-	if (error) {
-		return <div className="p-4 text-red-600 bg-red-50 rounded">{error}</div>;
-	}
+	return (
+		<tr
+			className={`border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors ${
+				mutState.flash ? "bg-green-50 dark:bg-green-900/20" : ""
+			}`}
+		>
+			<td className="py-2 px-3 align-top">
+				<span className="font-mono text-xs font-medium text-gray-900 dark:text-gray-100 break-all">
+					{keyDef.name}
+				</span>
+				{keyDef.description && (
+					<p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 max-w-xs">
+						{keyDef.description}
+					</p>
+				)}
+			</td>
+			<td className="py-2 px-3 align-top whitespace-nowrap">
+				<span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${CLASS_BADGE[keyDef.class] ?? ""}`}>
+					{keyDef.class}
+				</span>
+			</td>
+			<td className="py-2 px-3 align-top">
+				<div className="flex flex-col gap-1">
+					{valueCell}
+					{mutState.saving && (
+						<span className="text-xs text-blue-500">saving…</span>
+					)}
+					{mutState.error && (
+						<span className="text-xs text-red-600 dark:text-red-400">{mutState.error}</span>
+					)}
+				</div>
+			</td>
+			<td className="py-2 px-3 align-top text-xs font-mono text-gray-500 dark:text-gray-400">
+				{keyDef.default_value !== null && keyDef.default_value !== undefined
+					? String(keyDef.default_value)
+					: "—"}
+			</td>
+		</tr>
+	);
+};
+
+interface CategorySectionProps {
+	category: string;
+	keys: ConfigKeyDescriptor[];
+	mutStates: Map<string, KeyMutationState>;
+	onMutate: (keyName: string, value: unknown) => Promise<void>;
+}
+
+const CategorySection: React.FC<CategorySectionProps> = ({ category, keys, mutStates, onMutate }) => {
+	const [collapsed, setCollapsed] = useState(false);
 
 	return (
-		<div className="container mx-auto px-4 py-8">
-			<div className="flex items-center justify-between mb-6">
-				<h1 className="text-2xl font-bold">Config Keys</h1>
-				<div className="flex items-center gap-4 flex-wrap">
-					<input
-						type="search"
-						placeholder="Filter…"
-						value={filterText}
-						onChange={(e) => setFilterText(e.target.value)}
-						className="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-2 py-1 text-sm w-40"
-					/>
-					<div className="flex items-center gap-2">
-						<label htmlFor="class-filter" className="text-sm text-gray-600 dark:text-gray-400">
-							Class:
-						</label>
-						<select
-							id="class-filter"
-							value={filterClass}
-							onChange={(e) => setFilterClass(e.target.value)}
-							className="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-2 py-1 text-sm"
-						>
-							<option value="">All</option>
-							{classes.map((c) => (
-								<option key={c} value={c}>
-									{c}
-								</option>
-							))}
-						</select>
-					</div>
-					<span className="text-sm text-gray-500 dark:text-gray-400">
-						{filtered.length} keys
+		<div className="mb-4 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+			<button
+				type="button"
+				onClick={() => setCollapsed((v) => !v)}
+				className="w-full flex items-center justify-between px-4 py-2.5 bg-gray-50 dark:bg-gray-800/70 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-left"
+			>
+				<span className="font-semibold text-sm text-gray-800 dark:text-gray-200 capitalize">
+					{category.replace(/_/g, " ")}
+				</span>
+				<div className="flex items-center gap-2">
+					<span className="text-xs bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 px-2 py-0.5 rounded-full">
+						{keys.length}
 					</span>
-					<button
-						type="button"
-						onClick={() => void fetchData(true)}
-						disabled={refreshing}
-						className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs text-gray-600 dark:text-gray-400 border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
-						title="Refresh"
+					<svg
+						className={`w-4 h-4 text-gray-500 transition-transform ${collapsed ? "" : "rotate-90"}`}
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						strokeWidth="2"
+						aria-hidden="true"
 					>
-						<svg
-							className={`w-3 h-3 ${refreshing ? "animate-spin" : ""}`}
-							fill="none"
-							stroke="currentColor"
-							viewBox="0 0 24 24"
-							aria-hidden="true"
-						>
-							<path
-								strokeLinecap="round"
-								strokeLinejoin="round"
-								strokeWidth={2}
-								d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-							/>
-						</svg>
-						Refresh
-					</button>
+						<path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+					</svg>
 				</div>
-			</div>
-
-			{[...grouped.entries()].map(([category, categoryKeys]) => (
-				<div key={category} className="mb-8">
-					<h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-3">
-						{category}
-					</h2>
-					<div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
-						<table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-							<thead className="bg-gray-50 dark:bg-gray-800">
-								<tr>
-									<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-56">
-										Key
-									</th>
-									<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-20">
-										Class
-									</th>
-									<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-										Description
-									</th>
-									<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-64">
-										Value
-									</th>
-								</tr>
-							</thead>
-							<tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
-								{categoryKeys.map((key) => {
-									const editState = editStates.get(key.name);
-									const inputType = inferInputType(key);
-									return (
-										<tr
-											key={key.name}
-											className="hover:bg-gray-50 dark:hover:bg-gray-800"
-										>
-											<td className="px-4 py-3 font-mono text-xs text-gray-800 dark:text-gray-200 align-top">
-												{key.name}
-												{key.required && (
-													<span className="ml-1 text-red-500" title="Required">
-														*
-													</span>
-												)}
-											</td>
-											<td className="px-4 py-3 align-top">
-												<ClassBadge cls={key.class} />
-											</td>
-											<td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400 align-top">
-												{key.description ?? "—"}
-											</td>
-											<td className="px-4 py-3 align-top">
-												{key.masked ? (
-													<span className="font-mono text-xs text-gray-400 dark:text-gray-500">
-														••••••••
-													</span>
-												) : !key.editable ? (
-													<span className="font-mono text-xs text-gray-700 dark:text-gray-300">
-														{key.value == null ? (
-															<span className="text-gray-300 dark:text-gray-600">—</span>
-														) : (
-															String(key.value)
-														)}
-													</span>
-												) : editState ? (
-													<div className="flex flex-col gap-1">
-														{inputType === "boolean" ? (
-															<select
-																value={editState.value}
-																onChange={(e) =>
-																	setEditStates((prev) => {
-																		const next = new Map(prev);
-																		next.set(key.name, {
-																			...editState,
-																			value: e.target.value,
-																			error: null,
-																		});
-																		return next;
-																	})
-																}
-																className="rounded border border-blue-400 dark:border-blue-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-2 py-1 text-xs font-mono"
-																disabled={editState.saving}
-															>
-																<option value="true">true</option>
-																<option value="false">false</option>
-															</select>
-														) : (
-															<input
-																ref={(el) => {
-																	if (el) inputRefs.current.set(key.name, el);
-																	else inputRefs.current.delete(key.name);
-																}}
-																type={inputType === "number" ? "number" : "text"}
-																value={editState.value}
-																onChange={(e) =>
-																	setEditStates((prev) => {
-																		const next = new Map(prev);
-																		next.set(key.name, {
-																			...editState,
-																			value: e.target.value,
-																			error: null,
-																		});
-																		return next;
-																	})
-																}
-																onKeyDown={(e) => {
-																	if (e.key === "Enter") void saveEdit(key);
-																	if (e.key === "Escape") cancelEdit(key.name);
-																}}
-																className="rounded border border-blue-400 dark:border-blue-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-2 py-1 text-xs font-mono w-full"
-																disabled={editState.saving}
-															/>
-														)}
-														<div className="flex items-center gap-2">
-															<button
-																type="button"
-																onClick={() => void saveEdit(key)}
-																disabled={editState.saving}
-																className="px-2 py-0.5 rounded text-xs bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
-															>
-																{editState.saving ? "Saving…" : "Save"}
-															</button>
-															<button
-																type="button"
-																onClick={() => cancelEdit(key.name)}
-																disabled={editState.saving}
-																className="px-2 py-0.5 rounded text-xs text-gray-600 dark:text-gray-400 border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
-															>
-																Cancel
-															</button>
-															{editState.error && (
-																<span className="text-xs text-red-600">
-																	{editState.error}
-																</span>
-															)}
-														</div>
-													</div>
-												) : (
-													<button
-														type="button"
-														onClick={() => startEdit(key)}
-														className="font-mono text-xs text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 text-left group"
-														title="Click to edit"
-													>
-														{key.value == null ? (
-															<span className="text-gray-300 dark:text-gray-600 group-hover:text-blue-400">
-																—
-															</span>
-														) : (
-															<>
-																{String(key.value)}
-																<span className="ml-1 opacity-0 group-hover:opacity-60 text-gray-400">
-																	✎
-																</span>
-															</>
-														)}
-													</button>
-												)}
-											</td>
-										</tr>
-									);
-								})}
-							</tbody>
-						</table>
-					</div>
-				</div>
-			))}
-
-			{filtered.length === 0 && (
-				<div className="text-center py-8 text-gray-500">
-					No keys match the current filters.
+			</button>
+			{!collapsed && (
+				<div className="overflow-x-auto">
+					<table className="min-w-full text-sm">
+						<thead>
+							<tr className="bg-gray-50/50 dark:bg-gray-800/30 text-xs text-gray-500 dark:text-gray-400">
+								<th className="px-3 py-2 text-left font-medium w-1/3">Key / Description</th>
+								<th className="px-3 py-2 text-left font-medium w-20">Class</th>
+								<th className="px-3 py-2 text-left font-medium">Current Value</th>
+								<th className="px-3 py-2 text-left font-medium w-32">Default</th>
+							</tr>
+						</thead>
+						<tbody>
+							{keys.map((key) => (
+								<ConfigKeyRow
+									key={key.name}
+									keyDef={key}
+									mutState={mutStates.get(key.name) ?? { saving: false, error: null, flash: false }}
+									onMutate={onMutate}
+								/>
+							))}
+						</tbody>
+					</table>
 				</div>
 			)}
 		</div>
 	);
 };
 
-const CLASS_COLORS: Record<string, string> = {
-	flag: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
-	registry: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
-	secret: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
-	structural: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400",
-	tenant_dsn: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
-	diagnostic: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400",
-};
+export default function ConfigPage() {
+	const [keys, setKeys] = useState<ConfigKeyDescriptor[]>([]);
+	const [loading, setLoading] = useState(true);
+	const [loadError, setLoadError] = useState<string | null>(null);
+	const [mutStates, setMutStates] = useState<Map<string, KeyMutationState>>(new Map());
 
-function ClassBadge({ cls }: { cls: string }) {
-	const color = CLASS_COLORS[cls] ?? "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400";
+	useEffect(() => {
+		let cancelled = false;
+		setLoading(true);
+		setLoadError(null);
+		apiClient
+			.fetchConfigKeys()
+			.then((ks) => {
+				if (!cancelled) {
+					setKeys(ks);
+					setLoading(false);
+				}
+			})
+			.catch((err: Error) => {
+				if (!cancelled) {
+					setLoadError(err.message ?? "Failed to load config keys");
+					setLoading(false);
+				}
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, []);
+
+	const handleMutate = useCallback(async (keyName: string, value: unknown) => {
+		setMutStates((prev) => {
+			const next = new Map(prev);
+			next.set(keyName, { saving: true, error: null, flash: false });
+			return next;
+		});
+		const savedValue = keys.find((k) => k.name === keyName)?.value;
+		try {
+			const result: ConfigMutationResult = await apiClient.mutateConfigKey(keyName, value);
+			setKeys((prev) =>
+				prev.map((k) => (k.name === keyName ? { ...k, value: result.new_value } : k)),
+			);
+			setMutStates((prev) => {
+				const next = new Map(prev);
+				next.set(keyName, { saving: false, error: null, flash: true });
+				return next;
+			});
+			setTimeout(() => {
+				setMutStates((prev) => {
+					const next = new Map(prev);
+					const cur = next.get(keyName);
+					if (cur) next.set(keyName, { ...cur, flash: false });
+					return next;
+				});
+			}, 1500);
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : "Mutation failed";
+			// Revert optimistic update
+			setKeys((prev) =>
+				prev.map((k) => (k.name === keyName ? { ...k, value: savedValue } : k)),
+			);
+			setMutStates((prev) => {
+				const next = new Map(prev);
+				next.set(keyName, { saving: false, error: msg, flash: false });
+				return next;
+			});
+		}
+	}, [keys]);
+
+	// Group keys by category
+	const grouped = new Map<string, ConfigKeyDescriptor[]>();
+	for (const key of keys) {
+		const cat = key.category ?? "general";
+		if (!grouped.has(cat)) grouped.set(cat, []);
+		grouped.get(cat)!.push(key);
+	}
+	const sortedCategories = [...grouped.keys()].sort();
+
 	return (
-		<span className={`inline-flex px-1.5 py-0.5 rounded text-xs font-medium ${color}`}>
-			{cls}
-		</span>
+		<div className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
+			<div className="mb-6">
+				<h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Config</h1>
+				<p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+					Runtime configuration registry. Flag and registry keys are editable inline;
+					structural and secret keys are read-only.
+				</p>
+			</div>
+
+			{loading && (
+				<div className="text-center py-12 text-gray-500 dark:text-gray-400">Loading config keys…</div>
+			)}
+
+			{loadError && (
+				<div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 text-red-700 dark:text-red-400 text-sm">
+					{loadError}
+				</div>
+			)}
+
+			{!loading && !loadError && keys.length === 0 && (
+				<div className="text-center py-12 text-gray-500 dark:text-gray-400">
+					No config keys found. Ensure operator token is set.
+				</div>
+			)}
+
+			{!loading && sortedCategories.map((cat) => (
+				<CategorySection
+					key={cat}
+					category={cat}
+					keys={grouped.get(cat)!}
+					mutStates={mutStates}
+					onMutate={handleMutate}
+				/>
+			))}
+		</div>
 	);
 }
-
-export default ConfigPage;

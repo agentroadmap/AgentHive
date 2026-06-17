@@ -1575,6 +1575,51 @@ export async function recordGateDecision(args: {
 			}
 		}
 
+		// P3566 AC-1/AC-2: Pre-check independence + blocking for non-terminal advance.
+		// This fires before the INSERT (and thus before fn_apply_gate_advance) to give
+		// a friendly error message.  The hard enforcement is in
+		// fn_guard_nonterminal_gate_advance_on_decision (BEFORE INSERT on gate_decision_log).
+		const NON_TERMINAL_GATES = new Set(["DRAFT→REVIEW", "REVIEW→DEVELOP"]);
+		if (args.decision === "advance") {
+			const toStateGuess =
+				fromState.toUpperCase() === "DRAFT" ? "REVIEW"
+				: fromState.toUpperCase() === "REVIEW" ? "DEVELOP"
+				: null;
+			const gateKey = toStateGuess
+				? `${fromState.toUpperCase()}→${toStateGuess}`
+				: null;
+			if (gateKey && NON_TERMINAL_GATES.has(gateKey)) {
+				const decidedBy = args.decided_by ?? "mcp";
+				// AC-1: independent approver check
+				const { rows: indepRows } = await query<{ is_independent: boolean }>(
+					`SELECT roadmap.fn_actor_is_independent($1, $2) AS is_independent`,
+					[proposalId, decidedBy],
+				);
+				if (!indepRows[0]?.is_independent) {
+					return errorResult(
+						`Gate advance ${gateKey} on ${rawIdentifier} requires an INDEPENDENT reviewer. ` +
+						`No approve verdict found from a reviewer distinct from decided_by='${decidedBy}' ` +
+						`within the last 10 minutes. ` +
+						`Have a different agent submit an approve via submit_review before calling gate_decision.`,
+						"gate_independence_required",
+					);
+				}
+				// AC-2: unresolved blocking review check
+				const { rows: blockRows } = await query<{ has_blocking: boolean }>(
+					`SELECT roadmap.fn_has_unresolved_blocking($1, $2) AS has_blocking`,
+					[proposalId, decidedBy],
+				);
+				if (blockRows[0]?.has_blocking) {
+					return errorResult(
+						`Gate advance ${gateKey} on ${rawIdentifier} blocked by unresolved blocking review ` +
+						`(is_blocking=true or verdict request_changes/reject not superseded by a later independent approve). ` +
+						`Resolve all blocking feedback before advancing.`,
+						"gate_blocking_review",
+					);
+				}
+			}
+		}
+
 		// Resolve the forward gate target so the fn_apply_gate_advance trigger
 		// actually advances status on an 'advance' decision.
 		// IMPORTANT: use proposal.workflow_name (read above) — NOT the roadmap.workflows

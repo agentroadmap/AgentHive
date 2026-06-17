@@ -40,23 +40,23 @@ export interface RouteRow {
 
 export interface ConfigKeyDescriptor {
 	name: string;
-	class: string;
+	class: "secret" | "structural" | "registry" | "flag" | "tenant_dsn";
 	category: string | null;
 	description: string | null;
+	value: unknown;
 	default_value: unknown;
 	required: boolean;
 	db_table: string | null;
-	scope: string;
+	scope: string | null;
 	editable: boolean;
 	masked: boolean;
-	value: unknown;
 }
 
 export interface ConfigMutationResult {
-	ok: true;
 	key_name: string;
-	key_class: string;
-	scope: string;
+	new_value: unknown;
+	mutation_id: string;
+	applied_at: string;
 }
 
 export interface ReorderProposalPayload {
@@ -907,6 +907,30 @@ export class ApiClient {
 		return result.events ?? [];
 	}
 
+	// P3784/P3785: Config key registry
+	async fetchConfigKeys(category?: string): Promise<ConfigKeyDescriptor[]> {
+		const url = category
+			? `${API_BASE}/config/keys?category=${encodeURIComponent(category)}`
+			: `${API_BASE}/config/keys`;
+		const result = await this.fetchJson<{ keys: ConfigKeyDescriptor[] }>(url);
+		return result.keys ?? [];
+	}
+
+	async mutateConfigKey(
+		keyName: string,
+		value: unknown,
+		scope?: string,
+	): Promise<ConfigMutationResult> {
+		return this.fetchJson<ConfigMutationResult>(
+			`${API_BASE}/config/keys/${encodeURIComponent(keyName)}`,
+			{
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ value, scope }),
+			},
+		);
+	}
+
 	// P705 Phase 4: Mark notification as seen
 	async markNotificationSeen(notificationId: string): Promise<{
 		success: boolean;
@@ -932,26 +956,6 @@ export class ApiClient {
 		}>(`${API_BASE}/notifications/${encodeURIComponent(notificationId)}/seen`, {
 			method: "PATCH",
 		});
-	}
-
-	// ── P3785: Config key read + write ────────────────────────────────────────
-
-	async fetchConfigKeys(category?: string): Promise<ConfigKeyDescriptor[]> {
-		const params = category ? `?category=${encodeURIComponent(category)}` : "";
-		const result = await this.fetchJson<{ keys: ConfigKeyDescriptor[]; count: number; category_filter: string | null }>(
-			`${API_BASE}/config/keys${params}`,
-		);
-		return result.keys;
-	}
-
-	async mutateConfigKey(keyName: string, value: unknown, scope?: string): Promise<ConfigMutationResult> {
-		return this.fetchJson<ConfigMutationResult>(
-			`${API_BASE}/config/${encodeURIComponent(keyName)}`,
-			{
-				method: "PUT",
-				body: JSON.stringify(scope !== undefined ? { value, scope } : { value }),
-			},
-		);
 	}
 }
 

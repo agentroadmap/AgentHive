@@ -9,7 +9,7 @@
  * Tiered design (cheapest signal wins):
  *
  *   Tier-A (free, ~1ms):  pg_stat_activity check — is some process actively
- *                         LISTENing on msg_<agent_identity>?
+ *                         LISTENing on msg_<agent_identity> (via agentNotifyChannel)?
  *                         No connection ⇒ definitely not addressable.
  *   Tier-B (free, ~1ms):  agent_health.last_heartbeat_at — was the agent's
  *                         pulseHeartbeat() within HEARTBEAT_FRESH_MS?

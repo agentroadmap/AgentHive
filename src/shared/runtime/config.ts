@@ -31,6 +31,7 @@ import {
 	agentContextStorage,
 	type VerifiedPrincipal,
 } from "../identity/agent-context.ts";
+import { type ConfigCategory } from "./config-categories.js";
 
 /** The principal kinds carried in agentContextStorage. */
 type VerifiedPrincipalKind = VerifiedPrincipal["principal_kind"];
@@ -42,34 +43,17 @@ export type ConfigClass =
 	| "flag"
 	| "tenant_dsn";
 
-export type ConfigCategory =
-	| "database"
-	| "connection_pool"
-	| "vault_secret"
-	| "mcp_endpoint"
-	| "orchestrator"
-	| "dispatch"
-	| "liaison"
-	| "pause_backoff"
-	| "provider_quota"
-	| "adaptive_matcher"
-	| "gate_governance"
-	| "multi_tenant"
-	| "model_routing"
-	| "audit"
-	| "ui_ux"
-	| "diagnostic"
-	| "federation"
-	| "saga"
-	| "notifications";
+/** @deprecated Use ConfigCategory from config-categories.ts instead */
+export type ConfigKeyCategory = ConfigCategory;
 
 export interface ConfigKey<T> {
 	name: string;
 	class: ConfigClass;
-	category?: ConfigCategory;
 	parse: (raw: string) => T;
 	required: boolean;
 	description?: string;
+	/** Category from the closed 16-member taxonomy in config-categories.ts. Required for FlagKeys. */
+	category?: ConfigCategory;
 	yamlPath?: string;
 	/**
 	 * Optional yaml-assembly function for keys whose value is derived from
