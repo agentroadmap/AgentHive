@@ -19,6 +19,27 @@ import type {
 
 const API_BASE = "/api";
 
+export interface ConfigKeyDescriptor {
+	name: string;
+	class: "secret" | "structural" | "registry" | "flag" | "tenant_dsn";
+	category: string | null;
+	description: string | null;
+	value: unknown;
+	default_value: unknown;
+	required: boolean;
+	db_table: string | null;
+	scope: string | null;
+	editable: boolean;
+	masked: boolean;
+}
+
+export interface ConfigMutationResult {
+	key_name: string;
+	new_value: unknown;
+	mutation_id: string;
+	applied_at: string;
+}
+
 export interface RouteRow {
 	id: number;
 	model_name: string;
@@ -444,6 +465,24 @@ export class ApiClient {
 			throw new Error("Failed to update config");
 		}
 		return response.json();
+	}
+
+	async fetchConfigKeys(category?: string): Promise<ConfigKeyDescriptor[]> {
+		const url =
+			category != null
+				? `${API_BASE}/config/keys?category=${encodeURIComponent(category)}`
+				: `${API_BASE}/config/keys`;
+		const response = await this.fetchWithRetry(url);
+		const data = (await response.json()) as { keys: ConfigKeyDescriptor[] };
+		return data.keys;
+	}
+
+	async mutateConfigKey(keyName: string, value: unknown, scope?: string): Promise<ConfigMutationResult> {
+		const response = await this.fetchWithRetry(`${API_BASE}/config/keys/${encodeURIComponent(keyName)}`, {
+			method: "PUT",
+			body: JSON.stringify({ value, ...(scope != null ? { scope } : {}) }),
+		});
+		return response.json() as Promise<ConfigMutationResult>;
 	}
 
 	async fetchDocs(): Promise<Document[]> {

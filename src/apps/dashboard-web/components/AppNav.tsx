@@ -32,6 +32,7 @@ const SECONDARY: NavItem[] = [
 	{ href: "/statistics", label: "Statistics" },
 	{ href: "/achievements", label: "Achievements" },
 	{ href: "/settings", label: "Settings" },
+	{ href: "/config", label: "Config" },
 ];
 
 function isActive(current: string, href: string): boolean {

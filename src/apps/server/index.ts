@@ -45,6 +45,8 @@ import type { PoolClient, Client as PgClient } from "pg";
 import { hashOperatorToken, requireOperator } from "./operator-auth.ts";
 import { projectCreate } from "../mcp-server/tools/projects/lifecycle-handlers.ts";
 import { agentContextStorage, type VerifiedPrincipal } from "../../shared/identity/agent-context.ts";
+import { AllConfigKeys, getConfigKeyByName } from "../../shared/runtime/config-keys.ts";
+import { set as configSet } from "../../shared/runtime/config.ts";
 import { verifyBoundBearer } from "../../core/identity/principal-identity.ts";
 import {
 	generateArchitectureDocs,
@@ -1331,6 +1333,15 @@ export class RoadmapServer {
 				if (method === "PUT") return await this.handleUpdateConfig(req);
 			}
 
+			if (pathname === "/api/config/keys") {
+				if (method === "GET") return await this.handleGetConfigKeys(req);
+			}
+
+			if (pathname.startsWith("/api/config/keys/")) {
+				const keyName = pathname.slice("/api/config/keys/".length);
+				if (method === "PUT") return await this.handleMutateConfigKey(req, keyName);
+			}
+
 			if (pathname === "/api/docs") {
 				if (method === "GET") return await this.handleListDocs();
 				if (method === "POST") return await this.handleCreateDoc(req);
@@ -2511,6 +2522,126 @@ export class RoadmapServer {
 				{ error: "Failed to update decision" },
 				{ status: 500 },
 			);
+		}
+	}
+
+	private async handleGetConfigKeys(req: Request): Promise<Response> {
+		const auth = await requireOperator(req, { action: "config.read" });
+		if (auth.rejected) return auth.rejected;
+
+		const url = new URL(req.url, "http://localhost");
+		const categoryFilter = url.searchParams.get("category") ?? undefined;
+
+		const descriptors = Object.values(AllConfigKeys)
+			.filter((key) => !categoryFilter || key.category === categoryFilter)
+			.map((key) => {
+				const masked = key.class === "secret";
+				const editable = key.class === "flag" || key.class === "registry";
+				let value: unknown = null;
+				if (!masked) {
+					const envVal = process.env[key.name];
+					if (envVal !== undefined) {
+						try {
+							value = key.parse(envVal);
+						} catch {
+							value = envVal;
+						}
+					} else if ("defaultValue" in key) {
+						value = (key as { defaultValue?: unknown }).defaultValue ?? null;
+					}
+				}
+				return {
+					name: key.name,
+					class: key.class,
+					category: (key as { category?: string }).category ?? null,
+					description: key.description ?? null,
+					value,
+					default_value: ("defaultValue" in key ? (key as { defaultValue?: unknown }).defaultValue : null) ?? null,
+					required: key.required,
+					db_table: (key as { dbTable?: string }).dbTable ?? null,
+					scope: null,
+					editable,
+					masked,
+				};
+			});
+
+		return Response.json({
+			keys: descriptors,
+			count: descriptors.length,
+			category_filter: categoryFilter ?? null,
+		});
+	}
+
+	private async handleMutateConfigKey(req: Request, keyName: string): Promise<Response> {
+		const auth = await requireOperator(req, { action: "config.write" });
+		if (auth.rejected) return auth.rejected;
+
+		let body: { value?: unknown; scope?: string } = {};
+		try {
+			body = (await req.json()) as { value?: unknown; scope?: string };
+		} catch {
+			return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+		}
+
+		if (!("value" in body)) {
+			return Response.json({ error: "value is required" }, { status: 400 });
+		}
+
+		let key: ReturnType<typeof getConfigKeyByName>;
+		try {
+			key = getConfigKeyByName(keyName);
+		} catch {
+			return Response.json({ error: `Unknown config key: ${keyName}` }, { status: 404 });
+		}
+
+		if (key.class === "secret" || key.class === "tenant_dsn") {
+			return Response.json({ error: "Key class is immutable" }, { status: 403 });
+		}
+
+		let parsedValue: unknown;
+		try {
+			parsedValue = key.parse(String(body.value));
+		} catch (err) {
+			return Response.json({ error: `Invalid value: ${(err as Error).message}` }, { status: 400 });
+		}
+
+		// Resolve operator principal from control_identity — separate from roadmap.operator_token.
+		// roadmap.operator_token authenticates the HTTP request; control_identity.principal
+		// provides the audit FK that config.set() / persistMutation requires.
+		const { rows: principalRows } = await query<{ id: string }>(
+			`SELECT id FROM control_identity.principal
+			  WHERE principal_type = 'operator' AND lifecycle_status = 'active'
+			  ORDER BY created_at ASC LIMIT 1`,
+		);
+		if (principalRows.length === 0) {
+			return Response.json(
+				{
+					error:
+						"No active operator principal registered in control_identity. " +
+						"Config mutations require an operator principal — check AGENTHIVE_EMERGENCY_OPERATOR_DID or seed control_identity.principal.",
+				},
+				{ status: 503 },
+			);
+		}
+
+		try {
+			const principal: VerifiedPrincipal = {
+				principal_id: principalRows[0].id,
+				principal_kind: "operator",
+			};
+			await agentContextStorage.run({ verified: principal }, () =>
+				configSet(key, parsedValue),
+			);
+			return Response.json({
+				key_name: keyName,
+				new_value: parsedValue,
+				mutation_id: `mut-${Date.now()}`,
+				applied_at: new Date().toISOString(),
+			});
+		} catch (err) {
+			const msg = (err as Error).message ?? "Mutation failed";
+			console.error(`[config.write] ${keyName}:`, msg);
+			return Response.json({ error: msg }, { status: 403 });
 		}
 	}
 

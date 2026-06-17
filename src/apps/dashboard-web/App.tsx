@@ -15,6 +15,7 @@ import ChannelsPage from "./components/ChannelsPage";
 import DashboardPage from "./components/DashboardPage";
 import DecisionsPage from "./components/DecisionsPage";
 import DirectivesPage from "./components/DirectivesPage";
+import ConfigPage from "./components/ConfigPage";
 import ControlPage from "./components/ControlPage";
 import DispatchPage from "./components/DispatchPage";
 import DocumentsPage from "./components/DocumentsPage";
@@ -291,6 +292,9 @@ export default function App() {
 						</Route>
 						<Route path="/settings">
 							<SettingsPage />
+						</Route>
+						<Route path="/config">
+							<ConfigPage />
 						</Route>
 						<Route path="*">
 							<NotFoundPage />
