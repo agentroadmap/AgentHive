@@ -15,4 +15,14 @@ export interface ServerContext {
 	startedAt: Date;
 	/** The MCP server instance, or null if not yet initialized. */
 	mcpServer: McpServer | null;
+	/**
+	 * Called after /api/init succeeds so the server can update its internal
+	 * project-name state and wire up the config file watcher.
+	 */
+	onProjectInitialized?: (projectName: string) => void;
+	/**
+	 * Called after PUT /api/config succeeds so the server can broadcast
+	 * the config change to connected WebSocket clients.
+	 */
+	broadcastUpdate?: () => void;
 }
