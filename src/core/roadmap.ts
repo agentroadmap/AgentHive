@@ -83,6 +83,10 @@ import {
 import { executeStatusCallback } from "../utils/status-callback.ts";
 import { loadRuntimeEnvFile } from "../shared/runtime/config.ts";
 import {
+	extractLegacyConfigDirectives,
+	migrateLegacyConfigDirectivesToFiles,
+} from "./config/legacy-migration.ts";
+import {
 	migrateConfig,
 	needsMigration,
 } from "./infrastructure/config-migration.ts";
@@ -1701,191 +1705,11 @@ export class Core {
 		return this.git;
 	}
 
-	// Config migration
-	private parseLegacyInlineArray(value: string): string[] {
-		const items: string[] = [];
-		let current = "";
-		let quote: '"' | "'" | null = null;
-
-		const pushCurrent = () => {
-			const normalized = current.trim().replace(/\\(['"])/g, "$1");
-			if (normalized) {
-				items.push(normalized);
-			}
-			current = "";
-		};
-
-		for (let i = 0; i < value.length; i += 1) {
-			const ch = value[i];
-			const prev = i > 0 ? value[i - 1] : "";
-			if (quote) {
-				if (ch === quote && prev !== "\\") {
-					quote = null;
-					continue;
-				}
-				current += ch;
-				continue;
-			}
-			if (ch === '"' || ch === "'") {
-				quote = ch;
-				continue;
-			}
-			if (ch === ",") {
-				pushCurrent();
-				continue;
-			}
-			current += ch;
-		}
-		pushCurrent();
-		return items;
-	}
-
-	private stripYamlComment(value: string): string {
-		let quote: '"' | "'" | null = null;
-		for (let i = 0; i < value.length; i += 1) {
-			const ch = value[i];
-			const prev = i > 0 ? value[i - 1] : "";
-			if (quote) {
-				if (ch === quote && prev !== "\\") {
-					quote = null;
-				}
-				continue;
-			}
-			if (ch === '"' || ch === "'") {
-				quote = ch;
-				continue;
-			}
-			if (ch === "#") {
-				return value.slice(0, i).trimEnd();
-			}
-		}
-		return value;
-	}
-
-	private parseLegacyYamlValue(value: string): string {
-		const trimmed = this.stripYamlComment(value).trim();
-		const singleQuoted = trimmed.match(/^'(.*)'$/);
-		if (singleQuoted?.[1] !== undefined) {
-			return singleQuoted[1].replace(/''/g, "'");
-		}
-		const doubleQuoted = trimmed.match(/^"(.*)"$/);
-		if (doubleQuoted?.[1] !== undefined) {
-			return doubleQuoted[1].replace(/\\"/g, '"').replace(/\\'/g, "'");
-		}
-		return trimmed;
-	}
-
-	private async extractLegacyConfigDirectives(): Promise<string[]> {
-		try {
-			const configPath = this.fs.configFilePath;
-			const content = await readFile(configPath, "utf-8");
-			const lines = content.split("\n");
-			for (let i = 0; i < lines.length; i += 1) {
-				const line = lines[i] ?? "";
-				const match = line.match(/^(\s*)directives\s*:\s*(.*)$/);
-				if (!match) {
-					continue;
-				}
-
-				const directiveIndent = (match[1] ?? "").length;
-				const trailing = this.stripYamlComment(match[2] ?? "").trim();
-				if (trailing.startsWith("[")) {
-					let combined = trailing;
-					let closed = trailing.endsWith("]");
-					let j = i + 1;
-					while (!closed && j < lines.length) {
-						const segment = this.stripYamlComment(lines[j] ?? "").trim();
-						combined += segment;
-						if (segment.includes("]")) {
-							closed = true;
-							break;
-						}
-						j += 1;
-					}
-					if (closed) {
-						const openIndex = combined.indexOf("[");
-						const closeIndex = combined.lastIndexOf("]");
-						if (openIndex !== -1 && closeIndex > openIndex) {
-							const parsed = this.parseLegacyInlineArray(
-								combined.slice(openIndex + 1, closeIndex),
-							);
-							return parsed
-								.map((item) => this.parseLegacyYamlValue(item))
-								.filter(Boolean);
-						}
-					}
-				}
-				if (trailing.length > 0) {
-					const single = this.parseLegacyYamlValue(trailing);
-					return single ? [single] : [];
-				}
-
-				const values: string[] = [];
-				for (let j = i + 1; j < lines.length; j += 1) {
-					const nextLine = lines[j] ?? "";
-					if (!nextLine.trim()) {
-						continue;
-					}
-					const nextIndent = nextLine.match(/^\s*/)?.[0].length ?? 0;
-					if (nextIndent <= directiveIndent) {
-						break;
-					}
-					const trimmed = nextLine.trim();
-					if (!trimmed.startsWith("-")) {
-						continue;
-					}
-					const itemValue = this.parseLegacyYamlValue(trimmed.slice(1));
-					if (itemValue) {
-						values.push(itemValue);
-					}
-				}
-				return values;
-			}
-			return [];
-		} catch {
-			return [];
-		}
-	}
-
-	private async migrateLegacyConfigDirectivesToFiles(
-		legacyDirectives: string[],
-	): Promise<void> {
-		if (legacyDirectives.length === 0) {
-			return;
-		}
-		const existingDirectives = await this.fs.listDirectives();
-		const existingKeys = new Set<string>();
-		for (const directive of existingDirectives) {
-			const idKey = directive.id.trim().toLowerCase();
-			const titleKey = directive.title.trim().toLowerCase();
-			if (idKey) {
-				existingKeys.add(idKey);
-			}
-			if (titleKey) {
-				existingKeys.add(titleKey);
-			}
-		}
-		for (const name of legacyDirectives) {
-			const normalized = name.trim();
-			const key = normalized.toLowerCase();
-			if (!normalized || existingKeys.has(key)) {
-				continue;
-			}
-			const created = await this.fs.createDirective(normalized);
-			const createdIdKey = created.id.trim().toLowerCase();
-			const createdTitleKey = created.title.trim().toLowerCase();
-			if (createdIdKey) {
-				existingKeys.add(createdIdKey);
-			}
-			if (createdTitleKey) {
-				existingKeys.add(createdTitleKey);
-			}
-		}
-	}
+	// Config migration — pure helpers extracted to ./config/legacy-migration.ts (P3796)
 
 	async ensureConfigMigrated(): Promise<void> {
 		await this.ensureConfigLoaded();
-		const legacyDirectives = await this.extractLegacyConfigDirectives();
+		const legacyDirectives = await extractLegacyConfigDirectives(this.fs);
 		let config = await this.fs.loadConfig();
 		const needsSchemaMigration = !config || needsMigration(config);
 
@@ -1893,7 +1717,7 @@ export class Core {
 			config = migrateConfig(config || {});
 		}
 		if (legacyDirectives.length > 0) {
-			await this.migrateLegacyConfigDirectivesToFiles(legacyDirectives);
+			await migrateLegacyConfigDirectivesToFiles(this.fs, legacyDirectives);
 		}
 		if (config && (needsSchemaMigration || legacyDirectives.length > 0)) {
 			// Rewrite config to apply schema defaults and strip legacy directives key after successful migration.
