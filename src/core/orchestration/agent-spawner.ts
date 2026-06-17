@@ -2227,7 +2227,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	if (req.personaName) {
 		outputSummary = `persona=${req.personaName} ${outputSummary}`;
 	}
-	const errorDetail = stderr.slice(-4000);
+	let errorDetail = stderr.slice(-4000);
 
 	// TODO P1365-AC2: Extract rate-limit headers from response and record signal
 	// After spawn completes, if the Anthropic SDK or other instrumentation surfaces
@@ -2240,6 +2240,16 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	const exitClass = classifyExit(stdout, stderr, exitCode);
 	const status =
 		exitClass.outcome === "rate_limited" ? "rate_limited" : exitClass.outcome;
+
+	// P3847 AC-1: never persist an empty error_detail on a non-success exit.
+	errorDetail = synthesizeSilentExitDetail({
+		errorDetail,
+		outcome: exitClass.outcome,
+		exitCode,
+		stdoutLen: stdout.length,
+		durationMs,
+		timeoutMs,
+	});
 
 	await query(
 		`UPDATE roadmap_workforce.agent_runs
@@ -2500,6 +2510,38 @@ export function detectProviderQuotaSignal(
 	}
 
 	return null;
+}
+
+/**
+ * P3847 AC-1: guarantee a non-empty, attributable error_detail for any
+ * non-success spawn exit. Silent spawns — notably ~20-min
+ * AGENTHIVE_SPAWN_TIMEOUT_MS kills that produced no stderr AND no stdout — were
+ * recorded as 'failed' with error_detail='' (582/639 failed runs in a 7d
+ * sample, ~1.2M ms each), making them undiagnosable. When stderr is empty on a
+ * non-success outcome, synthesize a diagnostic from the exit classification;
+ * a run whose duration reached the timeout is explicitly flagged as a silent
+ * spawn-timeout. Pure (no I/O) so it is unit-testable. A 'completed' outcome or
+ * an already-populated detail is returned unchanged.
+ */
+export function synthesizeSilentExitDetail(args: {
+	errorDetail: string;
+	outcome: ExitClassification["outcome"];
+	exitCode: number | null;
+	stdoutLen: number;
+	durationMs: number;
+	timeoutMs: number;
+}): string {
+	if (args.outcome === "completed" || args.errorDetail.length > 0) {
+		return args.errorDetail;
+	}
+	const hitTimeout = args.durationMs >= args.timeoutMs;
+	return (
+		`[no stderr] outcome=${args.outcome} exitCode=${args.exitCode ?? "null"} ` +
+		`stdout_len=${args.stdoutLen} duration_ms=${args.durationMs}` +
+		(hitTimeout
+			? ` (hit spawn timeout ${args.timeoutMs}ms — silent/no-progress)`
+			: "")
+	);
 }
 
 export function classifyExit(
