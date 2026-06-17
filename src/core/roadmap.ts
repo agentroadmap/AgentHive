@@ -122,6 +122,17 @@ import {
 	loadRemoteProposals,
 	resolveProposalConflict,
 } from "./storage/proposal-loader.ts";
+import {
+	addAcceptanceCriteria as acAdd,
+	checkAcceptanceCriteria as acCheck,
+	listAcceptanceCriteria as acList,
+	removeAcceptanceCriteria as acRemove,
+} from "./acceptance-criteria.ts";
+import { LegacyConfigMigrator } from "./config-migration.ts";
+import {
+	createDecision as decisionsCreate,
+	updateDecisionFromContent as decisionsUpdateFromContent,
+} from "./decisions.ts";
 
 interface BlessedScreen {
 	program: {
@@ -1701,191 +1712,10 @@ export class Core {
 		return this.git;
 	}
 
-	// Config migration
-	private parseLegacyInlineArray(value: string): string[] {
-		const items: string[] = [];
-		let current = "";
-		let quote: '"' | "'" | null = null;
-
-		const pushCurrent = () => {
-			const normalized = current.trim().replace(/\\(['"])/g, "$1");
-			if (normalized) {
-				items.push(normalized);
-			}
-			current = "";
-		};
-
-		for (let i = 0; i < value.length; i += 1) {
-			const ch = value[i];
-			const prev = i > 0 ? value[i - 1] : "";
-			if (quote) {
-				if (ch === quote && prev !== "\\") {
-					quote = null;
-					continue;
-				}
-				current += ch;
-				continue;
-			}
-			if (ch === '"' || ch === "'") {
-				quote = ch;
-				continue;
-			}
-			if (ch === ",") {
-				pushCurrent();
-				continue;
-			}
-			current += ch;
-		}
-		pushCurrent();
-		return items;
-	}
-
-	private stripYamlComment(value: string): string {
-		let quote: '"' | "'" | null = null;
-		for (let i = 0; i < value.length; i += 1) {
-			const ch = value[i];
-			const prev = i > 0 ? value[i - 1] : "";
-			if (quote) {
-				if (ch === quote && prev !== "\\") {
-					quote = null;
-				}
-				continue;
-			}
-			if (ch === '"' || ch === "'") {
-				quote = ch;
-				continue;
-			}
-			if (ch === "#") {
-				return value.slice(0, i).trimEnd();
-			}
-		}
-		return value;
-	}
-
-	private parseLegacyYamlValue(value: string): string {
-		const trimmed = this.stripYamlComment(value).trim();
-		const singleQuoted = trimmed.match(/^'(.*)'$/);
-		if (singleQuoted?.[1] !== undefined) {
-			return singleQuoted[1].replace(/''/g, "'");
-		}
-		const doubleQuoted = trimmed.match(/^"(.*)"$/);
-		if (doubleQuoted?.[1] !== undefined) {
-			return doubleQuoted[1].replace(/\\"/g, '"').replace(/\\'/g, "'");
-		}
-		return trimmed;
-	}
-
-	private async extractLegacyConfigDirectives(): Promise<string[]> {
-		try {
-			const configPath = this.fs.configFilePath;
-			const content = await readFile(configPath, "utf-8");
-			const lines = content.split("\n");
-			for (let i = 0; i < lines.length; i += 1) {
-				const line = lines[i] ?? "";
-				const match = line.match(/^(\s*)directives\s*:\s*(.*)$/);
-				if (!match) {
-					continue;
-				}
-
-				const directiveIndent = (match[1] ?? "").length;
-				const trailing = this.stripYamlComment(match[2] ?? "").trim();
-				if (trailing.startsWith("[")) {
-					let combined = trailing;
-					let closed = trailing.endsWith("]");
-					let j = i + 1;
-					while (!closed && j < lines.length) {
-						const segment = this.stripYamlComment(lines[j] ?? "").trim();
-						combined += segment;
-						if (segment.includes("]")) {
-							closed = true;
-							break;
-						}
-						j += 1;
-					}
-					if (closed) {
-						const openIndex = combined.indexOf("[");
-						const closeIndex = combined.lastIndexOf("]");
-						if (openIndex !== -1 && closeIndex > openIndex) {
-							const parsed = this.parseLegacyInlineArray(
-								combined.slice(openIndex + 1, closeIndex),
-							);
-							return parsed
-								.map((item) => this.parseLegacyYamlValue(item))
-								.filter(Boolean);
-						}
-					}
-				}
-				if (trailing.length > 0) {
-					const single = this.parseLegacyYamlValue(trailing);
-					return single ? [single] : [];
-				}
-
-				const values: string[] = [];
-				for (let j = i + 1; j < lines.length; j += 1) {
-					const nextLine = lines[j] ?? "";
-					if (!nextLine.trim()) {
-						continue;
-					}
-					const nextIndent = nextLine.match(/^\s*/)?.[0].length ?? 0;
-					if (nextIndent <= directiveIndent) {
-						break;
-					}
-					const trimmed = nextLine.trim();
-					if (!trimmed.startsWith("-")) {
-						continue;
-					}
-					const itemValue = this.parseLegacyYamlValue(trimmed.slice(1));
-					if (itemValue) {
-						values.push(itemValue);
-					}
-				}
-				return values;
-			}
-			return [];
-		} catch {
-			return [];
-		}
-	}
-
-	private async migrateLegacyConfigDirectivesToFiles(
-		legacyDirectives: string[],
-	): Promise<void> {
-		if (legacyDirectives.length === 0) {
-			return;
-		}
-		const existingDirectives = await this.fs.listDirectives();
-		const existingKeys = new Set<string>();
-		for (const directive of existingDirectives) {
-			const idKey = directive.id.trim().toLowerCase();
-			const titleKey = directive.title.trim().toLowerCase();
-			if (idKey) {
-				existingKeys.add(idKey);
-			}
-			if (titleKey) {
-				existingKeys.add(titleKey);
-			}
-		}
-		for (const name of legacyDirectives) {
-			const normalized = name.trim();
-			const key = normalized.toLowerCase();
-			if (!normalized || existingKeys.has(key)) {
-				continue;
-			}
-			const created = await this.fs.createDirective(normalized);
-			const createdIdKey = created.id.trim().toLowerCase();
-			const createdTitleKey = created.title.trim().toLowerCase();
-			if (createdIdKey) {
-				existingKeys.add(createdIdKey);
-			}
-			if (createdTitleKey) {
-				existingKeys.add(createdTitleKey);
-			}
-		}
-	}
-
 	async ensureConfigMigrated(): Promise<void> {
 		await this.ensureConfigLoaded();
-		const legacyDirectives = await this.extractLegacyConfigDirectives();
+		const migrator = new LegacyConfigMigrator(this.fs);
+		const legacyDirectives = await migrator.extractLegacyConfigDirectives();
 		let config = await this.fs.loadConfig();
 		const needsSchemaMigration = !config || needsMigration(config);
 
@@ -1893,7 +1723,7 @@ export class Core {
 			config = migrateConfig(config || {});
 		}
 		if (legacyDirectives.length > 0) {
-			await this.migrateLegacyConfigDirectivesToFiles(legacyDirectives);
+			await migrator.migrateLegacyConfigDirectivesToFiles(legacyDirectives);
 		}
 		if (config && (needsSchemaMigration || legacyDirectives.length > 0)) {
 			// Rewrite config to apply schema defaults and strip legacy directives key after successful migration.
@@ -5111,168 +4941,50 @@ export class Core {
 		return success;
 	}
 
-	/**
-	 * Add acceptance criteria to a proposal
-	 */
 	async addAcceptanceCriteria(
 		proposalId: string,
 		criteria: string[],
 		autoCommit?: boolean,
 	): Promise<void> {
-		const proposal = await this.fs.loadProposal(proposalId);
-		if (!proposal) {
-			throw new Error(`Proposal not found: ${proposalId}`);
-		}
-
-		// Get existing criteria or initialize empty array
-		const current = Array.isArray(proposal.acceptanceCriteriaItems)
-			? [...proposal.acceptanceCriteriaItems]
-			: [];
-
-		// Calculate next index (1-based)
-		let nextIndex =
-			current.length > 0 ? Math.max(...current.map((c) => c.index)) + 1 : 1;
-
-		// Append new criteria
-		const newCriteria = criteria.map((text) => ({
-			index: nextIndex++,
-			text,
-			checked: false,
-		}));
-		proposal.acceptanceCriteriaItems = [...current, ...newCriteria];
-
-		// Save the proposal
-		await this.updateProposal(proposal, autoCommit);
+		return acAdd(this._acDeps(), proposalId, criteria, autoCommit);
 	}
 
-	/**
-	 * Remove acceptance criteria by indices (supports batch operations)
-	 * @returns Array of removed indices
-	 */
 	async removeAcceptanceCriteria(
 		proposalId: string,
 		indices: number[],
 		autoCommit?: boolean,
 	): Promise<number[]> {
-		const proposal = await this.fs.loadProposal(proposalId);
-		if (!proposal) {
-			throw new Error(`Proposal not found: ${proposalId}`);
-		}
-
-		let list = Array.isArray(proposal.acceptanceCriteriaItems)
-			? [...proposal.acceptanceCriteriaItems]
-			: [];
-		const removed: number[] = [];
-
-		// Sort indices in descending order to avoid index shifting issues
-		const sortedIndices = [...indices].sort((a, b) => b - a);
-
-		for (const idx of sortedIndices) {
-			const before = list.length;
-			list = list.filter((c) => c.index !== idx);
-			if (list.length < before) {
-				removed.push(idx);
-			}
-		}
-
-		if (removed.length === 0) {
-			throw new Error(
-				"No criteria were removed. Check that the specified indices exist.",
-			);
-		}
-
-		// Re-index remaining items (1-based)
-		list = list.map((c, i) => ({ ...c, index: i + 1 }));
-		proposal.acceptanceCriteriaItems = list;
-
-		// Save the proposal
-		await this.updateProposal(proposal, autoCommit);
-
-		return removed.sort((a, b) => a - b); // Return in ascending order
+		return acRemove(this._acDeps(), proposalId, indices, autoCommit);
 	}
 
-	/**
-	 * Check or uncheck acceptance criteria by indices (supports batch operations)
-	 * Silently ignores invalid indices and only updates valid ones.
-	 * @returns Array of updated indices
-	 */
 	async checkAcceptanceCriteria(
 		proposalId: string,
 		indices: number[],
 		checked: boolean,
 		autoCommit?: boolean,
 	): Promise<number[]> {
-		const proposal = await this.fs.loadProposal(proposalId);
-		if (!proposal) {
-			throw new Error(`Proposal not found: ${proposalId}`);
-		}
-
-		let list = Array.isArray(proposal.acceptanceCriteriaItems)
-			? [...proposal.acceptanceCriteriaItems]
-			: [];
-		const updated: number[] = [];
-
-		// Filter to only valid indices and update them
-		for (const idx of indices) {
-			if (list.some((c) => c.index === idx)) {
-				list = list.map((c) => {
-					if (c.index === idx) {
-						updated.push(idx);
-						return { ...c, checked };
-					}
-					return c;
-				});
-			}
-		}
-
-		if (updated.length === 0) {
-			throw new Error("No criteria were updated.");
-		}
-
-		proposal.acceptanceCriteriaItems = list;
-
-		// Save the proposal
-		await this.updateProposal(proposal, autoCommit);
-
-		return updated.sort((a, b) => a - b);
+		return acCheck(this._acDeps(), proposalId, indices, checked, autoCommit);
 	}
 
-	/**
-	 * List all acceptance criteria for a proposal
-	 */
 	async listAcceptanceCriteria(
 		proposalId: string,
 	): Promise<AcceptanceCriterion[]> {
-		const proposal = await this.fs.loadProposal(proposalId);
-		if (!proposal) {
-			throw new Error(`Proposal not found: ${proposalId}`);
-		}
+		return acList(this._acDeps(), proposalId);
+	}
 
-		return proposal.acceptanceCriteriaItems || [];
+	private _acDeps() {
+		return {
+			loadProposal: (id: string) => this.fs.loadProposal(id),
+			updateProposal: (p: Proposal, autoCommit?: boolean) =>
+				this.updateProposal(p, autoCommit),
+		};
 	}
 
 	async createDecision(
 		decision: Decision,
 		autoCommit?: boolean,
 	): Promise<void> {
-		await this.fs.saveDecision(decision);
-
-		// Record Pulse event
-		await this.recordPulse({
-			type: "decision_made",
-			id: decision.id,
-			title: decision.title,
-			impact: `Status: ${decision.status}`,
-		});
-
-		if (await this.shouldAutoCommit(autoCommit)) {
-			const roadmapDir = await this.getRoadmapDirectoryName();
-			const repoRoot = await this.git.stageRoadmapDirectory(roadmapDir);
-			await this.git.commitChanges(
-				`roadmap: Add decision ${decision.id}`,
-				repoRoot,
-			);
-		}
+		return decisionsCreate(this._decisionDeps(), decision, autoCommit);
 	}
 
 	async updateDecisionFromContent(
@@ -5280,44 +4992,32 @@ export class Core {
 		content: string,
 		autoCommit?: boolean,
 	): Promise<void> {
-		const existingDecision = await this.fs.loadDecision(decisionId);
-		if (!existingDecision) {
-			throw new Error(`Decision ${decisionId} not found`);
-		}
+		return decisionsUpdateFromContent(
+			this._decisionDeps(),
+			decisionId,
+			content,
+			autoCommit,
+		);
+	}
 
-		// Parse the markdown content to extract the decision data
-		const matter = await import("gray-matter");
-		const { data } = matter.default(content);
-
-		const extractSection = (
-			content: string,
-			sectionName: string,
-		): string | undefined => {
-			const regex = new RegExp(
-				`## ${sectionName}\\s*([\\s\\S]*?)(?=## |$)`,
-				"i",
-			);
-			const match = content.match(regex);
-			return match ? match[1]?.trim() : undefined;
+	private _decisionDeps() {
+		return {
+			saveDecision: (d: Decision) => this.fs.saveDecision(d),
+			loadDecision: (id: string) => this.fs.loadDecision(id),
+			recordPulse: (event: {
+				type: string;
+				id: string;
+				title: string;
+				impact: string;
+			}) => this.recordPulse(event),
+			commitIfNeeded: async (message: string, autoCommit?: boolean) => {
+				if (await this.shouldAutoCommit(autoCommit)) {
+					const roadmapDir = await this.getRoadmapDirectoryName();
+					const repoRoot = await this.git.stageRoadmapDirectory(roadmapDir);
+					await this.git.commitChanges(message, repoRoot);
+				}
+			},
 		};
-
-		const updatedDecision = {
-			...existingDecision,
-			title: data.title || existingDecision.title,
-			status: data.status || existingDecision.status,
-			date: data.date || existingDecision.date,
-			context: extractSection(content, "Context") || existingDecision.context,
-			decision:
-				extractSection(content, "Decision") || existingDecision.decision,
-			consequences:
-				extractSection(content, "Consequences") ||
-				existingDecision.consequences,
-			alternatives:
-				extractSection(content, "Alternatives") ||
-				existingDecision.alternatives,
-		};
-
-		await this.createDecision(updatedDecision, autoCommit);
 	}
 
 	async createDecisionWithTitle(
