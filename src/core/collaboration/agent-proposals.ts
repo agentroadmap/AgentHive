@@ -16,6 +16,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import * as runtimeConfig from "../../shared/runtime/config.ts";
+import { FlagKeys } from "../../shared/runtime/config-keys.ts";
+
 // ─── Types ───────────────────────────────────────────────────────────────
 
 /** Proposal workflow status */
@@ -196,6 +199,14 @@ export type LeaseHeartbeatResult =
 
 /** Default lease TTL in milliseconds (30 minutes) */
 const DEFAULT_LEASE_TTL_MS = 30 * 60 * 1000;
+
+export async function resolveAgentProposalLeaseTtlMs(): Promise<number> {
+	try {
+		return await runtimeConfig.get(FlagKeys.AGENT_PROPOSAL_LEASE_TTL_MS);
+	} catch {
+		return DEFAULT_LEASE_TTL_MS;
+	}
+}
 
 /** Lease heartbeat interval (5 minutes) */
 const _LEASE_HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000;

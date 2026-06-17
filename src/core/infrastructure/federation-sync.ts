@@ -26,6 +26,8 @@
 import * as crypto from "node:crypto";
 import { EventEmitter } from "node:events";
 import { query } from "../../infra/postgres/pool.ts";
+import * as runtimeConfig from "../../shared/runtime/config.ts";
+import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -61,6 +63,38 @@ const DEFAULT_POLL_INTERVAL_MS = 30_000;
 const HEALTH_FAIL_QUARANTINE_THRESHOLD = 3;
 const STALE_SYNC_THRESHOLD_MS = 60 * 60 * 1000; // 1 hour
 const PING_TIMEOUT_MS = 5_000;
+
+async function resolveFederationSyncPollMs(): Promise<number> {
+	try {
+		return await runtimeConfig.get(FlagKeys.FEDERATION_SYNC_POLL_MS);
+	} catch {
+		return DEFAULT_POLL_INTERVAL_MS;
+	}
+}
+
+async function resolveFederationQuarantineThreshold(): Promise<number> {
+	try {
+		return await runtimeConfig.get(FlagKeys.FEDERATION_QUARANTINE_THRESHOLD);
+	} catch {
+		return HEALTH_FAIL_QUARANTINE_THRESHOLD;
+	}
+}
+
+async function resolveFederationStaleSyncMs(): Promise<number> {
+	try {
+		return await runtimeConfig.get(FlagKeys.FEDERATION_STALE_SYNC_MS);
+	} catch {
+		return STALE_SYNC_THRESHOLD_MS;
+	}
+}
+
+async function resolveFederationPingTimeoutMs(): Promise<number> {
+	try {
+		return await runtimeConfig.get(FlagKeys.FEDERATION_PING_TIMEOUT_MS);
+	} catch {
+		return PING_TIMEOUT_MS;
+	}
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -371,7 +405,8 @@ export class FederationSync extends EventEmitter {
 		}
 
 		const start = Date.now();
-		const result = await this.signedFetch(peer, "GET", "/health", undefined, PING_TIMEOUT_MS);
+		const pingTimeoutMs = await resolveFederationPingTimeoutMs();
+		const result = await this.signedFetch(peer, "GET", "/health", undefined, pingTimeoutMs);
 		const latencyMs = Date.now() - start;
 
 		if (!result.ok) {
@@ -416,7 +451,7 @@ export class FederationSync extends EventEmitter {
 			);
 			const failCount = rows[0]?.health_fail_count ?? 0;
 
-			if (failCount >= HEALTH_FAIL_QUARANTINE_THRESHOLD) {
+			if (failCount >= await resolveFederationQuarantineThreshold()) {
 				await this.db(
 					`UPDATE roadmap.federation_peers
                         SET status = 'quarantined', updated_at = now()
@@ -450,6 +485,7 @@ export class FederationSync extends EventEmitter {
 		);
 
 		const now = Date.now();
+		const staleSyncMs = await resolveFederationStaleSyncMs();
 		return {
 			peers: rows.map((p) => ({
 				peer_uuid: p.peer_uuid,
@@ -460,7 +496,7 @@ export class FederationSync extends EventEmitter {
 				stale:
 					p.is_active &&
 					(!p.last_sync_at ||
-						now - new Date(p.last_sync_at).getTime() > STALE_SYNC_THRESHOLD_MS),
+						now - new Date(p.last_sync_at).getTime() > staleSyncMs),
 				health_fail_count: p.health_fail_count,
 			})),
 		};
@@ -882,11 +918,12 @@ export class FederationSync extends EventEmitter {
 		return results;
 	}
 
-	start(): void {
+	async start(): Promise<void> {
 		this.stopped = false;
+		const pollMs = await resolveFederationSyncPollMs();
 		this.pollTimer = setInterval(
 			() => this.runSyncCycle().catch((err) => this.emit("error", err)),
-			this.config.pollIntervalMs,
+			this.config.pollIntervalMs ?? pollMs,
 		);
 	}
 

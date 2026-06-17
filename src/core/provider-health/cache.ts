@@ -1,3 +1,6 @@
+import * as runtimeConfig from "../../shared/runtime/config.ts";
+import { FlagKeys } from "../../shared/runtime/config-keys.ts";
+
 export type HealthStatus = "ok" | "timeout" | "error";
 
 export interface HealthEntry {
@@ -7,6 +10,14 @@ export interface HealthEntry {
 }
 
 export const DEFAULT_PROVIDER_HEALTH_TTL_MS = 30_000;
+
+export async function resolveProviderHealthTtlMs(): Promise<number> {
+	try {
+		return await runtimeConfig.get(FlagKeys.PROVIDER_HEALTH_TTL_MS);
+	} catch {
+		return DEFAULT_PROVIDER_HEALTH_TTL_MS;
+	}
+}
 
 type Clock = () => number;
 

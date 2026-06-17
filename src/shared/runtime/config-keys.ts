@@ -1360,6 +1360,280 @@ export const FlagKeys = {
 		dbColumn: "value_jsonb",
 		envOverride: true,
 	} satisfies ConfigKey<"grid" | "stacked">,
+
+	// ─── P3787: first-wave hardcoded-constant migration ───────────────────────
+
+	DISPATCH_LOOP_THRESHOLD: {
+		name: "AGENTHIVE_DISPATCH_LOOP_THRESHOLD",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 0) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 6,
+		description: "Circuit-breaker: max failed runs per (proposal, role) in the last hour before gate_scanner_paused is set.",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	GATE_CONVERGENCE_MAX_BLOCKING: {
+		name: "AGENTHIVE_GATE_CONVERGENCE_MAX_BLOCKING",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 3,
+		description: "Convergence guard: max blocking-review count since last transition before proposal is paused.",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	GATE_CONVERGENCE_MAX_RUNS_PER_ROLE: {
+		name: "AGENTHIVE_GATE_CONVERGENCE_MAX_RUNS_PER_ROLE",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 8,
+		description: "Convergence guard: max per-role run count since last transition before proposal is paused.",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	FEDERATION_SYNC_POLL_MS: {
+		name: "FEDERATION_SYNC_POLL_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1000) throw new Error("must be >= 1000");
+			return n;
+		},
+		required: false,
+		defaultValue: 30_000,
+		description: "Federation sync polling interval in ms (default 30 s).",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	FEDERATION_QUARANTINE_THRESHOLD: {
+		name: "FEDERATION_QUARANTINE_THRESHOLD",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 3,
+		description: "Federation: consecutive health-check failures before a peer is quarantined.",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	FEDERATION_STALE_SYNC_MS: {
+		name: "FEDERATION_STALE_SYNC_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 60_000) throw new Error("must be >= 60000");
+			return n;
+		},
+		required: false,
+		defaultValue: 3_600_000,
+		description: "Federation: ms since last_sync_at before a peer sync is considered stale (default 1 h).",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	FEDERATION_PING_TIMEOUT_MS: {
+		name: "FEDERATION_PING_TIMEOUT_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 500) throw new Error("must be >= 500");
+			return n;
+		},
+		required: false,
+		defaultValue: 5_000,
+		description: "Federation: timeout in ms for peer /health ping (default 5 s).",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	SAGA_REPAIR_INTERVAL_MS: {
+		name: "SAGA_REPAIR_INTERVAL_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 5_000) throw new Error("must be >= 5000");
+			return n;
+		},
+		required: false,
+		defaultValue: 60_000,
+		description: "Saga repair worker: polling interval in ms (default 60 s).",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	SAGA_REPAIR_MAX_ATTEMPTS: {
+		name: "SAGA_REPAIR_MAX_ATTEMPTS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 10,
+		description: "Saga repair worker: max retry attempts before escalating to operator.",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	SAGA_REPAIR_BASE_BACKOFF_MIN: {
+		name: "SAGA_REPAIR_BASE_BACKOFF_MIN",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 2,
+		description: "Saga repair worker: base backoff multiplier in minutes for exponential retry delay.",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	SAGA_REPAIR_MAX_BACKOFF_HOURS: {
+		name: "SAGA_REPAIR_MAX_BACKOFF_HOURS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 24,
+		description: "Saga repair worker: maximum retry backoff cap in hours.",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	NOTIFICATION_MAX_ATTEMPTS: {
+		name: "NOTIFICATION_MAX_ATTEMPTS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 5,
+		description: "Notification router: max dispatch attempts per queue row before moving to DLQ.",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	NOTIFICATION_POLL_MS: {
+		name: "NOTIFICATION_POLL_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1000) throw new Error("must be >= 1000");
+			return n;
+		},
+		required: false,
+		defaultValue: 30_000,
+		description: "Notification router: backstop poll interval in ms (default 30 s).",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	NOTIFICATION_BATCH_SIZE: {
+		name: "NOTIFICATION_BATCH_SIZE",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 25,
+		description: "Notification router: max rows claimed per drain cycle.",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	PROVIDER_HEALTH_TTL_MS: {
+		name: "PROVIDER_HEALTH_TTL_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1000) throw new Error("must be >= 1000");
+			return n;
+		},
+		required: false,
+		defaultValue: 30_000,
+		description: "Provider health cache TTL in ms; entries older than this are rechecked (default 30 s).",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	AGENT_PROPOSAL_LEASE_TTL_MS: {
+		name: "AGENT_PROPOSAL_LEASE_TTL_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 60_000) throw new Error("must be >= 60000");
+			return n;
+		},
+		required: false,
+		defaultValue: 1_800_000,
+		description: "Agent proposal system: default lease TTL in ms (default 30 min).",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	GATEWAY_WAKE_TIMEOUT_MS: {
+		name: "GATEWAY_WAKE_TIMEOUT_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 500) throw new Error("must be >= 500");
+			return n;
+		},
+		required: false,
+		defaultValue: 10_000,
+		description: "Transport registry: max time in ms to wait for a transport adapter to come online on wakeUp() (default 10 s).",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
 };
 
 /**

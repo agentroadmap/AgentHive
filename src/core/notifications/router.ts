@@ -18,6 +18,8 @@ import type { NotificationChannel, OutboundMessage } from "../messaging/gateway/
 import { moveToDlq } from "../messaging/gateway/dlq.ts";
 import { TransportWakeTimeoutError } from "../messaging/gateway/errors.ts";
 import type { TransportRegistry } from "../messaging/gateway/registry.ts";
+import * as runtimeConfig from "../../shared/runtime/config.ts";
+import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 import { resolveTransport } from "./transport-registry.ts";
 import {
 	type NotificationEnvelope,
@@ -32,6 +34,30 @@ const BACKOFF_MS = [1_000, 4_000, 12_000, 32_000]; // index = attempts already m
 const POLL_INTERVAL_MS = 30_000;
 const BATCH_SIZE = 25;
 const ERROR_TRUNCATE = 4_000;
+
+async function resolveNotificationMaxAttempts(): Promise<number> {
+	try {
+		return await runtimeConfig.get(FlagKeys.NOTIFICATION_MAX_ATTEMPTS);
+	} catch {
+		return MAX_ATTEMPTS;
+	}
+}
+
+async function resolveNotificationPollMs(): Promise<number> {
+	try {
+		return await runtimeConfig.get(FlagKeys.NOTIFICATION_POLL_MS);
+	} catch {
+		return POLL_INTERVAL_MS;
+	}
+}
+
+async function resolveNotificationBatchSize(): Promise<number> {
+	try {
+		return await runtimeConfig.get(FlagKeys.NOTIFICATION_BATCH_SIZE);
+	} catch {
+		return BATCH_SIZE;
+	}
+}
 
 export interface RouterDeps {
 	pool: Pool;
@@ -98,9 +124,10 @@ export class NotificationRouter {
 			this.errorLog(`[notification-router] LISTEN error: ${err.message}`);
 		});
 
+		const pollMs = await resolveNotificationPollMs();
 		this.pollTimer = setInterval(() => {
 			void this.scheduleDrain();
-		}, POLL_INTERVAL_MS);
+		}, pollMs);
 		this.pollTimer.unref?.();
 
 		// Initial drain in case anything was waiting before we attached.
@@ -162,6 +189,7 @@ export class NotificationRouter {
 		// `payload`, `dispatched_at`, and `next_attempt_at` columns. Pending-row
 		// detection uses `status='pending'` (live CHECK constraint). payload is
 		// materialized as NULL so QueueRow stays shape-compatible.
+		const batchSize = await resolveNotificationBatchSize();
 		const { rows } = await this.deps.pool.query<QueueRow>(
 			`SELECT id, severity, kind, channel, proposal_id,
 			        title, body, NULL::jsonb AS payload, metadata, created_at, dispatch_attempts
@@ -178,7 +206,7 @@ export class NotificationRouter {
 			    created_at ASC
 			  LIMIT $1
 			  FOR UPDATE SKIP LOCKED`,
-			[BATCH_SIZE],
+			[batchSize],
 		);
 		return rows;
 	}
@@ -209,7 +237,8 @@ export class NotificationRouter {
 						} catch (err) {
 							if (err instanceof TransportWakeTimeoutError) {
 								const newAttempts = row.dispatch_attempts + 1;
-								if (newAttempts >= MAX_ATTEMPTS) {
+								const maxAttempts = await resolveNotificationMaxAttempts();
+								if (newAttempts >= maxAttempts) {
 									await this.markFailed(envelope.queueId, newAttempts, err.message);
 									await this.moveToDlqRow(envelope, newAttempts, effectiveChannel, "WAKE_TIMEOUT");
 									return;
@@ -251,8 +280,9 @@ export class NotificationRouter {
 
 		const newAttempts = row.dispatch_attempts + 1;
 		const lastError = errors.join("; ").slice(0, ERROR_TRUNCATE);
+		const maxAttempts = await resolveNotificationMaxAttempts();
 
-		if (newAttempts >= MAX_ATTEMPTS) {
+		if (newAttempts >= maxAttempts) {
 			await this.markFailed(envelope.queueId, newAttempts, lastError);
 			const effectiveChannel = row.channel
 				?? transportNameToChannel(routes[0]?.transport ?? "")

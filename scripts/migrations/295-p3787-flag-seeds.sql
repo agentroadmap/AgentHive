@@ -1,0 +1,40 @@
+-- Migration 295: P3787 first-wave runtime flag seeds
+-- Idempotent: ON CONFLICT (flag_name, scope) DO NOTHING
+-- All defaultValues match the original source literals exactly (AC-2).
+
+INSERT INTO core.runtime_flag (flag_name, scope, value_jsonb, description) VALUES
+  ('AGENTHIVE_DISPATCH_LOOP_THRESHOLD', 'global', '6',
+   'Circuit-breaker: max failed runs per (proposal, role) in the last hour before gate_scanner_paused is set.'),
+  ('AGENTHIVE_GATE_CONVERGENCE_MAX_BLOCKING', 'global', '3',
+   'Max blocking reviews before convergence guard halts further gate passes.'),
+  ('AGENTHIVE_GATE_CONVERGENCE_MAX_RUNS_PER_ROLE', 'global', '8',
+   'Max total gate runs per (proposal, role) before convergence guard activates.'),
+  ('FEDERATION_SYNC_POLL_MS', 'global', '30000',
+   'Polling interval (ms) for federation sync peer health checks.'),
+  ('FEDERATION_QUARANTINE_THRESHOLD', 'global', '3',
+   'Number of consecutive health-check failures before a peer is quarantined.'),
+  ('FEDERATION_STALE_SYNC_MS', 'global', '3600000',
+   'Age threshold (ms) after which a federation sync is considered stale.'),
+  ('FEDERATION_PING_TIMEOUT_MS', 'global', '5000',
+   'Timeout (ms) for federation peer ping requests.'),
+  ('SAGA_REPAIR_INTERVAL_MS', 'global', '60000',
+   'Polling interval (ms) for the saga repair worker cycle.'),
+  ('SAGA_REPAIR_MAX_ATTEMPTS', 'global', '10',
+   'Maximum retry attempts before a saga repair item is escalated to the operator.'),
+  ('SAGA_REPAIR_BASE_BACKOFF_MIN', 'global', '2',
+   'Base backoff in minutes for saga repair exponential retry scheduling.'),
+  ('SAGA_REPAIR_MAX_BACKOFF_HOURS', 'global', '24',
+   'Maximum backoff in hours for saga repair retry scheduling.'),
+  ('NOTIFICATION_MAX_ATTEMPTS', 'global', '5',
+   'Maximum dispatch attempts before a notification is moved to the DLQ.'),
+  ('NOTIFICATION_POLL_MS', 'global', '30000',
+   'Polling interval (ms) for the notification router drain cycle.'),
+  ('NOTIFICATION_BATCH_SIZE', 'global', '25',
+   'Number of pending notifications claimed per drain cycle.'),
+  ('PROVIDER_HEALTH_TTL_MS', 'global', '30000',
+   'TTL (ms) for cached provider health check results.'),
+  ('AGENT_PROPOSAL_LEASE_TTL_MS', 'global', '1800000',
+   'Default lease TTL (ms) for agent proposal claims (30 minutes).'),
+  ('GATEWAY_WAKE_TIMEOUT_MS', 'global', '10000',
+   'Timeout (ms) for transport gateway wake-up polling.')
+ON CONFLICT (flag_name, scope) DO NOTHING;
