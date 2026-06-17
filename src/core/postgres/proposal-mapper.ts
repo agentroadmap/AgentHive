@@ -218,7 +218,7 @@ export class PgProposalHydrator {
 						.toISOString()
 						.slice(0, 16)
 						.replace("T", " ")
-				: undefined,
+				: new Date(0).toISOString().slice(0, 16).replace("T", " "),
 			updatedDate: row.modified_at || row.created_at
 				? new Date(row.modified_at || row.created_at)
 						.toISOString()
