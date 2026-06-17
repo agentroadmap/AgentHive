@@ -2598,7 +2598,7 @@ export class RoadmapServer {
 			return Response.json({ error: `Unknown config key: ${keyName}` }, { status: 404 });
 		}
 
-		if (key.class === "secret" || key.class === "tenant_dsn") {
+		if (key.class === "secret" || key.class === "tenant_dsn" || key.class === "structural") {
 			return Response.json({ error: "Key class is immutable" }, { status: 403 });
 		}
 

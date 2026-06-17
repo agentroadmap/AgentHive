@@ -179,8 +179,13 @@ function ConfigRow({ descriptor, onSave }: ConfigRowProps) {
 				) : descriptor.editable ? (
 					<EditControl descriptor={descriptor} onSave={onSave} />
 				) : (
-					<span className="font-mono text-sm text-gray-300">
-						{formatValue(descriptor.value) || <span className="text-gray-600 italic">—</span>}
+					<span className="flex flex-col gap-0.5">
+						<span className="font-mono text-sm text-gray-300">
+							{formatValue(descriptor.value) || <span className="text-gray-600 italic">—</span>}
+						</span>
+						{(descriptor.class === "structural" || descriptor.class === "tenant_dsn") && (
+							<span className="text-xs text-gray-500 italic">set via env / deploy config · requires restart</span>
+						)}
 					</span>
 				)}
 			</td>
