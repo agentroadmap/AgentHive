@@ -4,6 +4,7 @@ stages:
   - security
   - check
   - test
+  - integration
   - build
 
 variables:
@@ -159,7 +160,24 @@ test:
       - node_modules/
   timeout: 10m
 
-# ─── Stage 3: Build ───────────────────────────────────────────
+# ─── Stage 3: Integration (P3842) ────────────────────────────
+# Spawns each long-running service, sends SIGTERM, and asserts exit within 5s.
+# Prevents regression of P3198 (SIGTERM hang fix).
+# Skips individual service assertions when the service cannot start (no DB /
+# infrastructure) — the job itself still passes in a clean-build environment.
+sigterm-test:
+  stage: integration
+  needs: [test]
+  script:
+    - npm ci
+    - node --import jiti/register --test tests/integration/sigterm-graceful.test.ts
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
+  timeout: 3m
+
+# ─── Stage 4: Build ───────────────────────────────────────────
 build:
   stage: build
   script:
