@@ -19,12 +19,21 @@ import type { ConfigKey } from "./config";
  */
 export type ConfigKeyCategory =
 	| "orchestrator"
-	| "a2a"
-	| "pause"
-	| "spawn"
-	| "matcher"
-	| "tui"
-	| "feature"
+	| "dispatch"
+	| "liaison"
+	| "pause_backoff"
+	| "adaptive_matcher"
+	| "gate_governance"
+	| "multi_tenant"
+	| "audit"
+	| "ui_ux"
+	| "model_routing"
+	| "provider_quota"
+	| "database"
+	| "connection_pool"
+	| "vault_secret"
+	| "mcp_endpoint"
+	| "diagnostic"
 	| "general";
 
 /**
@@ -709,7 +718,7 @@ export const FlagKeys = {
 			}
 		},
 		required: false,
-		category: "feature" as ConfigKeyCategory,
+		category: "dispatch" as ConfigKeyCategory,
 		description: "Enable offer-dispatch workflow",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -727,7 +736,7 @@ export const FlagKeys = {
 			}
 		},
 		required: false,
-		category: "feature" as ConfigKeyCategory,
+		category: "multi_tenant" as ConfigKeyCategory,
 		description: "Enable multi-tenant mode",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -745,7 +754,7 @@ export const FlagKeys = {
 			}
 		},
 		required: false,
-		category: "feature" as ConfigKeyCategory,
+		category: "audit" as ConfigKeyCategory,
 		description: "Enable audit logging",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -769,7 +778,7 @@ export const FlagKeys = {
 			return parsed;
 		},
 		required: true,
-		category: "a2a" as ConfigKeyCategory,
+		category: "liaison" as ConfigKeyCategory,
 		description: "How often A2A re-reads agent_registry for newly-registered local agencies (ms)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -787,7 +796,7 @@ export const FlagKeys = {
 			return parsed;
 		},
 		required: true,
-		category: "a2a" as ConfigKeyCategory,
+		category: "liaison" as ConfigKeyCategory,
 		description: "Backoff on PG connection loss before exit(1) (ms)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -805,7 +814,7 @@ export const FlagKeys = {
 			return parsed;
 		},
 		required: true,
-		category: "a2a" as ConfigKeyCategory,
+		category: "liaison" as ConfigKeyCategory,
 		description: "Bounded wait for fn_pulse(offline) calls during SIGTERM (ms)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -823,7 +832,7 @@ export const FlagKeys = {
 			return parsed;
 		},
 		required: true,
-		category: "a2a" as ConfigKeyCategory,
+		category: "liaison" as ConfigKeyCategory,
 		description: "How often A2A calls fn_pulse('online') per child to keep last_heartbeat_at fresh for existing dispatchability/maintenance consumers (ms)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -847,7 +856,7 @@ export const FlagKeys = {
 		},
 		required: false,
 		defaultValue: 60_000,
-		category: "a2a" as ConfigKeyCategory,
+		category: "liaison" as ConfigKeyCategory,
 		description: "Liaison context re-hydration interval (ms). Valid range: 1000-600000 (1s-10m)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -1183,7 +1192,7 @@ export const FlagKeys = {
 		},
 		required: false,
 		defaultValue: false,
-		category: "a2a" as ConfigKeyCategory,
+		category: "liaison" as ConfigKeyCategory,
 		description: "V3-C6: true makes each agency liaison self-claim work offers",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -1205,7 +1214,7 @@ export const FlagKeys = {
 			return parsed;
 		},
 		required: true,
-		category: "pause" as ConfigKeyCategory,
+		category: "pause_backoff" as ConfigKeyCategory,
 		description: "Number of consecutive no-eligible-agency failures before first pause (P1291)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -1223,7 +1232,7 @@ export const FlagKeys = {
 			return parsed;
 		},
 		required: true,
-		category: "pause" as ConfigKeyCategory,
+		category: "pause_backoff" as ConfigKeyCategory,
 		description: "Base backoff duration in milliseconds for first pause cycle (default 1800000 = 30min)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -1241,7 +1250,7 @@ export const FlagKeys = {
 			return parsed;
 		},
 		required: true,
-		category: "pause" as ConfigKeyCategory,
+		category: "pause_backoff" as ConfigKeyCategory,
 		description: "Exponential backoff multiplier for each pause cycle (default 2)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -1259,7 +1268,7 @@ export const FlagKeys = {
 			return parsed;
 		},
 		required: true,
-		category: "pause" as ConfigKeyCategory,
+		category: "pause_backoff" as ConfigKeyCategory,
 		description: "Hard cap on pause duration in milliseconds (default 86400000 = 24h)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -1280,7 +1289,7 @@ export const FlagKeys = {
 		},
 		required: false,
 		defaultValue: 3,
-		category: "spawn" as ConfigKeyCategory,
+		category: "dispatch" as ConfigKeyCategory,
 		description: "Max retry attempts when spawn hits provider-specific quota (P1359)",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
@@ -1303,7 +1312,7 @@ export const FlagKeys = {
 		},
 		required: false,
 		defaultValue: false,
-		category: "matcher" as ConfigKeyCategory,
+		category: "adaptive_matcher" as ConfigKeyCategory,
 		description:
 			"P3312: when false (default), matchWorkToRoute runs in shadow mode only — logs matcher_choice vs legacy_choice without changing dispatch behavior. Flip true once P3310+P3311 are COMPLETE.",
 		dbTable: "core.runtime_flag",
@@ -1340,13 +1349,383 @@ export const FlagKeys = {
 		},
 		required: false,
 		defaultValue: "grid" as "grid" | "stacked",
-		category: "tui" as ConfigKeyCategory,
+		category: "ui_ux" as ConfigKeyCategory,
 		description:
 			"TUI cockpit panel layout: 'grid' (2x2) or 'stacked' (single column).",
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: true,
 	} satisfies ConfigKey<"grid" | "stacked">,
+
+	// ─── P3781 AC-2: previously leaked process.env reads ────────────────────
+
+	AGENTHIVE_PREMATURE_GATE_GUARD_ENABLED: {
+		name: "AGENTHIVE_PREMATURE_GATE_GUARD_ENABLED",
+		class: "flag" as const,
+		parse: (v: string) => {
+			try {
+				return JSON.parse(v) === true;
+			} catch {
+				return v.toLowerCase() === "true" || v === "1";
+			}
+		},
+		required: false,
+		defaultValue: false,
+		category: "gate_governance" as ConfigKeyCategory,
+		description: "Guard against premature gate requests from proposals with zero passing ACs",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies ConfigKey<boolean>,
+
+	AGENTHIVE_HOLD_WINDOW_MAX_SEC: {
+		name: "AGENTHIVE_HOLD_WINDOW_MAX_SEC",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n <= 0) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 1800,
+		category: "dispatch" as ConfigKeyCategory,
+		description: "Maximum hold window in seconds before a rate-limited offer is released back to the pool",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies ConfigKey<number>,
+
+	AGENTHIVE_SELF_CLAIM_AGENCIES: {
+		name: "AGENTHIVE_SELF_CLAIM_AGENCIES",
+		class: "flag" as const,
+		parse: (v: string) => {
+			try {
+				const decoded = JSON.parse(v);
+				return typeof decoded === "string" ? decoded : v;
+			} catch {
+				return v;
+			}
+		},
+		required: false,
+		defaultValue: "",
+		category: "liaison" as ConfigKeyCategory,
+		description: "Comma-separated list of agency IDs allowed to self-claim work offers",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies ConfigKey<string>,
+
+	AGENTHIVE_LIAISON_LLM_TIMEOUT_MS: {
+		name: "AGENTHIVE_LIAISON_LLM_TIMEOUT_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n <= 0) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 30_000,
+		category: "liaison" as ConfigKeyCategory,
+		description: "Default LLM call timeout for liaison agents (ms); overridden per-provider by AGENTHIVE_LIAISON_LLM_TIMEOUT_MS_{PROVIDER}",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies ConfigKey<number>,
+
+	// ─── P3787: dispatch circuit-breaker tunables ────────────────────────────
+	// Seeded by scripts/migrations/295-p3787-flag-seeds.sql.
+	// Default == old literal; a fresh deploy with no flag rows behaves byte-identically.
+
+	DISPATCH_LOOP_THRESHOLD_PER_HOUR: {
+		name: "DISPATCH_LOOP_THRESHOLD_PER_HOUR",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 6,
+		category: "dispatch" as ConfigKeyCategory,
+		description: "Circuit-breaker: max (proposal, role) dispatches per hour before pausing (P689)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies ConfigKey<number>,
+
+	GATE_CONVERGENCE_MAX_BLOCKING: {
+		name: "GATE_CONVERGENCE_MAX_BLOCKING",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 3,
+		category: "gate_governance" as ConfigKeyCategory,
+		description: "Cumulative-convergence guard: max blocking reviews before proposal is paused (P1729)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies ConfigKey<number>,
+
+	GATE_CONVERGENCE_MAX_RUNS_PER_ROLE: {
+		name: "GATE_CONVERGENCE_MAX_RUNS_PER_ROLE",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 8,
+		category: "gate_governance" as ConfigKeyCategory,
+		description: "Cumulative-convergence guard: max per-role runs since last state/maturity transition before pausing (P1729)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies ConfigKey<number>,
+
+	// ─── P3787: federation-sync tunables ─────────────────────────────────────
+
+	FEDERATION_SYNC_POLL_INTERVAL_MS: {
+		name: "FEDERATION_SYNC_POLL_INTERVAL_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1000) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 30_000,
+		category: "dispatch" as ConfigKeyCategory,
+		description: "Cross-instance federation sync poll interval (ms)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	FEDERATION_HEALTH_QUARANTINE_THRESHOLD: {
+		name: "FEDERATION_HEALTH_QUARANTINE_THRESHOLD",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 3,
+		category: "dispatch" as ConfigKeyCategory,
+		description: "Consecutive health-check failures before quarantining a federation peer",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	FEDERATION_PING_TIMEOUT_MS: {
+		name: "FEDERATION_PING_TIMEOUT_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 100) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 5_000,
+		category: "dispatch" as ConfigKeyCategory,
+		description: "Timeout for federation peer health pings (ms)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	// ─── P3787: saga repair-worker tunables ──────────────────────────────────
+
+	SAGA_REPAIR_INTERVAL_MS: {
+		name: "SAGA_REPAIR_INTERVAL_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1000) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 60_000,
+		category: "pause_backoff" as ConfigKeyCategory,
+		description: "Saga repair-worker polling interval (ms); read once at worker startup",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	SAGA_REPAIR_MAX_ATTEMPTS: {
+		name: "SAGA_REPAIR_MAX_ATTEMPTS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 10,
+		category: "pause_backoff" as ConfigKeyCategory,
+		description: "Max retry attempts before escalating a failed saga to CRITICAL",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	SAGA_REPAIR_MAX_BACKOFF_HOURS: {
+		name: "SAGA_REPAIR_MAX_BACKOFF_HOURS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 24,
+		category: "pause_backoff" as ConfigKeyCategory,
+		description: "Hard cap on saga repair exponential backoff (hours)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	// ─── P3787: notification-router tunables ─────────────────────────────────
+
+	NOTIFICATION_ROUTER_POLL_MS: {
+		name: "NOTIFICATION_ROUTER_POLL_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1000) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 30_000,
+		category: "dispatch" as ConfigKeyCategory,
+		description: "Notification router backstop poll interval (ms); read once at router start",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	NOTIFICATION_ROUTER_BATCH_SIZE: {
+		name: "NOTIFICATION_ROUTER_BATCH_SIZE",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 25,
+		category: "dispatch" as ConfigKeyCategory,
+		description: "Max notifications per drain batch",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	NOTIFICATION_ROUTER_MAX_ATTEMPTS: {
+		name: "NOTIFICATION_ROUTER_MAX_ATTEMPTS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 5,
+		category: "dispatch" as ConfigKeyCategory,
+		description: "Max dispatch attempts before a notification is moved to DLQ",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	// ─── P3787: messaging gateway tunables ───────────────────────────────────
+
+	MESSAGING_WAKE_TIMEOUT_MS: {
+		name: "MESSAGING_WAKE_TIMEOUT_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 100) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 10_000,
+		category: "dispatch" as ConfigKeyCategory,
+		description: "Max wait for a transport adapter to become active (ms)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	// ─── P3787: DEFER — sync constructor context, seeds only, no consumer swap ──
+
+	PROVIDER_HEALTH_CACHE_TTL_MS: {
+		name: "PROVIDER_HEALTH_CACHE_TTL_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 100) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 30_000,
+		category: "provider_quota" as ConfigKeyCategory,
+		description: "Provider health cache TTL (ms); read at HealthCache construction — requires restart to take effect",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	AGENT_PROPOSAL_LEASE_TTL_MS: {
+		name: "AGENT_PROPOSAL_LEASE_TTL_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 60_000) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 1_800_000,
+		category: "orchestrator" as ConfigKeyCategory,
+		description: "Default agent proposal lease TTL (ms); used by AgentProposalManager at construction — requires restart to take effect",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	// ─── P3840: Unified dispatch pool ────────────────────────────────────────────
+	// When true, scanQueues() uses v_unified_dispatch_pool instead of v_mature_queue,
+	// covering new/active proposals for enhance/review/develop/merge offers in the
+	// same tick as mature proposals for gate-review offers. The implicit-gate and
+	// enhancer-revise timers are suppressed — all dispatch runs through one loop.
+	// Default false (legacy path) so rollback requires only a DB toggle + restart.
+	ORCHESTRATOR_UNIFIED_POOL_ENABLED: {
+		name: "ORCHESTRATOR_UNIFIED_POOL_ENABLED",
+		class: "flag" as const,
+		parse: (v: string) => {
+			try {
+				return JSON.parse(v) === true;
+			} catch {
+				return v.toLowerCase() === "true" || v === "1";
+			}
+		},
+		required: false,
+		defaultValue: false,
+		category: "orchestrator" as ConfigKeyCategory,
+		description:
+			"P3840: when true, scanQueues() uses v_unified_dispatch_pool (covers all proposal states in one loop); implicit-gate and enhancer-revise timers are suppressed. Default false = legacy v_mature_queue path.",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies ConfigKey<boolean>,
 };
 
 /**

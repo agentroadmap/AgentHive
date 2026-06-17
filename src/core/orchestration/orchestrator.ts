@@ -36,6 +36,8 @@ import { TIER_PREFERENCE, type TaskMetadata } from "../../orchestrator/model_rou
 // between the shim and the class). P902-D will progressively pull these
 // implementations into class methods.
 import {
+	claimEnhancementRevisionReady,
+	dispatchEnhancementRevision,
 	dispatchImplicitGate,
 	drainEnhancementRevisions,
 	drainImplicitGateReady,
@@ -44,6 +46,7 @@ import {
 	reconcileStaleDispatches,
 	reconcileStrandedAdvances,
 } from "./legacy-dispatch.ts";
+import { buildUnifiedPool } from "./unified-pool-builder.ts";
 import * as runtimeConfig from "../../shared/runtime/config.ts";
 import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 import {
@@ -173,6 +176,7 @@ export class Orchestrator {
 	private stuckWorkerMs = 60_000;
 	private heartbeatMs = 60_000;
 	private offerClaimEnabled = true;
+	private unifiedPoolEnabled = false;
 
 	private offerReapTimer: ReturnType<typeof setInterval> | null = null;
 	private pokeWatchdogTimer: ReturnType<typeof setInterval> | null = null;
@@ -275,6 +279,7 @@ export class Orchestrator {
 		this.stuckWorkerMs = await tryFlag("AGENTHIVE_STUCK_WORKER_WATCHDOG_INTERVAL_MS", FlagKeys.ORCHESTRATOR_STUCK_WORKER_MS, 60_000, Number);
 		this.heartbeatMs = await tryFlag("AGENTHIVE_HEARTBEAT_INTERVAL_MS", FlagKeys.ORCHESTRATOR_HEARTBEAT_MS, 60_000, Number);
 		this.offerClaimEnabled = await tryFlag("AGENTHIVE_OFFER_CLAIM_LOOP", FlagKeys.ORCHESTRATOR_OFFER_CLAIM_ENABLED, true, (s) => s !== "0");
+		this.unifiedPoolEnabled = await tryFlag("AGENTHIVE_UNIFIED_POOL_ENABLED", FlagKeys.ORCHESTRATOR_UNIFIED_POOL_ENABLED, false, (s) => s !== "0" && s.toLowerCase() !== "false");
 	}
 
 	/**
@@ -356,7 +361,7 @@ export class Orchestrator {
 			);
 		}
 
-		if (this.implicitGatePollMs > 0) {
+		if (!this.unifiedPoolEnabled && this.implicitGatePollMs > 0) {
 			// Initial drain at boot (matches legacy line 2604).
 			void this.trackInFlight(
 				drainImplicitGateReady("startup", 5).catch((err) =>
@@ -377,18 +382,24 @@ export class Orchestrator {
 			console.log(
 				`[Orchestrator] implicit gate polling every ${this.implicitGatePollMs}ms`,
 			);
+		} else if (this.unifiedPoolEnabled) {
+			console.log("[Orchestrator] implicit-gate timer suppressed — unified pool enabled (P3840)");
 		}
 
-		this.pollTimers.set(
-			"enhancer-revise",
-			setInterval(() => {
-				void this.trackInFlight(
-					this.runEnhancerReviseTick().catch((err) =>
-						console.error("[Orchestrator] enhancer-revise failed:", err),
-					),
-				);
-			}, this.enhancerReviseMs),
-		);
+		if (!this.unifiedPoolEnabled) {
+			this.pollTimers.set(
+				"enhancer-revise",
+				setInterval(() => {
+					void this.trackInFlight(
+						this.runEnhancerReviseTick().catch((err) =>
+							console.error("[Orchestrator] enhancer-revise failed:", err),
+						),
+					);
+				}, this.enhancerReviseMs),
+			);
+		} else {
+			console.log("[Orchestrator] enhancer-revise timer suppressed — unified pool enabled (P3840)");
+		}
 
 		this.pollTimers.set(
 			"reconciler",
@@ -828,6 +839,10 @@ export class Orchestrator {
 	 * Returns the number of proposals that were dispatched (mode ≠ skip).
 	 */
 	async scanQueues(): Promise<number> {
+		if (this.unifiedPoolEnabled) {
+			return this.scanQueuesUnified();
+		}
+
 		const candidates = await getUnlockedGateQueue(this.scanBatchLimit);
 		if (candidates.length === 0) return 0;
 
@@ -881,8 +896,6 @@ export class Orchestrator {
 					task,
 					proposalId: detail.id,
 					squadName: `scan-P${detail.id}-${mode}`,
-					role,
-					task,
 					stage: detail.status,
 					agentLabel: `${detail.displayId} (${mode})`,
 					activity: mode === "gate" ? "reviewing" : "preparing",
@@ -896,13 +909,10 @@ export class Orchestrator {
 					requiredTier,
 					phase: mode,
 					worktreeHint: this.defaultWorktree,
-					requiredCapabilities:
-						(primaryProfile?.requiredCapabilities ?? []).length > 0
-							? (primaryProfile?.requiredCapabilities ?? [])
-							: [role],
+					requiredCapabilities: primaryProfile?.requiredCapabilities ?? [],
 				});
 				console.log(
-					`[Orchestrator] scanQueues: posted offer ${dispatchId} for ${detail.displayId} (${mode})`,
+					`[Orchestrator] scanQueues: posted offer for ${detail.displayId} (${mode})`,
 				);
 
 				dispatched++;
@@ -914,6 +924,55 @@ export class Orchestrator {
 			}
 		}
 
+		return dispatched;
+	}
+
+	/**
+	 * P3840: Unified scan path — replaces the fragmented legacy scanQueues() + implicit-gate
+	 * + enhancer-revise timers with a single pass over v_unified_dispatch_pool.
+	 *
+	 * Routing by offer_kind:
+	 *   gate-review → dispatchImplicitGate (posts a gate-review work offer)
+	 *   enhance     → dispatchEnhancementRevision if proposal had a recent hold decision,
+	 *                 otherwise handleStateChange (fresh enhancement offer)
+	 *   review / develop / merge → handleStateChange (state-appropriate work offer)
+	 *
+	 * The orchestrator NEVER calls gate_decision here. All gate decisions must come
+	 * from agents claiming posted gate-review offers.
+	 */
+	private async scanQueuesUnified(): Promise<number> {
+		const pool = await buildUnifiedPool(this.scanBatchLimit);
+		if (pool.length === 0) return 0;
+
+		let dispatched = 0;
+
+		for (const row of pool) {
+			try {
+				if (row.offerKind === "gate-review") {
+					await dispatchImplicitGate(row.id, "unified-pool");
+				} else if (row.offerKind === "enhance") {
+					const holdTargets = await claimEnhancementRevisionReady(1, row.id);
+					if (holdTargets.length > 0) {
+						await dispatchEnhancementRevision(holdTargets[0], "unified-pool");
+					} else {
+						await handleStateChange(String(row.id), row.status);
+					}
+				} else {
+					// review, develop, merge
+					await handleStateChange(String(row.id), row.status);
+				}
+				dispatched++;
+			} catch (err) {
+				console.error(
+					`[Orchestrator] unified pool dispatch failed for P${row.id} (${row.offerKind}):`,
+					err instanceof Error ? err.message : err,
+				);
+			}
+		}
+
+		console.log(
+			`[Orchestrator] scanQueuesUnified: ${dispatched}/${pool.length} dispatched`,
+		);
 		return dispatched;
 	}
 
