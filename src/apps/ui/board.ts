@@ -2750,6 +2750,16 @@ export async function renderBoardTui(
 			new: "white", active: "cyan", mature: "green", obsolete: "red",
 		};
 		const getFeedIcon = (e: StreamEvent): string => {
+			// Discord-style action emoji, detected from the message content so
+			// lease/review/decision events (which arrive as 'message'/'custom'
+			// stream types) read like the Discord state feed. These take
+			// precedence over the generic type map below.
+			const msg = e.message;
+			if (/\blease claimed\b/.test(msg)) return "🔒";
+			if (/\blease released\b/.test(msg)) return "🔓";
+			if (/\breview by\b|\bposted review\b/.test(msg)) return "💬";
+			if (/\bdecision\b/.test(msg) && msg.includes("]")) return "⚖️";
+			if (/\bcreated\b/.test(msg)) return "✨";
 			// State transition: "P289 state draft -> review"
 			if (e.message.includes(" state ")) {
 				const m = e.message.match(/state\s+\S+\s+->\s+(\S+)/);
@@ -2773,11 +2783,15 @@ export async function renderBoardTui(
 				return "M";
 			}
 			// Other event types with colors
+			// Run outcomes carry the model name (e.g. "… (anthropic/claude) [148s]")
+			// — give them Discord-style emoji so the combined feed reads at a glance.
+			if (e.type === "review_passed") return "✅";
+			if (e.type === "review_failed") return "❌";
+			if (e.type === "proposal_coding") return "⚙️";
 			const typeMap: Record<string, [string, string]> = {
 				proposal_accepted: ["▣", "green"], proposal_claimed: ["◆", "yellow"],
-				proposal_coding: ["◒", "cyan"], review_requested: ["?", "yellow"],
-				proposal_reviewing: ["◆", "yellow"], review_passed: ["✓", "green"],
-				review_failed: ["✖", "red"], proposal_complete: ["✓", "green"],
+				review_requested: ["?", "yellow"],
+				proposal_reviewing: ["◆", "yellow"], proposal_complete: ["✓", "green"],
 				proposal_merged: ["▣", "magenta"], proposal_pushed: ["P", "cyan"],
 				agent_online: ["+", "green"], agent_offline: ["-", "red"],
 				heartbeat: ["$", "gray"], cubic_phase_change: ["~", "blue"],
