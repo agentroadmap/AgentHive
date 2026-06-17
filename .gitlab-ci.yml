@@ -11,11 +11,24 @@ variables:
   NODE_ENV: test
 
 # ─── Stage 0: Security ────────────────────────────────────────
-secret-scan:
+# gitleaks kept as advisory fallback; npm-package scan:secrets is the required gate.
+secret-scan-advisory:
   stage: security
   script:
     - gitleaks detect --source . --verbose
   allow_failure: true
+
+# Required gate: agenthive-scan-rules-secrets patterns (AgentHive-specific secrets).
+# Baseline suppresses pre-existing findings; only NEW secrets block merge.
+scan-secrets:
+  stage: security
+  script:
+    - npm ci
+    - npm run scan:secrets
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
 
 dependency-audit:
   stage: security
@@ -75,6 +88,28 @@ workflow-states-check:
   script:
     - npm ci
     - npm run scan:workflow-states
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
+
+# Required gate: agenthive-scan-rules-multi-tenant (X-Project-Id bypass, cross-tenant leaks).
+scan-multi-tenant:
+  stage: check
+  script:
+    - npm ci
+    - npm run scan:multi-tenant
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
+
+# Required gate: agenthive-scan-rules-agenthive (agenthive-specific hardcoded values).
+scan-agenthive:
+  stage: check
+  script:
+    - npm ci
+    - npm run scan:agenthive
   cache:
     key: ${CI_COMMIT_REF_SLUG}
     paths:
