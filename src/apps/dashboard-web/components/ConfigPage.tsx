@@ -153,7 +153,7 @@ interface ConfigRowProps {
 	onSave: (keyName: string, value: unknown) => Promise<void>;
 }
 
-function ConfigRow({ descriptor, onSave }: ConfigRowProps) {
+export function ConfigRow({ descriptor, onSave }: ConfigRowProps) {
 	const classBadgeColor: Record<string, string> = {
 		flag: "bg-blue-800 text-blue-200",
 		registry: "bg-purple-800 text-purple-200",
@@ -201,7 +201,7 @@ interface CategorySectionProps {
 	onSave: (keyName: string, value: unknown) => Promise<void>;
 }
 
-function CategorySection({ category, keys, onSave }: CategorySectionProps) {
+export function CategorySection({ category, keys, onSave }: CategorySectionProps) {
 	const [open, setOpen] = useState(true);
 
 	return (
