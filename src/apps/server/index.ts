@@ -31,6 +31,10 @@ import type {
 	SearchResultType,
 } from "../../types/index.ts";
 import { watchConfig } from "../../utils/config-watcher.ts";
+import {
+	AllConfigKeys,
+	getConfigKeyByName,
+} from "../../shared/runtime/config-keys.ts";
 import { formatVersionLabel, getVersionInfo } from "../../utils/version.ts";
 import {
 	getPool,
@@ -1327,6 +1331,15 @@ export class RoadmapServer {
 			if (pathname === "/api/statuses" && method === "GET")
 				return await this.handleGetStatuses();
 
+			if (pathname === "/api/config/keys") {
+				if (method === "GET") return await this.handleGetConfigKeys(req);
+			}
+
+			if (pathname.startsWith("/api/config/keys/")) {
+				const keyName = pathname.slice("/api/config/keys/".length);
+				if (method === "PUT") return await this.handleMutateConfigKey(req, keyName);
+			}
+
 			if (pathname === "/api/config") {
 				if (method === "GET") return await this.handleGetConfig();
 				if (method === "PUT") return await this.handleUpdateConfig(req);
@@ -2512,6 +2525,126 @@ export class RoadmapServer {
 				{ error: "Failed to update decision" },
 				{ status: 500 },
 			);
+		}
+	}
+
+	private async handleGetConfigKeys(req: Request): Promise<Response> {
+		const auth = await requireOperator(req, { action: "config.read" });
+		if (auth.rejected) return auth.rejected;
+
+		const url = new URL(req.url);
+		const categoryFilter = url.searchParams.get("category") ?? null;
+
+		// Query all active flag values in one shot
+		let flagRows: { flag_name: string; scope: string; value_jsonb: unknown; category: string | null }[] = [];
+		try {
+			const { rows } = await query<{ flag_name: string; scope: string; value_jsonb: unknown; category: string | null }>(
+				`SELECT flag_name, scope, value_jsonb, category
+				   FROM core.runtime_flag
+				  WHERE lifecycle_status = 'active'`,
+			);
+			flagRows = rows;
+		} catch {
+			// non-fatal if table not migrated yet
+		}
+		const flagMap = new Map<string, { value: unknown; category: string | null }>();
+		for (const r of flagRows) {
+			if (!flagMap.has(r.flag_name)) {
+				flagMap.set(r.flag_name, { value: r.value_jsonb, category: r.category });
+			}
+		}
+
+		const descriptors = Object.values(AllConfigKeys).map((key) => {
+			let value: unknown = null;
+			let masked = false;
+
+			if (key.class === "secret" || key.class === "tenant_dsn") {
+				masked = true;
+				value = null;
+			} else if (key.class === "structural") {
+				value = process.env[key.name] ?? ("defaultValue" in key ? key.defaultValue : null) ?? null;
+			} else if (key.class === "flag") {
+				const flagEntry = flagMap.get(key.name);
+				value = flagEntry?.value ?? ("defaultValue" in key ? key.defaultValue : null) ?? null;
+			} else if (key.class === "registry") {
+				value = process.env[key.name] ?? ("defaultValue" in key ? key.defaultValue : null) ?? null;
+			}
+
+			const flagMeta = flagMap.get(key.name);
+			const category =
+				(flagMeta?.category ?? null) ||
+				("category" in key ? (key as { category?: string }).category : null) ||
+				"uncategorized";
+
+			return {
+				name: key.name,
+				class: key.class,
+				category,
+				description: "description" in key ? (key as { description?: string }).description ?? null : null,
+				value,
+				default_value: "defaultValue" in key ? (key as { defaultValue?: unknown }).defaultValue ?? null : null,
+				required: key.required,
+				editable: key.class === "flag",
+				masked,
+			};
+		});
+
+		const filtered = categoryFilter
+			? descriptors.filter((d) => d.category === categoryFilter)
+			: descriptors;
+
+		return Response.json({ keys: filtered, count: filtered.length });
+	}
+
+	private async handleMutateConfigKey(req: Request, keyName: string): Promise<Response> {
+		const auth = await requireOperator(req, { action: "config.write" });
+		if (auth.rejected) return auth.rejected;
+
+		let key: ReturnType<typeof getConfigKeyByName>;
+		try {
+			key = getConfigKeyByName(keyName);
+		} catch {
+			return Response.json({ error: "Unknown config key" }, { status: 404 });
+		}
+
+		if (key.class !== "flag") {
+			return Response.json(
+				{ error: `Key '${keyName}' (class: ${key.class}) is not editable via this endpoint` },
+				{ status: 400 },
+			);
+		}
+
+		let body: { value: unknown; scope?: string };
+		try {
+			body = await req.json();
+		} catch {
+			return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+		}
+
+		const scope = typeof body.scope === "string" ? body.scope : "global";
+
+		try {
+			const serialized = JSON.stringify(body.value);
+			await query(
+				`INSERT INTO core.runtime_flag (flag_name, scope, value_jsonb, lifecycle_status)
+				 VALUES ($1, $2, $3::jsonb, 'active')
+				 ON CONFLICT (flag_name, scope)
+				 DO UPDATE SET value_jsonb = EXCLUDED.value_jsonb, updated_at = now()`,
+				[keyName, scope, serialized],
+			);
+			await query(
+				`SELECT pg_notify('runtime_flag_changed', $1::text)`,
+				[JSON.stringify({ flag_name: keyName, scope })],
+			);
+			return Response.json({
+				key_name: keyName,
+				scope,
+				new_value: body.value,
+				operator: auth.outcome.operatorName,
+			});
+		} catch (err) {
+			console.error(`[config.write] Failed to mutate ${keyName}:`, err);
+			return Response.json({ error: "Failed to update flag" }, { status: 500 });
 		}
 	}
 

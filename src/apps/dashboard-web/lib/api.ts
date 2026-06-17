@@ -72,6 +72,27 @@ export class ApiError extends Error {
 	}
 }
 
+export type ConfigKeyClass = "secret" | "structural" | "registry" | "flag" | "tenant_dsn";
+
+export interface ConfigKeyDescriptor {
+	name: string;
+	class: ConfigKeyClass;
+	category: string;
+	description: string | null;
+	value: unknown;
+	default_value: unknown;
+	required: boolean;
+	editable: boolean;
+	masked: boolean;
+}
+
+export interface ConfigMutationResult {
+	key_name: string;
+	scope: string;
+	new_value: unknown;
+	operator: string;
+}
+
 export class NetworkError extends Error {
 	constructor(message = "Network request failed") {
 		super(message);
@@ -420,6 +441,32 @@ export class ApiClient {
 		const response = await fetch(`${API_BASE}/statuses`);
 		if (!response.ok) {
 			throw new Error("Failed to fetch statuses");
+		}
+		return response.json();
+	}
+
+	async fetchConfigKeys(category?: string): Promise<{ keys: ConfigKeyDescriptor[]; count: number }> {
+		const params = category ? `?category=${encodeURIComponent(category)}` : "";
+		const response = await this.fetchWithRetry(`${API_BASE}/config/keys${params}`);
+		if (!response.ok) {
+			throw new Error("Failed to fetch config keys");
+		}
+		return response.json();
+	}
+
+	async mutateConfigKey(
+		keyName: string,
+		value: unknown,
+		scope?: string,
+	): Promise<ConfigMutationResult> {
+		const response = await this.fetchWithRetry(`${API_BASE}/config/keys/${encodeURIComponent(keyName)}`, {
+			method: "PUT",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ value, scope }),
+		});
+		if (!response.ok) {
+			const data = await response.json().catch(() => ({ error: "Mutation failed" }));
+			throw new Error(data.error || "Failed to update config key");
 		}
 		return response.json();
 	}
