@@ -1,6 +1,57 @@
 # 🗺️ AgentHive Roadmap
 
-> Generated: 2026-04-05 14:18 EDT | Source: Postgres `agenthive` | 71 proposals
+> Generated: 2026-06-16 | Source: Postgres `agenthive` (via MCP prop_list) | 763 proposals
+
+> **Note:** The proposal tables below are stale (2026-04-05, 71 rows). The live count is 763. See **How to Regenerate** below to produce a current full listing.
+
+## 📊 Live Status Summary (2026-06-16)
+
+| Status | Count |
+|--------|-------|
+| ✅ COMPLETE | 596 |
+| 🔀 MERGE | 1 |
+| 🔨 DEVELOP | 86 |
+| 🔍 REVIEW | 46 |
+| 📝 DRAFT | 34 |
+| **Total** | **763** |
+
+## 🔄 How to Regenerate
+
+Run the following query against the `agenthive` DB (via pgbouncer on port 6432) to regenerate the full proposal listing:
+
+```sql
+SELECT
+  p.display_id AS "ID",
+  p.title AS "Title",
+  p.status AS "Status",
+  p.maturity AS "Maturity",
+  p.type AS "Type",
+  COALESCE(ac_pass.cnt, 0) || '/' || COALESCE(ac_total.cnt, 0) AS "AC"
+FROM roadmap.proposal p
+LEFT JOIN (
+  SELECT proposal_id, COUNT(*) AS cnt
+  FROM roadmap.proposal_acceptance_criteria
+  WHERE status = 'pass'
+  GROUP BY proposal_id
+) ac_pass ON ac_pass.proposal_id = p.id
+LEFT JOIN (
+  SELECT proposal_id, COUNT(*) AS cnt
+  FROM roadmap.proposal_acceptance_criteria
+  GROUP BY proposal_id
+) ac_total ON ac_total.proposal_id = p.id
+ORDER BY
+  CASE p.status
+    WHEN 'COMPLETE' THEN 1 WHEN 'MERGE' THEN 2 WHEN 'DEVELOP' THEN 3
+    WHEN 'REVIEW' THEN 4 WHEN 'DRAFT' THEN 5 ELSE 6
+  END,
+  p.id::int;
+```
+
+Then update the header line with today's date and the row count, and replace the tables below.
+
+---
+
+## ⚠️ Stale Snapshot (2026-04-05, 71 proposals — for reference only)
 
 ## ✅ COMPLETE (1)
 | ID | Title | AC |
@@ -90,6 +141,8 @@
 
 ---
 
-**Stats:** 71 total | 1 COMPLETE | 1 REVIEW | 12 DEVELOP | 35 DRAFT | 22 PROPOSAL
-**AC Progress:** 1/93 passed (all others pending)
-**Note:** This file is generated from Postgres. Run the query to refresh.
+**Stale snapshot stats (2026-04-05):** 71 total | 1 COMPLETE | 1 REVIEW | 12 DEVELOP | 35 DRAFT | 22 PROPOSAL
+
+**Live stats (2026-06-16):** 763 total | 596 COMPLETE | 1 MERGE | 86 DEVELOP | 46 REVIEW | 34 DRAFT
+
+**Note:** This file is generated from Postgres. Run the regeneration query above to refresh the full table.
