@@ -84,6 +84,7 @@ import {
 	resumeAgencyOperator,
 	retireAgencyOperator,
 } from "../../core/orchestration/resolvers/agency-resolver.ts";
+import { routeSearchKnowledgeRequest } from "./routes/search-knowledge.ts";
 
 // Regex pattern to match any prefix (letters followed by dash)
 const PREFIX_PATTERN = /^[a-zA-Z]+-/i;
@@ -1425,8 +1426,11 @@ export class RoadmapServer {
 			// P081: SLA contract endpoint
 			if (pathname === "/api/init" && method === "POST")
 				return await this.handleInit(req);
-			if (pathname === "/api/search" && method === "GET")
-				return await this.handleSearch(req);
+			// search + knowledge — delegated to routes/search-knowledge.ts (P3796 AC-13)
+			{
+				const skResult = await routeSearchKnowledgeRequest(req, this.buildServerContext());
+				if (skResult) return skResult;
+			}
 
 			if (pathname === "/api/sequences" && method === "GET")
 				return await this.handleGetSequences();
@@ -1435,18 +1439,6 @@ export class RoadmapServer {
 
 			if (pathname === "/api/teams" && method === "GET")
 				return await this.handleListTeams();
-
-			if (pathname === "/api/knowledge" && method === "GET")
-				return await this.handleListKnowledge(req);
-
-			if (
-				pathname.startsWith("/api/knowledge/") &&
-				pathname.endsWith("/helpful") &&
-				method === "POST"
-			) {
-				const id = pathname.split("/")[3]!;
-				return await this.handleMarkKnowledgeHelpful(id);
-			}
 
 			if (pathname === "/api/sla" && method === "GET")
 				return await this.handleGetSla();
@@ -2225,8 +2217,7 @@ export class RoadmapServer {
 				);
 			}
 
-			// Get agenthive database connection (P674, P675 create tables here)
-			const result = await this.db.query(
+			const result = await getPool().query(
 				`UPDATE roadmap.schema_drift_seen
          SET resolved_at = now()
          WHERE fingerprint = $1 AND hotfix_proposal_id = $2`,
@@ -2259,7 +2250,7 @@ export class RoadmapServer {
 	): Promise<Response> {
 		try {
 			// Check if notification_inbox table exists (Phase 4 optional feature)
-			const tableExists = await this.db.query(
+			const tableExists = await getPool().query(
 				`SELECT EXISTS (
 					SELECT 1 FROM information_schema.tables
 					WHERE table_schema='roadmap' AND table_name='notification_inbox'
@@ -2274,7 +2265,7 @@ export class RoadmapServer {
 			}
 
 			// Update notification to mark as seen
-			const result = await this.db.query(
+			const result = await getPool().query(
 				`UPDATE roadmap.notification_inbox
 				 SET seen = true
 				 WHERE id = $1
@@ -2291,7 +2282,7 @@ export class RoadmapServer {
 
 			// Trigger pg_notify so WebSocket clients get real-time update
 			const notif = result.rows[0];
-			await this.db.query(
+			await getPool().query(
 				`SELECT pg_notify('notification_inbox_change', json_build_object('id', $1, 'change_type', 'update')::text)`,
 				[notificationId],
 			);
@@ -2544,7 +2535,7 @@ export class RoadmapServer {
 			let value: unknown = null;
 			let masked = false;
 
-			if (key.class === "secret" || key.class === "tenant_dsn") {
+			if (key.class === "secret") {
 				masked = true;
 				value = null;
 			} else if (key.class === "structural") {
@@ -2711,6 +2702,13 @@ export class RoadmapServer {
 			core: this.core,
 			searchService: this.searchService,
 			contentStore: this.contentStore,
+			mcpServer: this.mcpServer,
+			startedAt: this._startedAt,
+			getProjectName: () => this.projectName,
+			setProjectName: (name: string) => {
+				this.projectName = name;
+			},
+			broadcastProposalsUpdated: () => this.broadcastProposalsUpdated(),
 			resolveProjectScope: (req: Request) => this.resolveProjectScope(req),
 			handleError: (error: Error) => this.handleError(error),
 		};
@@ -3236,8 +3234,18 @@ export class RoadmapServer {
 				}));
 				return Response.json(agents);
 			}
-			const agents = await this.core.listAgents();
-			return Response.json(agents);
+			const { rows: allAgents } = await query<{
+				identity: string; agent_type: string; role: string | null;
+				status: string; trust_tier: string; updated_at: string;
+			}>(
+				`SELECT agent_identity AS identity, agent_type, role, status, trust_tier, updated_at
+				   FROM roadmap_workforce.agent_registry ORDER BY agent_identity ASC`,
+			);
+			return Response.json(allAgents.map((r) => ({
+				name: r.identity, identity: r.identity, agent_type: r.agent_type,
+				role: r.role, status: r.status, trustScore: 0,
+				trust_tier: r.trust_tier, capabilities: [] as string[], lastSeen: r.updated_at,
+			})));
 		} catch (error) {
 			console.error("Error listing agents:", error);
 			return Response.json({ error: "Failed to list agents" }, { status: 500 });
