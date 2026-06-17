@@ -10,6 +10,8 @@
 
 import type { Pool, PoolClient } from 'pg';
 
+import * as runtimeConfig from '../../../shared/runtime/config.ts';
+import { FlagKeys } from '../../../shared/runtime/config-keys.ts';
 import { resolveTransport } from '../../notifications/transport-registry.ts';
 import type {
   DispatchArgs,
@@ -21,6 +23,10 @@ import { TransportWakeTimeoutError } from './errors.ts';
 
 const WAKE_POLL_MS = 500;
 const DEFAULT_WAKE_TIMEOUT_MS = 10_000;
+
+async function resolveTransportWakeTimeoutMs(): Promise<number> {
+  try { return await runtimeConfig.get(FlagKeys.TRANSPORT_WAKE_TIMEOUT_MS); } catch { return DEFAULT_WAKE_TIMEOUT_MS; }
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -125,12 +131,13 @@ export class TransportRegistry {
         return r[0]?.status === 'online';
       },
 
-      wakeUp: async (wakeTimeoutMs = DEFAULT_WAKE_TIMEOUT_MS): Promise<void> => {
+      wakeUp: async (wakeTimeoutMs?: number): Promise<void> => {
+        const resolvedTimeout = wakeTimeoutMs ?? await resolveTransportWakeTimeoutMs();
         await pool.query(
           `SELECT pg_notify('transport_wake', $1)`,
           [JSON.stringify({ transport: transportId })],
         );
-        const deadline = Date.now() + wakeTimeoutMs;
+        const deadline = Date.now() + resolvedTimeout;
         while (Date.now() < deadline) {
           await sleep(WAKE_POLL_MS);
           const { rows: r } = await pool.query<{ status: string }>(
@@ -139,7 +146,7 @@ export class TransportRegistry {
           );
           if (r[0]?.status === 'online') return;
         }
-        throw new TransportWakeTimeoutError(transportId, wakeTimeoutMs);
+        throw new TransportWakeTimeoutError(transportId, resolvedTimeout);
       },
 
       send: async (msg: OutboundMessage): Promise<SendResult> => {

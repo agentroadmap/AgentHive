@@ -6,7 +6,15 @@ export interface HealthEntry {
 	latencyMs?: number;
 }
 
+import * as runtimeConfig from "../../shared/runtime/config.ts";
+import { FlagKeys } from "../../shared/runtime/config-keys.ts";
+
 export const DEFAULT_PROVIDER_HEALTH_TTL_MS = 30_000;
+
+/** P3787: resolve PROVIDER_HEALTH_TTL_MS from runtime_flag with fallback. */
+export async function resolveProviderHealthTtlMs(): Promise<number> {
+	try { return await runtimeConfig.get(FlagKeys.PROVIDER_HEALTH_TTL_MS); } catch { return DEFAULT_PROVIDER_HEALTH_TTL_MS; }
+}
 
 type Clock = () => number;
 

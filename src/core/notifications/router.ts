@@ -14,6 +14,8 @@
 
 import type { Client, Pool } from "pg";
 
+import * as runtimeConfig from "../../shared/runtime/config.ts";
+import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 import type { NotificationChannel, OutboundMessage } from "../messaging/gateway/adapter.ts";
 import { moveToDlq } from "../messaging/gateway/dlq.ts";
 import { TransportWakeTimeoutError } from "../messaging/gateway/errors.ts";
@@ -29,9 +31,15 @@ import {
 
 const MAX_ATTEMPTS = 5;
 const BACKOFF_MS = [1_000, 4_000, 12_000, 32_000]; // index = attempts already made
-const POLL_INTERVAL_MS = 30_000;
-const BATCH_SIZE = 25;
 const ERROR_TRUNCATE = 4_000;
+
+// P3787: hot-configurable via core.runtime_flag
+async function resolveNotificationPollIntervalMs(): Promise<number> {
+	try { return await runtimeConfig.get(FlagKeys.NOTIFICATION_POLL_INTERVAL_MS); } catch { return 30_000; }
+}
+async function resolveNotificationBatchSize(): Promise<number> {
+	try { return await runtimeConfig.get(FlagKeys.NOTIFICATION_BATCH_SIZE); } catch { return 25; }
+}
 
 export interface RouterDeps {
 	pool: Pool;
@@ -98,9 +106,10 @@ export class NotificationRouter {
 			this.errorLog(`[notification-router] LISTEN error: ${err.message}`);
 		});
 
+		const pollIntervalMs = await resolveNotificationPollIntervalMs();
 		this.pollTimer = setInterval(() => {
 			void this.scheduleDrain();
-		}, POLL_INTERVAL_MS);
+		}, pollIntervalMs);
 		this.pollTimer.unref?.();
 
 		// Initial drain in case anything was waiting before we attached.
@@ -178,7 +187,7 @@ export class NotificationRouter {
 			    created_at ASC
 			  LIMIT $1
 			  FOR UPDATE SKIP LOCKED`,
-			[BATCH_SIZE],
+			[await resolveNotificationBatchSize()],
 		);
 		return rows;
 	}

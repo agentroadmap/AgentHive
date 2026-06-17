@@ -8,32 +8,43 @@
  */
 
 import { query } from '../../postgres/pool';
+import * as runtimeConfig from '../../shared/runtime/config.ts';
+import { FlagKeys } from '../../shared/runtime/config-keys.ts';
 import type { ProjectRepairQueueRow } from './types';
 
-const REPAIR_INTERVAL_MS = 60_000; // 60 seconds
-const MAX_ATTEMPTS = 10;
-const BASE_BACKOFF_MINUTES = 2; // 2^attempt_count minutes
-const MAX_BACKOFF_HOURS = 24;
+// P3787: hot-configurable via core.runtime_flag
+async function resolveSagaRepairIntervalMs(): Promise<number> {
+  try { return await runtimeConfig.get(FlagKeys.SAGA_REPAIR_INTERVAL_MS); } catch { return 60_000; }
+}
+async function resolveSagaRepairMaxAttempts(): Promise<number> {
+  try { return await runtimeConfig.get(FlagKeys.SAGA_REPAIR_MAX_ATTEMPTS); } catch { return 10; }
+}
+async function resolveSagaRepairMaxBackoffHours(): Promise<number> {
+  try { return await runtimeConfig.get(FlagKeys.SAGA_REPAIR_MAX_BACKOFF_HOURS); } catch { return 24; }
+}
+
+const BASE_BACKOFF_MINUTES = 2; // 2^attempt_count minutes — array literal, kept static
 
 let repairWorkerRunning = false;
 
 /**
  * Start the repair worker (idempotent; safe to call multiple times)
  */
-export function startRepairWorker(): void {
+export async function startRepairWorker(): Promise<void> {
   if (repairWorkerRunning) {
     console.log('[RepairWorker] Already running, skipping');
     return;
   }
 
   repairWorkerRunning = true;
-  console.log('[RepairWorker] Started (60s interval)');
+  const intervalMs = await resolveSagaRepairIntervalMs();
+  console.log(`[RepairWorker] Started (${intervalMs}ms interval)`);
 
   // Initial run after 5s
   setTimeout(() => runRepairCycle(), 5000);
 
   // Recurring interval
-  setInterval(() => runRepairCycle(), REPAIR_INTERVAL_MS);
+  setInterval(() => runRepairCycle(), intervalMs);
 }
 
 /**
@@ -61,10 +72,14 @@ async function runRepairCycle(): Promise<void> {
  */
 async function processRepairItem(row: ProjectRepairQueueRow): Promise<void> {
   const { id, project_id, phase, attempt_count } = row;
+  const [maxAttempts, maxBackoffHours] = await Promise.all([
+    resolveSagaRepairMaxAttempts(),
+    resolveSagaRepairMaxBackoffHours(),
+  ]);
 
   try {
     // Check if attempt limit exceeded
-    if (attempt_count >= MAX_ATTEMPTS) {
+    if (attempt_count >= maxAttempts) {
       await escalateToOperator(id, project_id, phase, 'max_attempts_exceeded');
       return;
     }
@@ -109,7 +124,7 @@ async function processRepairItem(row: ProjectRepairQueueRow): Promise<void> {
       // Calculate next attempt with exponential backoff
       const nextBackoffMin = Math.min(
         Math.pow(2, attempt_count + 1) * BASE_BACKOFF_MINUTES,
-        MAX_BACKOFF_HOURS * 60
+        maxBackoffHours * 60
       );
 
       await query(

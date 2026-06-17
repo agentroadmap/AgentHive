@@ -10,7 +10,7 @@
  * This is the single source of truth for all configuration keys used in AgentHive.
  */
 
-import type { ConfigKey } from "./config";
+import type { ConfigKey, FlagConfigKey } from "./config";
 
 /**
  * Secret keys: env only, never from yaml/DB. PGPASSWORD, OAUTH_CLIENT_SECRET, etc.
@@ -685,6 +685,7 @@ export const FlagKeys = {
 	USE_OFFER_DISPATCH: {
 		name: "USE_OFFER_DISPATCH",
 		class: "flag" as const,
+		category: "dispatch" as const,
 		parse: (v: string) => {
 			// Parse JSON or boolean string from JSONB value_jsonb
 			try {
@@ -698,11 +699,12 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
-	} satisfies ConfigKey<boolean>,
+	} satisfies FlagConfigKey<boolean>,
 
 	ENABLE_MULTI_TENANT: {
 		name: "ENABLE_MULTI_TENANT",
 		class: "flag" as const,
+		category: "multi_tenant" as const,
 		parse: (v: string) => {
 			try {
 				return JSON.parse(v) === true;
@@ -715,11 +717,12 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
-	} satisfies ConfigKey<boolean>,
+	} satisfies FlagConfigKey<boolean>,
 
 	ENABLE_AUDIT_LOG: {
 		name: "ENABLE_AUDIT_LOG",
 		class: "flag" as const,
+		category: "audit" as const,
 		parse: (v: string) => {
 			try {
 				return JSON.parse(v) === true;
@@ -732,7 +735,7 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
-	} satisfies ConfigKey<boolean>,
+	} satisfies FlagConfigKey<boolean>,
 
 
 	// ─── P1132 A2A host service tunables ────────────────────────────────────
@@ -743,6 +746,7 @@ export const FlagKeys = {
 	A2A_HOST_LISTEN_REFRESH_MS: {
 		name: "A2A_HOST_LISTEN_REFRESH_MS",
 		class: "flag" as const,
+		category: "mcp_endpoint" as const,
 		parse: (v: string) => {
 			const parsed = Number(JSON.parse(v));
 			if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -755,11 +759,12 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
-	} satisfies ConfigKey<number>,
+	} satisfies FlagConfigKey<number>,
 
 	A2A_HOST_PG_RECONNECT_MS: {
 		name: "A2A_HOST_PG_RECONNECT_MS",
 		class: "flag" as const,
+		category: "mcp_endpoint" as const,
 		parse: (v: string) => {
 			const parsed = Number(JSON.parse(v));
 			if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -772,11 +777,12 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
-	} satisfies ConfigKey<number>,
+	} satisfies FlagConfigKey<number>,
 
 	A2A_HOST_SHUTDOWN_TIMEOUT_MS: {
 		name: "A2A_HOST_SHUTDOWN_TIMEOUT_MS",
 		class: "flag" as const,
+		category: "mcp_endpoint" as const,
 		parse: (v: string) => {
 			const parsed = Number(JSON.parse(v));
 			if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -789,11 +795,12 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
-	} satisfies ConfigKey<number>,
+	} satisfies FlagConfigKey<number>,
 
 	A2A_HOST_PRESENCE_REFRESH_MS: {
 		name: "A2A_HOST_PRESENCE_REFRESH_MS",
 		class: "flag" as const,
+		category: "mcp_endpoint" as const,
 		parse: (v: string) => {
 			const parsed = Number(JSON.parse(v));
 			if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -806,7 +813,7 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
-	} satisfies ConfigKey<number>,
+	} satisfies FlagConfigKey<number>,
 
 
 	// ─── Liaison runtime context refresh (P1370) ────────────────────────────────
@@ -816,6 +823,7 @@ export const FlagKeys = {
 	LIAISON_CONTEXT_REFRESH_MS: {
 		name: "LIAISON_CONTEXT_REFRESH_MS",
 		class: "flag" as const,
+		category: "liaison" as const,
 		parse: (v: string) => {
 			const parsed = Number(JSON.parse(v));
 			if (!Number.isFinite(parsed) || parsed < 1000 || parsed > 600_000) {
@@ -829,13 +837,14 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: true,
-	} satisfies ConfigKey<number>,
+	} satisfies FlagConfigKey<number>,
 
 	// ─── Orchestrator runtime-tunable flags (P1144) ───────────────────────────
 
 	ORCHESTRATOR_SCAN_BATCH_LIMIT: {
 		name: "ORCHESTRATOR_SCAN_BATCH_LIMIT",
 		class: "flag" as const,
+		category: "orchestrator" as const,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n)) throw new Error("invalid number");
@@ -847,11 +856,12 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
-	} satisfies ConfigKey<number>,
+	} satisfies FlagConfigKey<number>,
 
 	ORCHESTRATOR_STALL_THRESHOLD_HOURS: {
 		name: "ORCHESTRATOR_STALL_THRESHOLD_HOURS",
 		class: "flag" as const,
+		category: "orchestrator" as const,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n)) throw new Error("invalid number");
@@ -863,11 +873,12 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
-	} satisfies ConfigKey<number>,
+	} satisfies FlagConfigKey<number>,
 
 	ORCHESTRATOR_STALL_BATCH_LIMIT: {
 		name: "ORCHESTRATOR_STALL_BATCH_LIMIT",
 		class: "flag" as const,
+		category: "orchestrator" as const,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n)) throw new Error("invalid number");
@@ -879,11 +890,12 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
-	} satisfies ConfigKey<number>,
+	} satisfies FlagConfigKey<number>,
 
 	ORCHESTRATOR_OFFER_REAP_MS: {
 		name: "ORCHESTRATOR_OFFER_REAP_MS",
 		class: "flag" as const,
+		category: "orchestrator" as const,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n)) throw new Error("invalid number");
@@ -895,11 +907,12 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
-	} satisfies ConfigKey<number>,
+	} satisfies FlagConfigKey<number>,
 
 	ORCHESTRATOR_POKE_IDLE_MIN: {
 		name: "ORCHESTRATOR_POKE_IDLE_MIN",
 		class: "flag" as const,
+		category: "orchestrator" as const,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n)) throw new Error("invalid number");
@@ -911,11 +924,12 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
-	} satisfies ConfigKey<number>,
+	} satisfies FlagConfigKey<number>,
 
 	ORCHESTRATOR_POKE_STORM_CAP: {
 		name: "ORCHESTRATOR_POKE_STORM_CAP",
 		class: "flag" as const,
+		category: "orchestrator" as const,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n)) throw new Error("invalid number");
@@ -927,7 +941,7 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
-	} satisfies ConfigKey<number>,
+	} satisfies FlagConfigKey<number>,
 
 	// Phase 1 (hot-configurable cap): global in-flight work-offer backpressure
 	// limit. Read per-postWorkOffer call via config (cached + cleared on
@@ -938,6 +952,7 @@ export const FlagKeys = {
 	ORCHESTRATOR_MAX_INFLIGHT_OFFERS: {
 		name: "ORCHESTRATOR_MAX_INFLIGHT_OFFERS",
 		class: "flag" as const,
+		category: "orchestrator" as const,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n)) throw new Error("invalid number");
@@ -949,11 +964,12 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
-	} satisfies ConfigKey<number>,
+	} satisfies FlagConfigKey<number>,
 
 	ORCHESTRATOR_SHUTDOWN_DRAIN_MS: {
 		name: "ORCHESTRATOR_SHUTDOWN_DRAIN_MS",
 		class: "flag" as const,
+		category: "orchestrator" as const,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n)) throw new Error("invalid number");
@@ -965,11 +981,12 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
-	} satisfies ConfigKey<number>,
+	} satisfies FlagConfigKey<number>,
 
 	ORCHESTRATOR_IMPLICIT_GATE_POLL_MS: {
 		name: "ORCHESTRATOR_IMPLICIT_GATE_POLL_MS",
 		class: "flag" as const,
+		category: "orchestrator" as const,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n)) throw new Error("invalid number");
@@ -981,11 +998,12 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
-	} satisfies ConfigKey<number>,
+	} satisfies FlagConfigKey<number>,
 
 	ORCHESTRATOR_ENHANCER_REVISE_MS: {
 		name: "ORCHESTRATOR_ENHANCER_REVISE_MS",
 		class: "flag" as const,
+		category: "orchestrator" as const,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n)) throw new Error("invalid number");
@@ -997,11 +1015,12 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
-	} satisfies ConfigKey<number>,
+	} satisfies FlagConfigKey<number>,
 
 	ORCHESTRATOR_RECONCILER_MS: {
 		name: "ORCHESTRATOR_RECONCILER_MS",
 		class: "flag" as const,
+		category: "orchestrator" as const,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n)) throw new Error("invalid number");
@@ -1013,11 +1032,12 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
-	} satisfies ConfigKey<number>,
+	} satisfies FlagConfigKey<number>,
 
 	ORCHESTRATOR_STALE_ROW_REAPER_MS: {
 		name: "ORCHESTRATOR_STALE_ROW_REAPER_MS",
 		class: "flag" as const,
+		category: "orchestrator" as const,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n)) throw new Error("invalid number");
@@ -1029,11 +1049,12 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
-	} satisfies ConfigKey<number>,
+	} satisfies FlagConfigKey<number>,
 
 	ORCHESTRATOR_STUCK_WORKER_MS: {
 		name: "ORCHESTRATOR_STUCK_WORKER_MS",
 		class: "flag" as const,
+		category: "orchestrator" as const,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n)) throw new Error("invalid number");
@@ -1045,11 +1066,12 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
-	} satisfies ConfigKey<number>,
+	} satisfies FlagConfigKey<number>,
 
 	ORCHESTRATOR_HEARTBEAT_MS: {
 		name: "ORCHESTRATOR_HEARTBEAT_MS",
 		class: "flag" as const,
+		category: "orchestrator" as const,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n)) throw new Error("invalid number");
@@ -1061,11 +1083,12 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
-	} satisfies ConfigKey<number>,
+	} satisfies FlagConfigKey<number>,
 
 	ORCHESTRATOR_OFFER_CLAIM_ENABLED: {
 		name: "ORCHESTRATOR_OFFER_CLAIM_ENABLED",
 		class: "flag" as const,
+		category: "dispatch" as const,
 		parse: (v: string) => {
 			try {
 				return JSON.parse(v) === true;
@@ -1079,7 +1102,7 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
-	} satisfies ConfigKey<boolean>,
+	} satisfies FlagConfigKey<boolean>,
 
 	// V3-C6 (P1438): when true, each agency liaison runs its own AgencyClaimLoop
 	// (self-claim). Composes with ORCHESTRATOR_OFFER_CLAIM_ENABLED: cutover sets
@@ -1087,6 +1110,7 @@ export const FlagKeys = {
 	AGENCY_OFFER_CLAIM_ENABLED: {
 		name: "AGENCY_OFFER_CLAIM_ENABLED",
 		class: "flag" as const,
+		category: "dispatch" as const,
 		parse: (v: string) => {
 			try {
 				return JSON.parse(v) === true;
@@ -1100,7 +1124,7 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
-	} satisfies ConfigKey<boolean>,
+	} satisfies FlagConfigKey<boolean>,
 
 	// ─── P1291 per-(proposal, role) pause fuse tunables ──────────────────────
 	// Seeded by a P1291 migration. Operator changes via SQL UPDATE core.runtime_flag SET value_jsonb=...
@@ -1109,6 +1133,7 @@ export const FlagKeys = {
 	PAUSE_FAILURE_THRESHOLD: {
 		name: "PAUSE_FAILURE_THRESHOLD",
 		class: "flag" as const,
+		category: "pause_backoff" as const,
 		parse: (v: string) => {
 			const parsed = Number(JSON.parse(v));
 			if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -1121,11 +1146,12 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
-	} satisfies ConfigKey<number>,
+	} satisfies FlagConfigKey<number>,
 
 	PAUSE_BASE_BACKOFF_MS: {
 		name: "PAUSE_BASE_BACKOFF_MS",
 		class: "flag" as const,
+		category: "pause_backoff" as const,
 		parse: (v: string) => {
 			const parsed = Number(JSON.parse(v));
 			if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -1138,11 +1164,12 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
-	} satisfies ConfigKey<number>,
+	} satisfies FlagConfigKey<number>,
 
 	PAUSE_BACKOFF_MULTIPLIER: {
 		name: "PAUSE_BACKOFF_MULTIPLIER",
 		class: "flag" as const,
+		category: "pause_backoff" as const,
 		parse: (v: string) => {
 			const parsed = Number(JSON.parse(v));
 			if (!Number.isFinite(parsed) || parsed < 1) {
@@ -1155,11 +1182,12 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
-	} satisfies ConfigKey<number>,
+	} satisfies FlagConfigKey<number>,
 
 	PAUSE_MAX_BACKOFF_MS: {
 		name: "PAUSE_MAX_BACKOFF_MS",
 		class: "flag" as const,
+		category: "pause_backoff" as const,
 		parse: (v: string) => {
 			const parsed = Number(JSON.parse(v));
 			if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -1172,13 +1200,14 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
-	} satisfies ConfigKey<number>,
+	} satisfies FlagConfigKey<number>,
 
 	// ─── P1359: Provider quota cooldown + automatic route fallback ────────────
 
 	SPAWN_PROVIDER_MAX_ATTEMPTS: {
 		name: "SPAWN_PROVIDER_MAX_ATTEMPTS",
 		class: "flag" as const,
+		category: "provider_quota" as const,
 		parse: (v: string) => {
 			const n = Number(JSON.parse(v));
 			if (!Number.isFinite(n) || n <= 0) {
@@ -1192,7 +1221,259 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: false,
-	} satisfies ConfigKey<number>,
+	} satisfies FlagConfigKey<number>,
+
+	// ─── P3787: Dispatch circuit-breaker + convergence guard ─────────────────
+
+	DISPATCH_LOOP_THRESHOLD_PER_HOUR: {
+		name: "DISPATCH_LOOP_THRESHOLD_PER_HOUR",
+		class: "flag" as const,
+		category: "dispatch" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error(`Invalid DISPATCH_LOOP_THRESHOLD_PER_HOUR: ${v}`);
+			return n;
+		},
+		required: false,
+		defaultValue: 6,
+		description: "Circuit breaker: max completed/failed runs for (proposal, role) in the last hour before pausing",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies FlagConfigKey<number>,
+
+	GATE_CONVERGENCE_MAX_BLOCKING: {
+		name: "GATE_CONVERGENCE_MAX_BLOCKING",
+		class: "flag" as const,
+		category: "gate_governance" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error(`Invalid GATE_CONVERGENCE_MAX_BLOCKING: ${v}`);
+			return n;
+		},
+		required: false,
+		defaultValue: 3,
+		description: "Convergence guard: max blocking reviews before pausing proposal (since last state/maturity transition)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies FlagConfigKey<number>,
+
+	GATE_CONVERGENCE_MAX_RUNS_PER_ROLE: {
+		name: "GATE_CONVERGENCE_MAX_RUNS_PER_ROLE",
+		class: "flag" as const,
+		category: "gate_governance" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error(`Invalid GATE_CONVERGENCE_MAX_RUNS_PER_ROLE: ${v}`);
+			return n;
+		},
+		required: false,
+		defaultValue: 8,
+		description: "Convergence guard: max per-role dispatch attempts since last state/maturity transition before pausing",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies FlagConfigKey<number>,
+
+	// ─── P3787: Federation sync tuning ───────────────────────────────────────
+
+	FEDERATION_SYNC_POLL_INTERVAL_MS: {
+		name: "FEDERATION_SYNC_POLL_INTERVAL_MS",
+		class: "flag" as const,
+		category: "federation" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1000) throw new Error(`Invalid FEDERATION_SYNC_POLL_INTERVAL_MS: ${v}`);
+			return n;
+		},
+		required: false,
+		defaultValue: 30_000,
+		description: "Federation peer sync poll interval in milliseconds (default 30 s)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies FlagConfigKey<number>,
+
+	FEDERATION_HEALTH_QUARANTINE_THRESHOLD: {
+		name: "FEDERATION_HEALTH_QUARANTINE_THRESHOLD",
+		class: "flag" as const,
+		category: "federation" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error(`Invalid FEDERATION_HEALTH_QUARANTINE_THRESHOLD: ${v}`);
+			return n;
+		},
+		required: false,
+		defaultValue: 3,
+		description: "Consecutive health-check failures before a federation peer is quarantined",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies FlagConfigKey<number>,
+
+	FEDERATION_PING_TIMEOUT_MS: {
+		name: "FEDERATION_PING_TIMEOUT_MS",
+		class: "flag" as const,
+		category: "federation" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 500) throw new Error(`Invalid FEDERATION_PING_TIMEOUT_MS: ${v}`);
+			return n;
+		},
+		required: false,
+		defaultValue: 5_000,
+		description: "Timeout in milliseconds for federation peer ping/health requests",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies FlagConfigKey<number>,
+
+	// ─── P3787: Saga repair worker ────────────────────────────────────────────
+
+	SAGA_REPAIR_INTERVAL_MS: {
+		name: "SAGA_REPAIR_INTERVAL_MS",
+		class: "flag" as const,
+		category: "saga" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 5000) throw new Error(`Invalid SAGA_REPAIR_INTERVAL_MS: ${v}`);
+			return n;
+		},
+		required: false,
+		defaultValue: 60_000,
+		description: "Repair worker poll interval in milliseconds (default 60 s)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies FlagConfigKey<number>,
+
+	SAGA_REPAIR_MAX_ATTEMPTS: {
+		name: "SAGA_REPAIR_MAX_ATTEMPTS",
+		class: "flag" as const,
+		category: "saga" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error(`Invalid SAGA_REPAIR_MAX_ATTEMPTS: ${v}`);
+			return n;
+		},
+		required: false,
+		defaultValue: 10,
+		description: "Max repair attempts before a saga item is escalated to operator",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies FlagConfigKey<number>,
+
+	SAGA_REPAIR_MAX_BACKOFF_HOURS: {
+		name: "SAGA_REPAIR_MAX_BACKOFF_HOURS",
+		class: "flag" as const,
+		category: "saga" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error(`Invalid SAGA_REPAIR_MAX_BACKOFF_HOURS: ${v}`);
+			return n;
+		},
+		required: false,
+		defaultValue: 24,
+		description: "Hard ceiling on saga repair exponential backoff in hours (default 24 h)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies FlagConfigKey<number>,
+
+	// ─── P3787: Notification router ───────────────────────────────────────────
+
+	NOTIFICATION_POLL_INTERVAL_MS: {
+		name: "NOTIFICATION_POLL_INTERVAL_MS",
+		class: "flag" as const,
+		category: "notifications" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1000) throw new Error(`Invalid NOTIFICATION_POLL_INTERVAL_MS: ${v}`);
+			return n;
+		},
+		required: false,
+		defaultValue: 30_000,
+		description: "Notification router poll interval in milliseconds (backstop for missed pg_notify)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies FlagConfigKey<number>,
+
+	NOTIFICATION_BATCH_SIZE: {
+		name: "NOTIFICATION_BATCH_SIZE",
+		class: "flag" as const,
+		category: "notifications" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1 || n > 1000) throw new Error(`Invalid NOTIFICATION_BATCH_SIZE: ${v}`);
+			return n;
+		},
+		required: false,
+		defaultValue: 25,
+		description: "Max notifications claimed per drain cycle (LIMIT in notification_queue SELECT)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies FlagConfigKey<number>,
+
+	// ─── P3787: Provider health cache ────────────────────────────────────────
+
+	PROVIDER_HEALTH_TTL_MS: {
+		name: "PROVIDER_HEALTH_TTL_MS",
+		class: "flag" as const,
+		category: "provider_quota" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1000) throw new Error(`Invalid PROVIDER_HEALTH_TTL_MS: ${v}`);
+			return n;
+		},
+		required: false,
+		defaultValue: 30_000,
+		description: "Provider health cache TTL in milliseconds (entries older than this are stale)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies FlagConfigKey<number>,
+
+	// ─── P3787: Agent proposal lease ─────────────────────────────────────────
+
+	AGENT_PROPOSAL_LEASE_TTL_MS: {
+		name: "AGENT_PROPOSAL_LEASE_TTL_MS",
+		class: "flag" as const,
+		category: "orchestrator" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 60_000) throw new Error(`Invalid AGENT_PROPOSAL_LEASE_TTL_MS: ${v}`);
+			return n;
+		},
+		required: false,
+		defaultValue: 1_800_000,
+		description: "AgentProposalSystem in-memory lease TTL in milliseconds (default 30 min)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies FlagConfigKey<number>,
+
+	// ─── P3787: Transport wake timeout ───────────────────────────────────────
+
+	TRANSPORT_WAKE_TIMEOUT_MS: {
+		name: "TRANSPORT_WAKE_TIMEOUT_MS",
+		class: "flag" as const,
+		category: "dispatch" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 500) throw new Error(`Invalid TRANSPORT_WAKE_TIMEOUT_MS: ${v}`);
+			return n;
+		},
+		required: false,
+		defaultValue: 10_000,
+		description: "Max wait in milliseconds for a transport adapter to come online before failing wakeUp()",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies FlagConfigKey<number>,
 
 	/**
 	 * TUI cockpit layout — 'grid' (default, 2x2) or 'stacked' (single column).
@@ -1203,6 +1484,7 @@ export const FlagKeys = {
 	TUI_COCKPIT_LAYOUT: {
 		name: "AGENTHIVE_COCKPIT_LAYOUT",
 		class: "flag" as const,
+		category: "ui_ux" as const,
 		parse: (v: string) => {
 			// Accept JSON-encoded string from the DB ("\"stacked\"") and a
 			// bare env value (stacked). JSON.parse handles both.
@@ -1228,7 +1510,7 @@ export const FlagKeys = {
 		dbTable: "core.runtime_flag",
 		dbColumn: "value_jsonb",
 		envOverride: true,
-	} satisfies ConfigKey<"grid" | "stacked">,
+	} satisfies FlagConfigKey<"grid" | "stacked">,
 };
 
 /**
