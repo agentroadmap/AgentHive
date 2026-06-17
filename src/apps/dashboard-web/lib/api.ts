@@ -912,6 +912,39 @@ export class ApiClient {
 			method: "PATCH",
 		});
 	}
+	// P3785: fetch all config key descriptors
+	async fetchConfigKeys(category?: string): Promise<ConfigKeyDescriptor[]> {
+		const qs = category ? `?category=${encodeURIComponent(category)}` : "";
+		return this.fetchJson<ConfigKeyDescriptor[]>(`${API_BASE}/config/keys${qs}`);
+	}
+
+	// P3785: mutate a registry/flag config key
+	async mutateConfigKey(keyName: string, value: unknown): Promise<ConfigMutationResult> {
+		return this.fetchJson<ConfigMutationResult>(
+			`${API_BASE}/config/keys/${encodeURIComponent(keyName)}`,
+			{ method: "PUT", body: JSON.stringify({ value }) },
+		);
+	}
+}
+
+export interface ConfigKeyDescriptor {
+	name: string;
+	class: "secret" | "structural" | "registry" | "flag" | "tenant_dsn";
+	category: string | null;
+	description: string | null;
+	value: unknown;
+	default_value: unknown;
+	required: boolean;
+	db_table: string | null;
+	scope: string | null;
+	editable: boolean;
+	masked: boolean;
+}
+
+export interface ConfigMutationResult {
+	key_name: string;
+	new_value: unknown;
+	applied_at: string;
 }
 
 export const apiClient = new ApiClient();

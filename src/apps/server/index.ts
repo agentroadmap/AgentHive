@@ -82,6 +82,8 @@ import {
 	resumeAgencyOperator,
 	retireAgencyOperator,
 } from "../../core/orchestration/resolvers/agency-resolver.ts";
+import { AllConfigKeys, getConfigKeyByName } from "../../shared/runtime/config-keys.ts";
+import * as runtimeConfig from "../../shared/runtime/config.ts";
 
 // Regex pattern to match any prefix (letters followed by dash)
 const PREFIX_PATTERN = /^[a-zA-Z]+-/i;
@@ -1340,6 +1342,14 @@ export class RoadmapServer {
 
 			if (pathname === "/api/statuses" && method === "GET")
 				return await this.handleGetStatuses();
+
+			if (pathname === "/api/config/keys") {
+				if (method === "GET") return await this.handleGetConfigKeys(req);
+			}
+			if (pathname.startsWith("/api/config/keys/")) {
+				const keyName = decodeURIComponent(pathname.slice("/api/config/keys/".length));
+				if (method === "PUT") return await this.handleMutateConfigKey(req, keyName);
+			}
 
 			if (pathname === "/api/config") {
 				if (method === "GET") return await this.handleGetConfig();
@@ -7093,5 +7103,130 @@ agenthive_msg_send_rate_limit_violations_by_reason_total{reason="${reason}"} ${c
 			console.error("[p659] combine failed:", (err as Error).message);
 			return Response.json({ error: "combine action failed" }, { status: 500 });
 		}
+	}
+
+	// P3785: GET /api/config/keys — enumerate all config keys with current values.
+	private async handleGetConfigKeys(_req: Request): Promise<Response> {
+		try {
+			const keys = Object.values(AllConfigKeys);
+			const descriptors = await Promise.all(
+				keys.map(async (key) => {
+					const masked = key.class === "secret";
+					const editable = key.class === "registry" || key.class === "flag";
+					let value: unknown = null;
+					if (!masked) {
+						try {
+							value = await runtimeConfig.getOptional(key as runtimeConfig.ConfigKey<unknown>);
+						} catch {
+							value = null;
+						}
+					}
+					return {
+						name: key.name,
+						class: key.class,
+						category: (key as Record<string, unknown>).category as string | null ?? null,
+						description: key.description ?? null,
+						value: masked ? null : value,
+						default_value: key.defaultValue ?? null,
+						required: key.required,
+						db_table: key.dbTable ?? null,
+						scope: null,
+						editable,
+						masked,
+					};
+				}),
+			);
+			const category = new URL(_req.url).searchParams.get("category");
+			const filtered = category
+				? descriptors.filter((d) => d.category === category)
+				: descriptors;
+			return Response.json(filtered);
+		} catch (err) {
+			console.error("[p3785] handleGetConfigKeys failed:", (err as Error).message);
+			return Response.json({ error: "failed to list config keys" }, { status: 500 });
+		}
+	}
+
+	// P3785: PUT /api/config/keys/:keyName — mutate a registry/flag config key.
+	private async handleMutateConfigKey(req: Request, keyName: string): Promise<Response> {
+		const auth = await requireOperator(req, { action: "config.write" });
+		if (auth.rejected) return auth.rejected;
+
+		let key: runtimeConfig.ConfigKey<unknown>;
+		try {
+			key = getConfigKeyByName(keyName) as runtimeConfig.ConfigKey<unknown>;
+		} catch {
+			return Response.json({ error: `Unknown config key: ${keyName}` }, { status: 404 });
+		}
+
+		if (key.class !== "registry" && key.class !== "flag") {
+			return Response.json(
+				{ error: `Key '${keyName}' (class=${key.class}) is not editable via API` },
+				{ status: 403 },
+			);
+		}
+
+		let body: Record<string, unknown>;
+		try {
+			body = (await req.json()) as Record<string, unknown>;
+		} catch {
+			return Response.json({ error: "invalid JSON body" }, { status: 400 });
+		}
+		if (!("value" in body)) {
+			return Response.json({ error: "body must include 'value'" }, { status: 400 });
+		}
+
+		// Bridge: look up operator principal_id from control_identity
+		const ctrl = getControlPool();
+		const { rows: principalRows } = await ctrl.query<{ id: string }>(
+			`SELECT id::text FROM control_identity.principal
+			  WHERE display_name = $1
+			    AND principal_type = 'operator'
+			    AND lifecycle_status = 'active'
+			  LIMIT 1`,
+			[auth.outcome.operatorName],
+		);
+		if (!principalRows[0]) {
+			return Response.json(
+				{
+					error: `Operator '${auth.outcome.operatorName}' has no active principal row in control_identity.principal. ` +
+						`Register the operator as a principal to enable config writes.`,
+				},
+				{ status: 403 },
+			);
+		}
+
+		const principal_id = principalRows[0].id;
+		const principal: VerifiedPrincipal = {
+			principal_id,
+			principal_kind: "operator",
+			parent_principal_id: null,
+		};
+
+		let parsedValue: unknown;
+		try {
+			parsedValue = key.parse(String(body.value));
+		} catch (err) {
+			return Response.json(
+				{ error: `Invalid value for key '${keyName}': ${(err as Error).message}` },
+				{ status: 422 },
+			);
+		}
+
+		try {
+			await agentContextStorage.run({ verified: principal }, async () => {
+				await runtimeConfig.set(key as runtimeConfig.ConfigKey<unknown>, parsedValue);
+			});
+		} catch (err) {
+			const msg = (err as Error).message;
+			console.error(`[p3785] config.set(${keyName}) failed:`, msg);
+			return Response.json({ error: msg }, { status: 500 });
+		}
+
+		return Response.json({
+			key_name: keyName,
+			new_value: parsedValue,
+			applied_at: new Date().toISOString(),
+		});
 	}
 }
