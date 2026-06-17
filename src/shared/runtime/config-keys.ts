@@ -1701,6 +1701,31 @@ export const FlagKeys = {
 		envOverride: false,
 	} satisfies ConfigKey<number>,
 
+	// ─── P3795: Provider health routing gate ────────────────────────────────────
+	// Hard circuit-breaker on P796 async probe results. When true, dispatch to
+	// providers marked unhealthy (status='timeout'|'error') is blocked.
+	// Fail-open on absent/stale cache entries. Default: true (gate active).
+
+	PROVIDER_HEALTH_GATE_ENABLED: {
+		name: "PROVIDER_HEALTH_GATE_ENABLED",
+		class: "flag" as const,
+		parse: (v: string) => {
+			try {
+				return JSON.parse(v) === true;
+			} catch {
+				return v.toLowerCase() === "true" || v === "1";
+			}
+		},
+		required: false,
+		defaultValue: true,
+		category: "dispatch" as ConfigKeyCategory,
+		description:
+			"P3795: when true, dispatch is blocked for providers whose P796 async health probe returns timeout or error. Fail-open on stale/absent cache. Default true.",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<boolean>,
+
 	// ─── P3840: Unified dispatch pool ────────────────────────────────────────────
 	// When true, scanQueues() uses v_unified_dispatch_pool instead of v_mature_queue,
 	// covering new/active proposals for enhance/review/develop/merge offers in the

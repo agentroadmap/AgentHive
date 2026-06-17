@@ -18,6 +18,8 @@
 
 import { query as _pgQuery } from "../../../infra/postgres/pool.ts";
 import { enqueueNotification } from "../../notifications/enqueue.ts";
+import { softSortProviderHealthCandidates } from "../agent-spawner.ts";
+import { getCached } from "../../provider-health/cache.ts";
 
 export const THROTTLE_THRESHOLD = 3; // failures before throttled
 export const DORMANT_SILENCE_MINUTES = 5;
@@ -115,7 +117,8 @@ export async function resolveAgency(
 		`SELECT pr.id, pr.agency_id, pr.project_id, pr.capabilities,
 		        pr.status, pr.throttle_count, pr.last_seen_at, pr.max_in_flight,
 		        pr.agency_identity,
-		        COALESCE(inf.in_flight_count, 0) AS in_flight_count
+		        COALESCE(inf.in_flight_count, 0) AS in_flight_count,
+		        COALESCE(ar.preferred_provider, '') AS route_provider
 		 FROM roadmap_workforce.provider_registry pr
 		 JOIN roadmap_workforce.agent_registry ar ON ar.id = pr.agency_id
 		 LEFT JOIN roadmap.agency a ON a.agency_id = ar.agent_identity
@@ -131,13 +134,20 @@ export async function resolveAgency(
 		   AND (pr.project_id IS NULL OR pr.project_id = $1)
 		   AND COALESCE(inf.in_flight_count, 0) < pr.max_in_flight
 		 ORDER BY pr.throttle_count ASC, pr.last_seen_at DESC NULLS LAST
-		 LIMIT 1`,
+		 LIMIT 5`,
 		[projectId],
 	);
 
 	if (!rows.length) return null;
 
-	const row = rows[0];
+	// P3795 AC-5: soft-sort candidates by provider health before picking winner.
+	// Healthy providers rank above unknown/stale, unhealthy rank last.
+	// The hard gate fires later in offer-dispatch-handler; this is a tiebreaker.
+	const sorted = softSortProviderHealthCandidates(
+		rows,
+		(provider) => getCached(provider, null),
+	);
+	const row = sorted[0];
 
 	// V3-C8 (P1440): Apply capability subset matching if required_capabilities are specified.
 	if (requiredCapabilities) {

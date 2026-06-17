@@ -50,6 +50,7 @@ import { validateProposal } from "../../core/orchestration/d4-validator.ts";
 import { verifyDeliverables } from "../../core/orchestration/deliverable-verifier.ts";
 import * as config from "../../shared/runtime/config.ts";
 import { FlagKeys } from "../../shared/runtime/config-keys.ts";
+import { isProviderHealthyForDispatch } from "../../core/provider-health/routing-gate.ts";
 
 const obs = new ObservabilityWriter("agency:offer-dispatch-handler");
 
@@ -522,6 +523,42 @@ async function runSpawn(args: {
 			logger.warn(
 				`[OfferDispatchHandler] ${agencyId}: no preferred_provider in agent_registry; falling back to route_hint='${payload.route_hint}'`,
 			);
+		}
+
+		// P3795: Hard provider health gate. Block dispatch to providers whose P796
+		// async probe returned 'timeout' or 'error'. Fail-open on absent/stale cache.
+		const healthGate = isProviderHealthyForDispatch(agencyProvider, null);
+		if (!healthGate.allowed) {
+			logger.warn(
+				`[OfferDispatchHandler] ${agencyId}: provider health gate blocked dispatch to '${agencyProvider}' (status=${healthGate.status}, checkedAt=${healthGate.checkedAt})`,
+			);
+			clearInterval(renewalTimer);
+			try {
+				await exec(
+					`INSERT INTO roadmap.escalation_log
+					 (obstacle_type, agent_identity, escalated_to, severity, resolution_note)
+					 VALUES ('PROVIDER_HEALTH_GATE', $1, 'orchestrator', 'low', $2)`,
+					[
+						agencyId,
+						`Provider ${agencyProvider} blocked: health status=${healthGate.status} at ${healthGate.checkedAt}`,
+					],
+				);
+			} catch (escErr) {
+				logger.warn(
+					`[OfferDispatchHandler] ${agencyId}: escalation_log INSERT failed (non-blocking):`,
+					escErr instanceof Error ? escErr.message : escErr,
+				);
+			}
+			await exec(
+				`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, $4)`,
+				[dispatchId, agencyId, claimToken, "failed"],
+			).catch((err) => {
+				logger.error(
+					`[OfferDispatchHandler] ${agencyId}: fn_complete_work_offer failed on health gate block:`,
+					err instanceof Error ? err.message : err,
+				);
+			});
+			return;
 		}
 
 		// P1113/P1392: resolve persona and build the enriched task string.
