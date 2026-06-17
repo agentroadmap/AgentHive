@@ -48,7 +48,8 @@ import { sendMessage as sendLiaisonMessage } from "../../infra/agency/liaison-me
 import { agentNotifyChannel } from "../../infra/messaging/a2a-access-control.ts";
 import { discordSend } from "../../infra/discord/notify.ts";
 import { runObservabilityAlertTick } from "../../infra/agency/observability-alerting.ts";
-import type { PoolClient, Client as PgClient } from "pg";
+import type { Pool, PoolClient, Client as PgClient } from "pg";
+import { ConfigResolver } from "../../shared/runtime/config.ts";
 import { hashOperatorToken, requireOperator } from "./operator-auth.ts";
 import { projectCreate } from "../mcp-server/tools/projects/lifecycle-handlers.ts";
 import { agentContextStorage, type VerifiedPrincipal } from "../../shared/identity/agent-context.ts";
@@ -201,6 +202,13 @@ export class RoadmapServer {
 	private mcpServer: McpServer | null = null;
 	private sseTransports = new Map<string, SSEServerTransport>();
 	private roadmapEventsClient: PoolClient | null = null;
+	// P3564: LISTEN can't run on PgBouncer transaction-mode, so taking the LISTEN
+	// client from the shared getPool() pins that pool to direct 5432 (the
+	// dual-signature WARN) AND, when the shared pool resolves to 6432, silently
+	// drops notifications. Give roadmap_events its own dedicated direct-5432 pool
+	// (P827 pattern, max:1). Falls back to the shared pool when PGPORT_DIRECT is
+	// unset.
+	private directListenPool: Pool | null = null;
 	private roadmapEventsReconnectTimer: ReturnType<typeof setTimeout> | null =
 		null;
 
@@ -595,10 +603,36 @@ export class RoadmapServer {
 		}, 3000);
 	}
 
+	private async connectRoadmapListenClient(): Promise<PoolClient> {
+		const directPortEnv = process.env.PGPORT_DIRECT;
+		const directPort = Number(directPortEnv);
+		if (
+			directPortEnv &&
+			Number.isFinite(directPort) &&
+			directPort > 0 &&
+			directPort <= 65535
+		) {
+			if (!this.directListenPool) {
+				const { Pool } = await import("pg");
+				const poolOptions =
+					(getPool() as unknown as { options?: Record<string, unknown> })
+						.options ?? {};
+				this.directListenPool = new Pool(
+					ConfigResolver.buildDirectListenPoolConfig(poolOptions, directPort),
+				);
+				this.directListenPool.on("error", (err) => {
+					console.error("[WS] direct LISTEN pool error:", err.message);
+				});
+			}
+			return this.directListenPool.connect();
+		}
+		return getPool().connect();
+	}
+
 	private async startRoadmapEventsListener(): Promise<void> {
 		if (this._stopping || this.roadmapEventsClient) return;
 		try {
-			const client = await getPool().connect();
+			const client = await this.connectRoadmapListenClient();
 			this.roadmapEventsClient = client;
 			client.on("error", (err) => {
 				console.error("[WS] roadmap_events listener error:", err.message);
@@ -894,6 +928,14 @@ export class RoadmapServer {
 			} catch {}
 			try {
 				client.release();
+			} catch {}
+		}
+		// P3564: tear down the dedicated direct-LISTEN pool on shutdown.
+		if (this.directListenPool) {
+			const lp = this.directListenPool;
+			this.directListenPool = null;
+			try {
+				await lp.end();
 			} catch {}
 		}
 		if (this.agencyAlertInterval) {
