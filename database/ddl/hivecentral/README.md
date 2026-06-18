@@ -12,11 +12,13 @@ no separate runtime schema). `queue` maps to `dispatch`. `proposal` stays in ten
 ## Layout
 
 ```
-000-roles.sql          Per-service Postgres roles (run first, on the postgres DB)
-001-core.sql           P592 — core: installation, host, os_user, runtime_flag, service_heartbeat
-                              NOTE: also covers the "runtime" P820 family (no separate schema)
-002-identity.sql       P593 — control_identity: principal, did_document, principal_key, audit_action
-004-model.sql          P595 — hivecentral: model_capability, model, model_route, host_model_policy
+000-roles.sql              Per-service Postgres roles (run first, on the postgres DB)
+001-core.sql               P592 — core: installation, host, os_user, runtime_flag, service_heartbeat,
+                                  control_runtime_service. Also covers "runtime" P820 family (no separate schema).
+002-identity.sql           P593 — control_identity: principal, did_document, principal_key, audit_action
+001b-core-post-identity.sql P820/P828 — core.config_mutation_log (append-only config audit, FK→control_identity.principal).
+                                  MUST be applied after 002-identity.sql. Separated to preserve bootstrap order.
+004-model.sql              P595 — hivecentral: model_capability, model, model_route, host_model_policy
 005-credential.sql     P596 — control_credential: vault_provider, credential, credential_grant, rotation_log
 005-dispatch-stub.sql  P603 stub — dispatch: work_claim (cost-snapshot billing record, pre-claim)
 005-dispatch-full.sql  P820 — dispatch (full): work_offer, proposal_lease, dispatch_audit,
@@ -109,28 +111,29 @@ Minimum PostgreSQL version: **16** (declarative partitioning + pg_partman 5.x).
 Apply in strict dependency order — each file depends on schemas created by earlier files:
 
 ```
-Step  File                     Schema created
-----  -----------------------  --------------
- 1    000-roles.sql            (roles — run against postgres DB, not hiveCentral)
- 2    001-core.sql             core  [covers "runtime" P820 family]
- 3    002-identity.sql         control_identity
- 4    004-model.sql            hivecentral  (model, model_route, host_model_policy)
- 5    005-credential.sql       control_credential
- 6    005-dispatch-stub.sql    dispatch  (work_claim billing stub — must precede full)
- 7    005-dispatch-full.sql    dispatch  (work_offer, proposal_lease, dispatch_audit,
-                               capacity_snapshot, reaper fns — covers "queue" P820 family)
- 8    006-workforce.sql        workforce
- 9    010-project.sql          control_project
-10    009-sandbox.sql          sandbox
-11    010b-project-ext.sql     (extends control_project; adds FK to sandbox)
-12    003-agency.sql           agency
-13    007-template.sql         template  [covers "workflow" P820 family]
-14    008-tooling.sql          tooling
-15    011-dependency.sql       dependency
-16    012-messaging.sql        messaging
-17    013-observability.sql    observability
-18    014-governance.sql       governance
-19    015-efficiency.sql       efficiency
+Step  File                          Schema created
+----  ----------------------------  --------------
+ 1    000-roles.sql                 (roles — run against postgres DB, not hiveCentral)
+ 2    001-core.sql                  core  [covers "runtime" P820 family; excludes config_mutation_log]
+ 3    002-identity.sql              control_identity
+ 4    001b-core-post-identity.sql   core.config_mutation_log  [FK→control_identity.principal; split from 001]
+ 5    004-model.sql                 hivecentral  (model, model_route, host_model_policy)
+ 6    005-credential.sql            control_credential
+ 7    005-dispatch-stub.sql         dispatch  (work_claim billing stub — must precede full)
+ 8    005-dispatch-full.sql         dispatch  (work_offer, proposal_lease, dispatch_audit,
+                                   capacity_snapshot, reaper fns — covers "queue" P820 family)
+ 9    006-workforce.sql             workforce
+10    010-project.sql               control_project
+11    009-sandbox.sql               sandbox
+12    010b-project-ext.sql          (extends control_project; adds FK to sandbox)
+13    003-agency.sql                agency
+14    007-template.sql              template  [covers "workflow" P820 family]
+15    008-tooling.sql               tooling
+16    011-dependency.sql            dependency
+17    012-messaging.sql             messaging
+18    013-observability.sql         observability
+19    014-governance.sql            governance
+20    015-efficiency.sql            efficiency
 ```
 
 P820 family coverage:
@@ -154,9 +157,10 @@ PGOPTIONS='-c agenthive.admin_password=<vault> \
 # substitution variable :admin_password, not the GUC agenthive.admin_password
 # read by current_setting(). Using -v produces a runtime error.
 
-# Then on hiveCentral DB itself (steps 2–19 in order):
+# Then on hiveCentral DB itself (steps 2–20 in order):
 psql -d hiveCentral -f 001-core.sql
 psql -d hiveCentral -f 002-identity.sql
+psql -d hiveCentral -f 001b-core-post-identity.sql
 psql -d hiveCentral -f 004-model.sql
 psql -d hiveCentral -f 005-credential.sql
 psql -d hiveCentral -f 005-dispatch-stub.sql
