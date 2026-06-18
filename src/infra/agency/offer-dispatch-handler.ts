@@ -51,6 +51,7 @@ import { validateProposal } from "../../core/orchestration/d4-validator.ts";
 import { verifyDeliverables } from "../../core/orchestration/deliverable-verifier.ts";
 import { evaluateCostQuota } from "./cost-quota-admission.ts";
 import { incrementDebt, resetDebt } from "./fair-share-debt.ts";
+import { isProviderHealthyForDispatch } from "../../core/provider-health/routing-gate.ts";
 
 const obs = new ObservabilityWriter("agency:offer-dispatch-handler");
 
@@ -569,6 +570,62 @@ async function runSpawn(args: {
 			logger.warn(
 				`[OfferDispatchHandler] ${agencyId}: no preferred_provider in agent_registry; falling back to route_hint='${payload.route_hint}'`,
 			);
+		}
+
+		// P3795 (AC-2): hard routing gate on provider health. Exclude a provider
+		// whose P796 probe cache shows a FRESH timeout/error from the dispatch
+		// path entirely. Fails open on stale/unknown (a lagging probe cycle must
+		// never wedge all dispatch); persistent failures are still caught by the
+		// P908-B cooldown enforcement. Skipped when the provider is unresolved.
+		if (agencyProvider) {
+			const healthGate = await isProviderHealthyForDispatch(
+				agencyProvider,
+				null,
+			);
+			if (!healthGate.allowed) {
+				clearInterval(renewalTimer);
+				logger.warn(
+					`[OfferDispatchHandler] ${agencyId}: provider '${agencyProvider}' blocked by health gate (reason=${healthGate.reason}, status=${healthGate.status ?? "n/a"}); releasing offer=${payload.offer_id} as failed`,
+				);
+				// Release the claim so the offer can be re-dispatched once the
+				// provider recovers; 'failed' feeds the P1360 spawn throttle.
+				await exec(
+					`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, $4)`,
+					[dispatchId, agencyId, claimToken, "failed"],
+				).catch((err) => {
+					logger.error(
+						`[OfferDispatchHandler] ${agencyId}: fn_complete_work_offer failed on health-gate block:`,
+						err instanceof Error ? err.message : err,
+					);
+				});
+				// AC-3: surface the block on the escalation path (non-blocking —
+				// a failed insert must not propagate or change control flow).
+				await exec(
+					`INSERT INTO roadmap.escalation_log
+					 (obstacle_type, agent_identity, escalated_to, resolution_note, severity)
+					 VALUES ($1, $2, $3, $4, $5)`,
+					[
+						"PROVIDER_HEALTH_GATE",
+						agencyId,
+						"orchestrator",
+						`Provider ${agencyProvider} blocked: health status=${healthGate.status ?? "unknown"} at ${healthGate.checkedAt ?? "n/a"}`,
+						"low",
+					],
+				).catch((err) => {
+					logger.warn(
+						`[OfferDispatchHandler] ${agencyId}: escalation_log insert failed for health-gate block (non-fatal):`,
+						err instanceof Error ? err.message : err,
+					);
+				});
+				if (completionSpanId) {
+					void obs.closeSpan({
+						spanId: completionSpanId,
+						status: "error",
+						errorMessage: `provider_health_gate:${healthGate.reason}`,
+					});
+				}
+				return;
+			}
 		}
 
 		// P1113/P1392: resolve persona and build the enriched task string.

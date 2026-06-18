@@ -30,6 +30,7 @@ import {
 	type PackageType,
 } from "../../infra/agency/context_builder.ts";
 import { query } from "../../infra/postgres/pool.ts";
+import { getCached } from "../provider-health/cache.ts";
 import * as config from "../../shared/runtime/config.ts";
 import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 import {
@@ -1287,7 +1288,7 @@ async function resolveModelRoute(
           CASE WHEN mr.is_default = true THEN 0 ELSE 1 END,
           mr.priority ASC,
           COALESCE(mr.cost_per_million_input, 0) ASC
-        LIMIT 1`,
+        LIMIT 8`,
 				[provider, ...defaultPolicyParams],
 			)
 		: await query<RouteRow>(
@@ -1303,16 +1304,26 @@ async function resolveModelRoute(
         ORDER BY
           CASE WHEN mr.is_default = true THEN 0 ELSE 1 END,
           mr.priority ASC
-        LIMIT 1`,
+        LIMIT 8`,
 				[provider, ...defaultPolicyParams],
 			);
 
-	if (rows.length > 0) {
-		const route = toModelRoute(rows[0]);
+	// P3795 AC-5: soft-sort the eligible default routes by P796 health as a
+	// secondary preference signal (revives the previously-dead
+	// softSortProviderHealthCandidates). Stable sort → identical pick when no
+	// health data exists (every candidate ranks equal, SQL order preserved);
+	// when present, healthy providers float ahead of stale/unknown and known-bad
+	// sink. The hard gate (offer-dispatch-handler) already excludes
+	// fresh-unhealthy providers from dispatch — this only reorders within the
+	// already-eligible set.
+	const ranked = softSortProviderHealthCandidates(rows, getCached);
+
+	if (ranked.length > 0) {
+		const route = toModelRoute(ranked[0]);
 		assertResolvedRouteMetadata(provider, route);
 		void logRouteDecision({
 			provider,
-			chosenRouteId: rows[0].id,
+			chosenRouteId: ranked[0].id,
 			proposalId,
 			role,
 			agencyIdentity,
