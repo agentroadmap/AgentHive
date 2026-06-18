@@ -30,8 +30,6 @@ export interface SilentWatchdogResult {
 interface SilentRunRow {
 	id: string;
 	agency_identity: string | null;
-	dispatch_id: string | null;
-	claim_token: string | null;
 	proposal_id: string | null;
 }
 
@@ -45,17 +43,15 @@ export async function detectAndReapSilentSpawns(
 
 	// Find running rows past threshold with no tool calls on their briefing.
 	// A NULL briefing_id means legacy spawns without tracking — also silent.
+	// Note: agent_runs has no dispatch_id FK; squad_dispatch orphans are handled
+	// by the existing 20-min squad_dispatch reaper in reap-stale-rows.ts.
 	let silentRows: SilentRunRow[] = [];
 	try {
 		const { rows } = await pool.query<SilentRunRow>(
 			`SELECT ar.id,
 			        ar.agency_identity,
-			        ar.dispatch_id::text,
-			        sd.claim_token,
 			        ar.proposal_id::text
 			   FROM roadmap_workforce.agent_runs ar
-			   LEFT JOIN roadmap_workforce.squad_dispatch sd
-			          ON sd.id = ar.dispatch_id
 			  WHERE ar.status = 'running'
 			    AND ar.started_at < now() - ($1)::interval
 			    AND (
@@ -93,14 +89,6 @@ export async function detectAndReapSilentSpawns(
 				 WHERE id = $1 AND status = 'running'`,
 				[row.id],
 			);
-
-			// Release the squad_dispatch so the slot is freed for future offers
-			if (row.dispatch_id && row.agency_identity && row.claim_token) {
-				await pool.query(
-					`SELECT roadmap_workforce.fn_complete_work_offer($1, $2, $3, $4)`,
-					[row.dispatch_id, row.agency_identity, row.claim_token, "timeout"],
-				);
-			}
 
 			// AC-5: throttle counter so P1360 can gate repeated silent agencies
 			if (row.agency_identity) {
