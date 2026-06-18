@@ -12,6 +12,7 @@
 
 import type { Pool } from "pg";
 import { reapOrphanScratch } from "../../shared/utils/agent-scratch.ts";
+import { reapSilentNoProgressRuns } from "./no-progress-watchdog.ts";
 
 export interface ReaperLogger {
 	log: (msg: string) => void;
@@ -22,6 +23,8 @@ export interface ReapResult {
 	leases: number;
 	dispatches: number;
 	zombieRunsTimedOut: number;
+	/** P3847 Part B: runs reaped early by the silent no-progress watchdog. */
+	silentRunsReaped: number;
 	sequencesRealigned: number;
 	pokeAttemptsPruned: number;
 	lifecycleLogPruned: number;
@@ -54,6 +57,7 @@ export async function reapStaleRows(
 		leases: 0,
 		dispatches: 0,
 		zombieRunsTimedOut: 0,
+		silentRunsReaped: 0,
 		sequencesRealigned: 0,
 		pokeAttemptsPruned: 0,
 		lifecycleLogPruned: 0,
@@ -199,6 +203,21 @@ export async function reapStaleRows(
 	} catch (err) {
 		logger.warn(
 			`[${tag}] P1682 AC-5 hold wake sweep failed: ${err instanceof Error ? err.message : String(err)}`,
+		);
+	}
+
+	// P3847 Part B: silent no-progress watchdog. Reap status='running' runs that
+	// have shown NO progress (no tool-call/checkpoint activity AND only bare
+	// 'persona=<x>' output) for AGENTHIVE_SPAWN_NO_PROGRESS_MS — well before the
+	// 60-min zombie threshold below — releasing the lease, applying the P1360
+	// throttle, and raising a silent-spawn alert. Runs disjoint from the zombie
+	// reaper (which handles >60-min orphans).
+	try {
+		const watchdog = await reapSilentNoProgressRuns(pool, logger, { tag });
+		result.silentRunsReaped = watchdog.silentRunsReaped;
+	} catch (err) {
+		logger.warn(
+			`[${tag}] silent no-progress watchdog failed: ${err instanceof Error ? err.message : String(err)}`,
 		);
 	}
 
