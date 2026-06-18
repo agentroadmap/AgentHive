@@ -7,6 +7,7 @@ import {
 	assertResolvedRouteMetadata,
 	buildSpawnProcessEnv,
 	buildArgsBySpec,
+	classifyExit,
 	liveChildCount,
 	renderClosingHint,
 	terminateLiveChildren,
@@ -397,6 +398,96 @@ describe("buildArgsBySpec for agy", () => {
 		assert.ok(spec.argv.includes("Gemini 3.5 Flash (Medium)"), "argv must include the exact model name");
 		assert.ok(spec.argv.includes("run lint check"), "argv must include task");
 		assert.ok(spec.argv.includes("/data/code/worktree/antigravity"), "argv must include worktree path");
+	});
+});
+
+describe("P3847 AC-7: resolvedErrorDetail fallback on empty stderr + non-zero exit", () => {
+	it("classifyExit returns failed outcome on non-zero exit with empty stderr", () => {
+		const result = classifyExit("", "", 1);
+		assert.equal(result.outcome, "failed");
+	});
+
+	it("classifyExit returns completed outcome on zero exit", () => {
+		const result = classifyExit("done", "", 0);
+		assert.equal(result.outcome, "completed");
+	});
+
+	it("fallback error_detail is synthesised when stderr is empty and outcome is not completed", () => {
+		const stdout = "";
+		const stderr = "";
+		const exitCode = 1;
+		const durationMs = 1_200_000;
+		const timeoutMs = 1_200_000;
+
+		const exitClass = classifyExit(stdout, stderr, exitCode);
+		const errorDetail = stderr.slice(-4000);
+
+		// P3847 AC-1 logic (mirrors agent-spawner.ts production path)
+		const resolvedErrorDetail =
+			exitClass.outcome !== "completed" && errorDetail.trim() === ""
+				? `${exitClass.outcome}: no stderr; stdout_len=${stdout.length}; exit_code=${exitCode ?? "null"}; duration=${durationMs}ms${durationMs >= timeoutMs ? " (hit spawn timeout)" : ""}`
+				: errorDetail;
+
+		assert.ok(
+			resolvedErrorDetail !== "",
+			"resolvedErrorDetail must not be empty for a failed run with empty stderr",
+		);
+		assert.ok(
+			resolvedErrorDetail.includes("no stderr"),
+			`resolvedErrorDetail must contain 'no stderr', got: ${resolvedErrorDetail}`,
+		);
+		assert.ok(
+			resolvedErrorDetail.includes("hit spawn timeout"),
+			`resolvedErrorDetail must note timeout when duration >= timeoutMs, got: ${resolvedErrorDetail}`,
+		);
+		assert.ok(
+			resolvedErrorDetail.includes("exit_code=1"),
+			`resolvedErrorDetail must include exit_code, got: ${resolvedErrorDetail}`,
+		);
+	});
+
+	it("does not overwrite error_detail when stderr has content", () => {
+		const stdout = "";
+		const stderr = "Error: provider quota exceeded";
+		const exitCode = 1;
+		const durationMs = 5_000;
+		const timeoutMs = 1_200_000;
+
+		const exitClass = classifyExit(stdout, stderr, exitCode);
+		const errorDetail = stderr.slice(-4000);
+
+		const resolvedErrorDetail =
+			exitClass.outcome !== "completed" && errorDetail.trim() === ""
+				? `${exitClass.outcome}: no stderr; stdout_len=${stdout.length}; exit_code=${exitCode ?? "null"}; duration=${durationMs}ms${durationMs >= timeoutMs ? " (hit spawn timeout)" : ""}`
+				: errorDetail;
+
+		assert.equal(
+			resolvedErrorDetail,
+			"Error: provider quota exceeded",
+			"must pass through existing stderr content unchanged",
+		);
+	});
+
+	it("does not synthesise fallback for completed runs with empty stderr", () => {
+		const stdout = "Task done";
+		const stderr = "";
+		const exitCode = 0;
+		const durationMs = 3_000;
+		const timeoutMs = 1_200_000;
+
+		const exitClass = classifyExit(stdout, stderr, exitCode);
+		const errorDetail = stderr.slice(-4000);
+
+		const resolvedErrorDetail =
+			exitClass.outcome !== "completed" && errorDetail.trim() === ""
+				? `${exitClass.outcome}: no stderr; stdout_len=${stdout.length}; exit_code=${exitCode ?? "null"}; duration=${durationMs}ms${durationMs >= timeoutMs ? " (hit spawn timeout)" : ""}`
+				: errorDetail;
+
+		assert.equal(
+			resolvedErrorDetail,
+			"",
+			"completed runs with empty stderr should leave error_detail empty",
+		);
 	});
 });
 

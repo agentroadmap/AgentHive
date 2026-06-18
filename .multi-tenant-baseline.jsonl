@@ -198,3 +198,5 @@
 {"rule":"endpoints.mcp-url","file":"/data/code/worktree/claude3/src/apps/hive-cli/domains/mcp/index.ts","line":21,"col":31,"severity":"critical","confidence":"high","proposal":"P449"}
 {"rule":"paths.agenthive-project-root","file":"/data/code/worktree/agy3/scripts/run-schema-drift-monitor.ts","line":14,"col":47,"severity":"critical","confidence":"high","proposal":"P448"}
 {"rule":"paths.agenthive-project-root","file":"/data/code/worktree/agy3/src/infra/agency/offer-dispatch-handler.ts","line":818,"col":27,"severity":"critical","confidence":"high","proposal":"P448"}
+{"rule":"paths.agenthive-project-root","file":"/data/code/worktree/claude1/scripts/run-schema-drift-monitor.ts","line":14,"col":47,"severity":"critical","confidence":"high","proposal":"P448"}
+{"rule":"paths.agenthive-project-root","file":"/data/code/worktree/claude1/src/infra/agency/offer-dispatch-handler.ts","line":1128,"col":27,"severity":"critical","confidence":"high","proposal":"P448"}

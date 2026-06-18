@@ -2119,14 +2119,16 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	// worktree suffix, so it joins cleanly to agent_registry rows.
 	// P1436: also record provider-truth columns for spend/routing audit.
 	// P3311 AC-6: stamp task_class at INSERT from the stage role.
+	// P3847 AC-3: stamp briefing_id so the silent-spawn watchdog can join
+	// roadmap.tool_call_log for no-progress detection (NULL = legacy/untracked).
 	const taskClass = classifyTaskClass(stage);
 	const { rows } = await query(
 		`INSERT INTO roadmap_workforce.agent_runs
        (proposal_id, display_id, agent_identity, stage, model_used, status, activity, started_at,
         claimed_provider, resolved_provider, agent_cli, route_id, agency_identity, provider_mismatch,
-        task_class)
+        task_class, briefing_id)
      VALUES ($1, $2, $3, $4, $5, 'running', $6, now(),
-        $7, $8, $9, $10, $11, $12, $13)
+        $7, $8, $9, $10, $11, $12, $13, $14)
      RETURNING id`,
 		[
 			proposalId ?? null,
@@ -2142,6 +2144,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 			req.agencyIdentity ?? null,
 			providerMismatch,
 			taskClass,
+			req.briefingId ?? null,
 		],
 	);
 	const agentRunId = String(rows[0].id);
@@ -2251,15 +2254,12 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	const status =
 		exitClass.outcome === "rate_limited" ? "rate_limited" : exitClass.outcome;
 
-	// P3847 AC-1: never persist an empty error_detail on a non-success exit.
-	errorDetail = synthesizeSilentExitDetail({
-		errorDetail,
-		outcome: exitClass.outcome,
-		exitCode,
-		stdoutLen: stdout.length,
-		durationMs,
-		timeoutMs,
-	});
+	// P3847 AC-1: never write empty error_detail on non-success runs — silent
+	// timeouts leave error_detail blank, making 582/wk failures undiagnosable.
+	const resolvedErrorDetail =
+		exitClass.outcome !== "completed" && errorDetail.trim() === ""
+			? `${exitClass.outcome}: no stderr; stdout_len=${stdout.length}; exit_code=${exitCode ?? "null"}; duration=${durationMs}ms${durationMs >= timeoutMs ? " (hit spawn timeout)" : ""}`
+			: errorDetail;
 
 	await query(
 		`UPDATE roadmap_workforce.agent_runs
@@ -2269,7 +2269,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
          error_detail = $4,
          completed_at = now()
      WHERE id = $5`,
-		[status, durationMs, outputSummary, errorDetail, agentRunId],
+		[status, durationMs, outputSummary, resolvedErrorDetail, agentRunId],
 	);
 
 	// P1289 AC-5: budget ledger writer is deferred to P1018 (CLI token capture
@@ -2282,7 +2282,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	await obsWriter.closeSpan({
 		spanId,
 		status: exitCode === 0 ? "ok" : "error",
-		errorMessage: exitCode !== 0 ? errorDetail.slice(0, 500) : null,
+		errorMessage: exitCode !== 0 ? resolvedErrorDetail.slice(0, 500) : null,
 	});
 	await obsWriter.writeAgentExecutionSpan({
 		spanId,
