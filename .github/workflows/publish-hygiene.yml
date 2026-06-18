@@ -93,3 +93,26 @@ jobs:
             exit 1
           fi
           echo "Legacy migration directory guard: no new SQL files in database/migrations/ — OK."
+
+      # P1107 AC-8: MCP binary bundle gate. esbuild catches dup-declaration corruption
+      # that tsc misses (src/apps/mcp-server excluded from tsconfig.check.json).
+      # Runs on every PR/push to main; fails fast with the conflicting identifier named.
+      - name: MCP binary bundle gate (P1107 AC-8)
+        run: npm run check:mcp-bundle
+
+      # P1107 AC-8: Message-type drift gate. Verifies the roadmap.message_ledger
+      # CHECK constraint and TypeScript MessageType enum are in sync.
+      # Informational until the baseline drift from pre-P1017 rows is cleared.
+      - name: Message-type drift gate (P1107 AC-8)
+        continue-on-error: true
+        run: npm run check:message-drift
+
+      # P1107 AC-8: Migration continuity gate. Verifies every on-disk migration
+      # file in scripts/migrations/ matches a row in roadmap.migration_history.
+      # Requires DB access; skipped when AUDIT_DATABASE_URL is absent.
+      - name: Migration continuity gate (P1107 AC-8)
+        if: ${{ env.AUDIT_DATABASE_URL != '' }}
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ env.AUDIT_DATABASE_URL }}
+        run: npm run check:migration-continuity

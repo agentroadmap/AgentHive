@@ -415,6 +415,9 @@ export default function App() {
 						<Route path="/config">
 							<ConfigPage />
 						</Route>
+						<Route path="/config">
+							<ConfigPage />
+						</Route>
 						<Route path="*">
 							<NotFoundPage />
 						</Route>

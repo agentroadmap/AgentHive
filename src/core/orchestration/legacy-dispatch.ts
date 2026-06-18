@@ -2205,6 +2205,7 @@ export type EnhancementRevisionTarget = {
 
 export async function claimEnhancementRevisionReady(
 	limit = 4,
+	proposalId?: number,
 ): Promise<EnhancementRevisionTarget[]> {
 	const { rows } = await query<EnhancementRevisionTarget>(
 		`SELECT p.id,
@@ -2234,14 +2235,15 @@ export async function claimEnhancementRevisionReady(
             AND sd.dispatch_status IN ('open', 'active')
           LIMIT 1
        ) active_enhancer ON true
-      WHERE p.maturity = 'new'
+      WHERE p.maturity IN ('new', 'active')
         AND LOWER(p.status) IN ('draft', 'review', 'develop')
         AND gdl.decision = 'hold'
         AND gdl.created_at > now() - ($2 * interval '1 hour')
         AND active_enhancer IS NULL
+        AND ($3::int IS NULL OR p.id = $3::int)
       ORDER BY gdl.created_at ASC
       LIMIT $1`,
-		[limit, ENHANCEMENT_HOLD_WINDOW_HOURS],
+		[limit, ENHANCEMENT_HOLD_WINDOW_HOURS, proposalId ?? null],
 	);
 	return rows;
 }

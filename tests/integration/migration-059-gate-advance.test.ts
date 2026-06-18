@@ -152,10 +152,12 @@ describe("Migration 059 — trg_apply_gate_advance", () => {
 		});
 
 		it("should log an auto-advance discussion entry", async () => {
+			// test-runner-p611 is in agent_registry → fn_apply_gate_advance resolves
+			// decided_by to the author identity (not the 'system/auto-advance' fallback).
 			const discussions = await getSystemDiscussions(
 				pool,
 				proposalId,
-				"system/auto-advance",
+				"test-runner-p611",
 			);
 			assert.ok(
 				discussions.length > 0,
@@ -254,11 +256,12 @@ describe("Migration 059 — trg_apply_gate_advance", () => {
 				"Status should remain REVIEW when from_state mismatches",
 			);
 
-			// Should have a WARNING discussion
+			// Should have a WARNING discussion.
+			// test-runner-p611 is in agent_registry → v_author resolves to decided_by.
 			const discussions = await getSystemDiscussions(
 				pool,
 				proposalId,
-				"system/auto-advance",
+				"test-runner-p611",
 			);
 			assert.ok(discussions.length > 0, "Should have a drift warning discussion");
 			assert.ok(
@@ -321,12 +324,12 @@ describe("Migration 059 — trg_apply_gate_advance", () => {
 			const discussions = await getSystemDiscussions(
 				pool,
 				proposalId,
-				"system/auto-advance",
+				"test-runner-p611",
 			);
 			assert.equal(
 				discussions.length,
 				0,
-				"Non-advance decisions should not create system/auto-advance discussions",
+				"Non-advance decisions should not create auto-advance discussions",
 			);
 		});
 	});

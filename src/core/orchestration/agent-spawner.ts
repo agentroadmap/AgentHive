@@ -1653,10 +1653,9 @@ export async function spawnWithRetry(req: SpawnRequest): Promise<SpawnResult> {
 			"quota_exhausted";
 
 		// P1682 AC-4 & AC-9: Decision fork — hold vs cooldown based on reset duration
-		// Read thresholds from env (AC-6); defaults chosen for rapid re-probe vs over-wait
-		const HOLD_WINDOW_MAX_SEC = Number(
-			process.env.AGENTHIVE_HOLD_WINDOW_MAX_SEC ?? 1800,
-		); // default 30min
+		// Read thresholds from config (AC-6); defaults chosen for rapid re-probe vs over-wait
+		const HOLD_WINDOW_MAX_SEC =
+			(await config.getOptional(FlagKeys.AGENTHIVE_HOLD_WINDOW_MAX_SEC)) ?? 1800;
 		const CLAUDE_CLI_DEFAULT_COOLDOWN_SEC = Number(
 			process.env.AGENTHIVE_CLAUDE_CLI_DEFAULT_COOLDOWN_SEC ?? 3600,
 		); // default 1h

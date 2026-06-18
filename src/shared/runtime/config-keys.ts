@@ -1858,6 +1858,219 @@ export const DiagnosticKeys = {
 		required: false,
 		description: "Enable state-names registry debug logging",
 	} satisfies ConfigKey<boolean>,
+
+	// ─── P3781/P3787 branch-merge: keys referenced by main code/tests under
+	// the original (pre-rename) names. Kept alongside main's renamed equivalents
+	// so FlagKeys.* references on both sides resolve. (P3566-branch merge)
+
+	AGENTHIVE_PREMATURE_GATE_GUARD_ENABLED: {
+		name: "AGENTHIVE_PREMATURE_GATE_GUARD_ENABLED",
+		class: "flag" as const,
+		parse: (v: string) => {
+			try {
+				return JSON.parse(v) === true;
+			} catch {
+				return v.toLowerCase() === "true" || v === "1";
+			}
+		},
+		required: false,
+		defaultValue: false,
+		category: "gate_governance" as ConfigKeyCategory,
+		description: "Guard against premature gate requests from proposals with zero passing ACs",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies ConfigKey<boolean>,
+
+	AGENTHIVE_HOLD_WINDOW_MAX_SEC: {
+		name: "AGENTHIVE_HOLD_WINDOW_MAX_SEC",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n <= 0) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 1800,
+		category: "dispatch" as ConfigKeyCategory,
+		description: "Maximum hold window in seconds before a rate-limited offer is released back to the pool",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies ConfigKey<number>,
+
+	AGENTHIVE_SELF_CLAIM_AGENCIES: {
+		name: "AGENTHIVE_SELF_CLAIM_AGENCIES",
+		class: "flag" as const,
+		parse: (v: string) => {
+			try {
+				const decoded = JSON.parse(v);
+				return typeof decoded === "string" ? decoded : v;
+			} catch {
+				return v;
+			}
+		},
+		required: false,
+		defaultValue: "",
+		category: "liaison" as ConfigKeyCategory,
+		description: "Comma-separated list of agency IDs allowed to self-claim work offers",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies ConfigKey<string>,
+
+	AGENTHIVE_LIAISON_LLM_TIMEOUT_MS: {
+		name: "AGENTHIVE_LIAISON_LLM_TIMEOUT_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n <= 0) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 30_000,
+		category: "liaison" as ConfigKeyCategory,
+		description: "Default LLM call timeout for liaison agents (ms); overridden per-provider by AGENTHIVE_LIAISON_LLM_TIMEOUT_MS_{PROVIDER}",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies ConfigKey<number>,
+
+	DISPATCH_LOOP_THRESHOLD_PER_HOUR: {
+		name: "DISPATCH_LOOP_THRESHOLD_PER_HOUR",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 6,
+		category: "dispatch" as ConfigKeyCategory,
+		description: "Circuit-breaker: max (proposal, role) dispatches per hour before pausing (P689)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies ConfigKey<number>,
+
+	FEDERATION_SYNC_POLL_INTERVAL_MS: {
+		name: "FEDERATION_SYNC_POLL_INTERVAL_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1000) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 30_000,
+		category: "dispatch" as ConfigKeyCategory,
+		description: "Cross-instance federation sync poll interval (ms)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	FEDERATION_HEALTH_QUARANTINE_THRESHOLD: {
+		name: "FEDERATION_HEALTH_QUARANTINE_THRESHOLD",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 3,
+		category: "dispatch" as ConfigKeyCategory,
+		description: "Consecutive health-check failures before quarantining a federation peer",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	NOTIFICATION_ROUTER_POLL_MS: {
+		name: "NOTIFICATION_ROUTER_POLL_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1000) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 30_000,
+		category: "dispatch" as ConfigKeyCategory,
+		description: "Notification router backstop poll interval (ms); read once at router start",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	NOTIFICATION_ROUTER_BATCH_SIZE: {
+		name: "NOTIFICATION_ROUTER_BATCH_SIZE",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 25,
+		category: "dispatch" as ConfigKeyCategory,
+		description: "Max notifications per drain batch",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	NOTIFICATION_ROUTER_MAX_ATTEMPTS: {
+		name: "NOTIFICATION_ROUTER_MAX_ATTEMPTS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 5,
+		category: "dispatch" as ConfigKeyCategory,
+		description: "Max dispatch attempts before a notification is moved to DLQ",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	MESSAGING_WAKE_TIMEOUT_MS: {
+		name: "MESSAGING_WAKE_TIMEOUT_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 100) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 10_000,
+		category: "dispatch" as ConfigKeyCategory,
+		description: "Max wait for a transport adapter to become active (ms)",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
+
+	PROVIDER_HEALTH_CACHE_TTL_MS: {
+		name: "PROVIDER_HEALTH_CACHE_TTL_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 100) throw new Error("invalid number");
+			return n;
+		},
+		required: false,
+		defaultValue: 30_000,
+		category: "provider_quota" as ConfigKeyCategory,
+		description: "Provider health cache TTL (ms); read at HealthCache construction — requires restart to take effect",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: false,
+	} satisfies ConfigKey<number>,
 };
 
 /**
