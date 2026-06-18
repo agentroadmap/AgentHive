@@ -7,25 +7,27 @@ Target schema files for the v3 redesign control-plane database. These run **only
 ## Layout
 
 ```
-000-roles.sql         Per-service Postgres roles (run first, on the postgres DB)
-001-core.sql          P592 — core: installation, host, os_user, runtime_flag, service_heartbeat
-002-identity.sql      P593 — control_identity: principal, did_document, principal_key, audit_action
-004-model.sql         P595 — control_model: model, model_route, host_model_policy
-005-credential.sql    P596 — control_credential: vault_provider, credential, credential_grant, rotation_log
-006-workforce.sql     P597 — workforce: agent, agent_skill, agent_capability
-010-project.sql       P601 — control_project: project, project_db, project_host, project_repo, project_*_grant
-010b-project-ext.sql         control_project ext: project_worktree, project_member, project_budget_policy,
-                              project_capacity_config (P744), project_route_policy (P747 D1), project_sandbox_grant
-009-sandbox.sql       P600 — sandbox: sandbox_definition, boundary_policy, egress_rule, mount_grant
-003-agency.sql        P594 — agency: agency_provider, agency, agency_session, liaison_message, agency_route_policy (P747 D2)
-007-template.sql      P598 — template: workflow_template (immutable), state_name, gate_definition, agent_role_profile, proposal_template
-008-tooling.sql       P599 — tooling: tool, mcp_tool, cli_tool, tool_grant
-011-dependency.sql    P602 — dependency: cross_project_dependency, dependency_kind_catalog
-012-messaging.sql     P603 — messaging: a2a_topic, a2a_message, a2a_subscription, a2a_dlq, a2a_message_archive
-013-observability.sql P604 — observability: trace_span, agent_execution_span, proposal_lifecycle_event,
-                              model_routing_outcome (P747 D6), decision_explainability
-014-governance.sql    P605 — governance: policy_version (immutable), decision_log (hash-chained), compliance_check, event_log
-015-efficiency.sql    P606 — efficiency: efficiency_metric, cost_ledger_summary, dispatch_metric_summary, route_token_budget (P747 D4)
+000-roles.sql           Per-service Postgres roles (run first, on the postgres DB)
+001-core.sql            P592 — core: installation, host, os_user, runtime_flag, service_heartbeat, config_mutation_log
+002-identity.sql        P593 — control_identity: principal, did_document, principal_key, audit_action
+004-model.sql           P595 — control_model: model, model_route, host_model_policy
+005-credential.sql      P596 — control_credential: vault_provider, credential, credential_grant, rotation_log
+005-dispatch-stub.sql   P595 stub — dispatch: work_claim (cost_snapshot contract; extended by dispatch-full)
+005-dispatch-full.sql   P820 — dispatch: work_offer, proposal_lease, dispatch_audit (append-only), capacity_snapshot
+006-workforce.sql       P597 — workforce: agent, agent_skill, agent_capability
+010-project.sql         P601 — control_project: project, project_db, project_host, project_repo, project_*_grant
+010b-project-ext.sql           control_project ext: project_worktree, project_member, project_budget_policy,
+                                project_capacity_config (P744), project_route_policy (P747 D1), project_sandbox_grant
+009-sandbox.sql         P600 — sandbox: sandbox_definition, boundary_policy, egress_rule, mount_grant
+003-agency.sql          P594 — agency: agency_provider, agency, agency_session, liaison_message, agency_route_policy (P747 D2)
+007-template.sql        P598 — template: workflow_template (immutable), state_name, gate_definition, agent_role_profile, proposal_template
+008-tooling.sql         P599 — tooling: tool, mcp_tool, cli_tool, tool_grant
+011-dependency.sql      P602 — dependency: cross_project_dependency, dependency_kind_catalog
+012-messaging.sql       P603 — messaging: a2a_topic, a2a_message, a2a_subscription, a2a_dlq, a2a_message_archive
+013-observability.sql   P604 — observability: trace_span, agent_execution_span, proposal_lifecycle_event,
+                                model_routing_outcome (P747 D6), decision_explainability
+014-governance.sql      P605 — governance: policy_version (immutable), decision_log (hash-chained), compliance_check, event_log
+015-efficiency.sql      P606 — efficiency: efficiency_metric, cost_ledger_summary, dispatch_metric_summary, route_token_budget (P747 D4)
 ```
 
 ## Catalog hygiene fields (uniform across every central catalog)
@@ -100,25 +102,27 @@ Minimum PostgreSQL version: **16** (declarative partitioning + pg_partman 5.x).
 Apply in strict dependency order — each file depends on schemas created by earlier files:
 
 ```
-Step  File                    Schema created
-----  ----------------------  --------------
- 1    000-roles.sql           (roles — run against postgres DB, not hiveCentral)
- 2    001-core.sql            core
- 3    002-identity.sql        control_identity
- 4    004-model.sql           control_model
- 5    005-credential.sql      control_credential
- 6    006-workforce.sql       workforce
- 7    010-project.sql         control_project
- 8    009-sandbox.sql         sandbox
- 9    010b-project-ext.sql    (extends control_project; adds FK to sandbox)
-10    003-agency.sql          agency
-11    007-template.sql        template
-12    008-tooling.sql         tooling
-13    011-dependency.sql      dependency
-14    012-messaging.sql       messaging
-15    013-observability.sql   observability
-16    014-governance.sql      governance
-17    015-efficiency.sql      efficiency
+Step  File                      Schema created / extended
+----  ------------------------  ----------------------------------------
+ 1    000-roles.sql             (roles — run against postgres DB, not hiveCentral)
+ 2    001-core.sql              core
+ 3    002-identity.sql          control_identity
+ 4    004-model.sql             control_model (hivecentral)
+ 5    005-credential.sql        control_credential
+ 6    005-dispatch-stub.sql     dispatch (work_claim stub)
+ 7    006-workforce.sql         workforce
+ 8    010-project.sql           control_project
+ 9    009-sandbox.sql           sandbox
+10    010b-project-ext.sql      (extends control_project; adds FK to sandbox)
+11    003-agency.sql            agency
+12    005-dispatch-full.sql     dispatch (work_offer, proposal_lease, dispatch_audit, capacity_snapshot)
+13    007-template.sql          template
+14    008-tooling.sql           tooling
+15    011-dependency.sql        dependency
+16    012-messaging.sql         messaging
+17    013-observability.sql     observability
+18    014-governance.sql        governance
+19    015-efficiency.sql        efficiency
 ```
 
 ```bash
@@ -140,11 +144,13 @@ psql -d hiveCentral -f 001-core.sql
 psql -d hiveCentral -f 002-identity.sql
 psql -d hiveCentral -f 004-model.sql
 psql -d hiveCentral -f 005-credential.sql
+psql -d hiveCentral -f 005-dispatch-stub.sql
 psql -d hiveCentral -f 006-workforce.sql
 psql -d hiveCentral -f 010-project.sql
 psql -d hiveCentral -f 009-sandbox.sql
 psql -d hiveCentral -f 010b-project-ext.sql
 psql -d hiveCentral -f 003-agency.sql
+psql -d hiveCentral -f 005-dispatch-full.sql
 psql -d hiveCentral -f 007-template.sql
 psql -d hiveCentral -f 008-tooling.sql
 psql -d hiveCentral -f 011-dependency.sql
