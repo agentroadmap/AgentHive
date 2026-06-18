@@ -12,6 +12,7 @@
 
 import type { Pool } from "pg";
 import { reapOrphanScratch } from "../../shared/utils/agent-scratch.ts";
+import { detectAndReapSilentSpawns } from "./silent-spawn-watchdog.ts";
 
 export interface ReaperLogger {
 	log: (msg: string) => void;
@@ -22,6 +23,7 @@ export interface ReapResult {
 	leases: number;
 	dispatches: number;
 	zombieRunsTimedOut: number;
+	silentSpawnsTimedOut: number;
 	sequencesRealigned: number;
 	pokeAttemptsPruned: number;
 	lifecycleLogPruned: number;
@@ -54,6 +56,7 @@ export async function reapStaleRows(
 		leases: 0,
 		dispatches: 0,
 		zombieRunsTimedOut: 0,
+		silentSpawnsTimedOut: 0,
 		sequencesRealigned: 0,
 		pokeAttemptsPruned: 0,
 		lifecycleLogPruned: 0,
@@ -223,6 +226,18 @@ export async function reapStaleRows(
 		);
 	}
 
+	// P3847 AC-3/4: Detect and reap silent spawns (no tool calls within threshold).
+	// Runs after the 60-min zombie reaper — these fire at 5 min and are NOT zombies,
+	// they are live processes that never made progress (MCP init failure, prompt loop, etc).
+	try {
+		const silentResult = await detectAndReapSilentSpawns(pool, logger, tag);
+		result.silentSpawnsTimedOut = silentResult.silentSpawnsTimedOut;
+	} catch (err) {
+		logger.warn(
+			`[${tag}] silent spawn watchdog failed: ${err instanceof Error ? err.message : String(err)}`,
+		);
+	}
+
 	// P251: Prune resolved poke_attempt rows older than retention window (AC-2).
 	try {
 		const r = await pool.query(
@@ -283,6 +298,7 @@ export async function reapStaleRows(
 		result.leases ||
 		result.dispatches ||
 		result.zombieRunsTimedOut ||
+		result.silentSpawnsTimedOut ||
 		result.sequencesRealigned ||
 		result.pokeAttemptsPruned ||
 		result.lifecycleLogPruned ||
@@ -290,7 +306,7 @@ export async function reapStaleRows(
 		result.holdWakesCleared
 	) {
 		logger.log(
-			`[${tag}] reaped: ${result.leases} lease(s), ${result.dispatches} dispatch(es), ${result.zombieRunsTimedOut} zombie run(s), ${result.sequencesRealigned} sequence(s) realigned, ${result.pokeAttemptsPruned} poke_attempt(s) pruned, ${result.lifecycleLogPruned} lifecycle_log row(s) pruned, ${result.scratchDirs} scratch dir(s) reaped, ${result.holdWakesCleared} hold(s) woken`,
+			`[${tag}] reaped: ${result.leases} lease(s), ${result.dispatches} dispatch(es), ${result.zombieRunsTimedOut} zombie run(s), ${result.silentSpawnsTimedOut} silent run(s), ${result.sequencesRealigned} sequence(s) realigned, ${result.pokeAttemptsPruned} poke_attempt(s) pruned, ${result.lifecycleLogPruned} lifecycle_log row(s) pruned, ${result.scratchDirs} scratch dir(s) reaped, ${result.holdWakesCleared} hold(s) woken`,
 		);
 	} else {
 		logger.log(`[${tag}] no stale rows`);

@@ -2217,9 +2217,10 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	const { rows } = await query(
 		`INSERT INTO roadmap_workforce.agent_runs
        (proposal_id, display_id, agent_identity, stage, model_used, status, activity, started_at,
-        claimed_provider, resolved_provider, agent_cli, route_id, agency_identity, provider_mismatch)
+        claimed_provider, resolved_provider, agent_cli, route_id, agency_identity, provider_mismatch,
+        briefing_id)
      VALUES ($1, $2, $3, $4, $5, 'running', $6, now(),
-        $7, $8, $9, $10, $11, $12)
+        $7, $8, $9, $10, $11, $12, $13)
      RETURNING id`,
 		[
 			proposalId ?? null,
@@ -2234,6 +2235,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 			route.routeId ?? null,
 			req.agencyIdentity ?? null,
 			providerMismatch,
+			req.briefingId ?? null,
 		],
 	);
 	const agentRunId = String(rows[0].id);
@@ -2343,6 +2345,13 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	const status =
 		exitClass.outcome === "rate_limited" ? "rate_limited" : exitClass.outcome;
 
+	// P3847 AC-1: never write empty error_detail on non-success runs — silent
+	// timeouts leave error_detail blank, making 582/wk failures undiagnosable.
+	const resolvedErrorDetail =
+		exitClass.outcome !== "completed" && errorDetail.trim() === ""
+			? `${exitClass.outcome}: no stderr; stdout_len=${stdout.length}; exit_code=${exitCode ?? "null"}; duration=${durationMs}ms${durationMs >= timeoutMs ? " (hit spawn timeout)" : ""}`
+			: errorDetail;
+
 	await query(
 		`UPDATE roadmap_workforce.agent_runs
      SET status = $1,
@@ -2351,7 +2360,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
          error_detail = $4,
          completed_at = now()
      WHERE id = $5`,
-		[status, durationMs, outputSummary, errorDetail, agentRunId],
+		[status, durationMs, outputSummary, resolvedErrorDetail, agentRunId],
 	);
 
 	// P1289 AC-5: budget ledger writer is deferred to P1018 (CLI token capture
@@ -2364,7 +2373,7 @@ export async function spawnAgent(req: SpawnRequest): Promise<SpawnResult> {
 	await obsWriter.closeSpan({
 		spanId,
 		status: exitCode === 0 ? "ok" : "error",
-		errorMessage: exitCode !== 0 ? errorDetail.slice(0, 500) : null,
+		errorMessage: exitCode !== 0 ? resolvedErrorDetail.slice(0, 500) : null,
 	});
 	await obsWriter.writeAgentExecutionSpan({
 		spanId,
