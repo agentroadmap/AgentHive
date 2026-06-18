@@ -932,6 +932,43 @@ export const FlagKeys = {
 		envOverride: true,
 	} satisfies ConfigKey<number>,
 
+	// P3796: default LLM invocation timeout for liaison agents.
+	LIAISON_LLM_TIMEOUT_MS: {
+		name: "LIAISON_LLM_TIMEOUT_MS",
+		class: "flag" as const,
+		category: "liaison",
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 1_000 || n > 600_000) {
+				throw new Error("Invalid LIAISON_LLM_TIMEOUT_MS: must be integer 1000–600000 ms");
+			}
+			return n;
+		},
+		required: false,
+		defaultValue: 30_000,
+		description: "Default LLM invocation timeout (ms) for liaison agents; per-provider env overrides (AGENTHIVE_LIAISON_LLM_TIMEOUT_MS_{PROVIDER}) still take precedence",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies ConfigKey<number>,
+
+	SELF_CLAIM_AGENCIES: {
+		name: "SELF_CLAIM_AGENCIES",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const parsed = JSON.parse(v);
+			if (typeof parsed === "string") return parsed;
+			throw new Error("must be a comma-separated string of agency identities");
+		},
+		required: false,
+		defaultValue: "",
+		description:
+			"Comma-separated agency identities allowed to self-claim offers when AGENCY_OFFER_CLAIM_ENABLED=true; empty = all agencies",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies ConfigKey<string>,
+
 	// ─── Orchestrator runtime-tunable flags (P1144) ───────────────────────────
 
 	ORCHESTRATOR_SCAN_BATCH_LIMIT: {

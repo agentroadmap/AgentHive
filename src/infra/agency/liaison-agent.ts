@@ -204,7 +204,7 @@ export async function runLiaisonAgent(
 
 	// V3-C6 step-1 canary scoping: AGENCY_OFFER_CLAIM_ENABLED is a GLOBAL flag, so
 	// turning it on would enable self-claim for EVERY attached agency at once. The
-	// optional AGENTHIVE_SELF_CLAIM_AGENCIES allowlist (comma-separated identities,
+	// optional SELF_CLAIM_AGENCIES allowlist (comma-separated identities,
 	// mirrors a2a-host's AGENTHIVE_AGENCY_FILTER) restricts self-claim to listed
 	// agencies even when the global flag is on — enabling a single-agency canary.
 	// Empty allowlist = all agencies (backward-compatible with the pre-allowlist
@@ -217,7 +217,7 @@ export async function runLiaisonAgent(
 	}
 	const selfClaimAllowlist = rawSelfClaimAllowlist
 		.split(",")
-		.map((s) => s.trim())
+		.map((s: string) => s.trim())
 		.filter(Boolean);
 	const allowedByList =
 		selfClaimAllowlist.length === 0 || selfClaimAllowlist.includes(identity);
@@ -464,8 +464,9 @@ export async function runLiaisonAgent(
 				`Reply concisely. If it's a task, acknowledge and outline your approach in 2-3 sentences.`;
 			const prompt = `${systemContext}\n\n---\nIncoming message:\n${msg.message_content}`;
 
+			const timeoutMs = await resolveLiaisonLlmTimeoutMs(provider);
 			replyContent = await invokeCliHandler(handler, prompt, {
-				timeoutMs: await resolveLiaisonLlmTimeoutMs(provider),
+				timeoutMs,
 			});
 		} catch (err) {
 			const errMsg = err instanceof Error ? err.message : String(err);

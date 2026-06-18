@@ -218,6 +218,6 @@ All `must-have` items from both reviewers were promoted into the v3 architecture
 |---|---|
 | P530.0–P530.17 | Children; all must reach COMPLETE for P590 AC-1 |
 | P501 | Wave 1 — empty `hiveCentral` bootstrap; P590 is blocked until P501 ships against v3 schema |
-| P482–P485 | Multi-project bootstrap: M0 bridge for first non-agenthive tenant onboarding |
+| P483–P485 | Multi-project bootstrap: M0 bridge for first non-agenthive tenant onboarding (P482 in this range is obsolete; P483–P485 are the active successors) |
 | P602 | Cross-project dependency schema (P530.11 precursor) |
 | P661 | Stale squad dispatch reconciler — compatible with P530.0 lease reconciliation |

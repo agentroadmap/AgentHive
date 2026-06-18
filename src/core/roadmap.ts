@@ -32,13 +32,7 @@ import {
 	mapPgPriority,
 } from "./postgres/pg-tag-utils.ts";
 import * as pgPool from "../postgres/pool.ts";
-import type {
-	ProposalAcceptanceCriterionRow,
-	ProposalActivity,
-	ProposalDependency,
-	ProposalRow,
-	ProposalSummary,
-} from "../infra/postgres/proposal-storage-v2.ts";
+import type { ProposalActivity } from "../infra/postgres/proposal-storage-v2.ts";
 import * as pg from "../infra/postgres/proposal-storage-v2.ts";
 import {
 	type AcceptanceCriterion,
@@ -98,6 +92,16 @@ import {
 import { executeStatusCallback } from "../utils/status-callback.ts";
 import { loadRuntimeEnvFile } from "../shared/runtime/config.ts";
 import {
+	extractLegacyConfigDirectives,
+	migrateLegacyConfigDirectivesToFiles,
+} from "./config/legacy-migration.ts";
+import { PgProposalHydrator } from "./postgres/proposal-mapper.ts";
+import {
+	buildLatestProposalMap,
+	filterProposalsByProposalSnapshots,
+	getActiveAndCompletedIdsFromProposalMap,
+} from "./proposal/id-generation.ts";
+import {
 	migrateConfig,
 	needsMigration,
 } from "./infrastructure/config-migration.ts";
@@ -112,11 +116,17 @@ import {
 import { RateLimiter } from "./infrastructure/rate-limiter.ts";
 import { SearchService } from "./infrastructure/search-service.ts";
 import { getBlockingIssues, loadIssues } from "./pipeline/issue-tracker.ts";
+import { ClaimsService } from "./proposal/claims.ts";
 import {
 	isCompleteStatus,
 	isReachedStatus,
 	isReady,
 } from "./proposal/directives.ts";
+import {
+	addActivityLog as addActivityLogFn,
+	applyProposalUpdateInput as applyUpdateEngine,
+	normalizePriority as normalizePriorityFn,
+} from "./proposal/update-engine.ts";
 import {
 	calculateNewOrdinal,
 	DEFAULT_ORDINAL_STEP,
@@ -143,13 +153,6 @@ import {
 	listAcceptanceCriteria as acList,
 	removeAcceptanceCriteria as acRemove,
 } from "./proposal/criteria.ts";
-import { LegacyConfigMigrator } from "./config-migration.ts";
-import {
-	createDecision as decisionsCreate,
-	updateDecisionFromContent as decisionsUpdateFromContent,
-} from "./proposal/decisions.ts";
-import { buildPgTags } from "./postgres/pg-tag-utils.ts";
-import { hydratePgProposalRow } from "./postgres/proposal-hydrator.ts";
 import {
 	buildLatestProposalMap,
 	filterProposalsByProposalSnapshots,
@@ -221,6 +224,10 @@ export class Core {
 	private readonly enableWatchers: boolean;
 	// Rate Limiter (PROPOSAL-44): per-agent rate limiting with fair share
 	private rateLimiter?: RateLimiter;
+	// Postgres row → Proposal hydration (P3796: extracted to postgres/proposal-mapper.ts)
+	private readonly pgHydrator = new PgProposalHydrator();
+	// Claims lifecycle (P3796 AC-15: extracted to ./proposal/claims.ts)
+	private _claims!: ClaimsService;
 
 	constructor(projectRoot: string, options?: { enableWatchers?: boolean }) {
 		this.projectRoot = projectRoot;
@@ -230,6 +237,7 @@ export class Core {
 		// Interactive modes (TUI, browser, MCP) should explicitly pass enableWatchers: true
 		this.enableWatchers = options?.enableWatchers ?? false;
 		// Note: Config is loaded lazily when needed since constructor can't be async
+		this._claims = new ClaimsService(this);
 	}
 
 	getProjectRoot(): string {
@@ -449,17 +457,7 @@ export class Core {
 	private normalizePriority(
 		value: string | undefined,
 	): ("high" | "medium" | "low") | undefined {
-		if (value === undefined || value === "") {
-			return undefined;
-		}
-		const normalized = value.toLowerCase();
-		const allowed = ["high", "medium", "low"] as const;
-		if (!allowed.includes(normalized as (typeof allowed)[number])) {
-			throw new Error(
-				`Invalid priority: ${value}. Valid values are: high, medium, low`,
-			);
-		}
-		return normalized as "high" | "medium" | "low";
+		return normalizePriorityFn(value);
 	}
 
 	private isExactProposalReference(
@@ -524,7 +522,8 @@ export class Core {
 		return changedProposals;
 	}
 
-	private async isPostgresProposalBackend(
+	/** @internal Used by ClaimsService and other extracted modules. */
+	async isPostgresProposalBackend(
 		config?: RoadmapConfig | null,
 	): Promise<boolean> {
 		const resolvedConfig = config ?? (await this.filesystem.loadConfig());
@@ -720,8 +719,8 @@ export class Core {
 		}
 	}
 
-	/** Ensure Postgres pool is initialised — needed when CLI has no PGPASSWORD env from systemd. */
-	private async ensurePgPool(): Promise<void> {
+	/** @internal Ensure Postgres pool is initialised — needed when CLI has no PGPASSWORD env from systemd. */
+	async ensurePgPool(): Promise<void> {
 		try {
 			await loadRuntimeEnvFile();
 			const config = await this.filesystem.loadConfig();
@@ -746,7 +745,8 @@ export class Core {
 		return availableTypes[0].type;
 	}
 
-	private async loadPgProposalById(
+	/** @internal Load a full Proposal by display-id from Postgres. */
+	async loadPgProposalById(
 		proposalId: string,
 	): Promise<Proposal | null> {
 		await this.ensurePgPool();
@@ -765,7 +765,7 @@ export class Core {
 					.then((rows) => rows.find((r) => r.proposal_id === row.id) ?? null)
 					.catch(() => null),
 			]);
-		return await hydratePgProposalRow(pg, row, {
+		return await this.pgHydrator.hydrate(row, {
 			summary,
 			dependencies,
 			acceptanceCriteria,
@@ -791,7 +791,7 @@ export class Core {
 						if (diskIds.has(pgId)) {
 							return null;
 						}
-						return await hydratePgProposalRow(pg, row);
+						return await this.pgHydrator.hydrate(row);
 					}),
 				)
 			).filter((proposal): proposal is Proposal => proposal !== null);
@@ -859,7 +859,7 @@ export class Core {
 			const rowById = new Map(rows.map((row) => [row.id, row]));
 			const proposals = await Promise.all(
 				rows.map(async (row) =>
-					hydratePgProposalRow(pg, row, {
+					this.pgHydrator.hydrate(row, {
 						summary: summaryById.get(row.id),
 						dependencies: dependencyRows,
 						activity: activityById.get(row.id) ?? null,
@@ -1215,8 +1215,8 @@ export class Core {
 		}
 	}
 
-	private async getRoadmapDirectoryName(): Promise<string> {
-		// Always use "roadmap" as the directory name
+	/** @internal Returns the roadmap directory name (always "roadmap"). */
+	async getRoadmapDirectoryName(): Promise<string> {
 		return DEFAULT_DIRECTORIES.ROADMAP;
 	}
 
@@ -1235,10 +1235,11 @@ export class Core {
 		return this.git;
 	}
 
+	// Config migration — pure helpers extracted to ./config/legacy-migration.ts (P3796)
+
 	async ensureConfigMigrated(): Promise<void> {
 		await this.ensureConfigLoaded();
-		const migrator = new LegacyConfigMigrator(this.fs);
-		const legacyDirectives = await migrator.extractLegacyConfigDirectives();
+		const legacyDirectives = await extractLegacyConfigDirectives(this.fs);
 		let config = await this.fs.loadConfig();
 		const needsSchemaMigration = !config || needsMigration(config);
 
@@ -1246,7 +1247,7 @@ export class Core {
 			config = migrateConfig(config || {});
 		}
 		if (legacyDirectives.length > 0) {
-			await migrator.migrateLegacyConfigDirectivesToFiles(legacyDirectives);
+			await migrateLegacyConfigDirectivesToFiles(this.fs, legacyDirectives);
 		}
 		if (config && (needsSchemaMigration || legacyDirectives.length > 0)) {
 			// Rewrite config to apply schema defaults and strip legacy directives key after successful migration.
@@ -1846,7 +1847,7 @@ export class Core {
 							? proposal.dependencies.join(", ")
 							: null),
 					priority: proposal.priority ?? null,
-					tags: buildPgTags(proposal),
+					tags: this.pgHydrator.buildPgTags(proposal),
 				},
 				proposal.builder ??
 					proposal.auditor ??
@@ -2005,7 +2006,7 @@ export class Core {
 						? proposal.dependencies.join(", ")
 						: null),
 				priority: proposal.priority ?? null,
-				tags: buildPgTags(proposal),
+				tags: this.pgHydrator.buildPgTags(proposal),
 			});
 
 			const dependencyIds = (
@@ -2182,24 +2183,13 @@ export class Core {
 		}
 	}
 
-	/**
-	 * Add an entry to the proposal's activity log
-	 */
 	private addActivityLog(
 		proposal: Proposal,
 		actor: string,
 		action: string,
 		reason?: string,
 	): void {
-		if (!proposal.activityLog) {
-			proposal.activityLog = [];
-		}
-		proposal.activityLog.push({
-			timestamp: new Date().toISOString().slice(0, 19).replace("T", " "),
-			actor,
-			action,
-			reason,
-		});
+		addActivityLogFn(proposal, actor, action, reason);
 	}
 
 	private async applyProposalUpdateInput(
@@ -2207,909 +2197,16 @@ export class Core {
 		input: ProposalUpdateInput,
 		statusResolver: (status: string) => Promise<string>,
 	): Promise<{ proposal: Proposal; mutated: boolean }> {
-		let mutated = false;
-
-		const applyStringField = (
-			value: string | undefined,
-			current: string | undefined,
-			assign: (next: string) => void,
-		) => {
-			if (typeof value === "string") {
-				const next = value;
-				if ((current ?? "") !== next) {
-					assign(next);
-					mutated = true;
-				}
-			}
-		};
-
-		if (input.title !== undefined) {
-			const trimmed = input.title.trim();
-			if (trimmed.length === 0) {
-				throw new Error("Title cannot be empty.");
-			}
-			if (proposal.title !== trimmed) {
-				proposal.title = trimmed;
-				mutated = true;
-			}
-		}
-
-		applyStringField(input.description, proposal.description, (next) => {
-			proposal.description = next;
-		});
-		applyStringField(input.summary, proposal.summary, (next) => {
-			proposal.summary = next;
-			proposal.description = next;
-		});
-		applyStringField(input.motivation, proposal.motivation, (next) => {
-			proposal.motivation = next;
-		});
-		applyStringField(input.design, proposal.design, (next) => {
-			proposal.design = next;
-			proposal.implementationPlan = next;
-		});
-		applyStringField(input.drawbacks, proposal.drawbacks, (next) => {
-			proposal.drawbacks = next;
-		});
-		applyStringField(input.alternatives, proposal.alternatives, (next) => {
-			proposal.alternatives = next;
-		});
-		applyStringField(
-			input.dependency_note,
-			proposal.dependency_note,
-			(next) => {
-				proposal.dependency_note = next;
+		return applyUpdateEngine(
+			{
+				validateDeps: (ids) => validateDependencies(ids, this),
+				assertNoBlockingTestIssues: (id, action) =>
+					this.assertNoBlockingTestIssues(id, action),
 			},
+			proposal,
+			input,
+			statusResolver,
 		);
-
-		applyStringField(input.domainId, proposal.domainId, (next) => {
-			proposal.domainId = next;
-		});
-
-		applyStringField(input.proposalType, proposal.proposalType, (next) => {
-			proposal.proposalType = next;
-		});
-
-		applyStringField(input.category, proposal.category, (next) => {
-			proposal.category = next;
-		});
-
-		applyStringField(input.builder, proposal.builder, (next) => {
-			proposal.builder = next;
-		});
-
-		applyStringField(input.auditor, proposal.auditor, (next) => {
-			proposal.auditor = next;
-		});
-
-		applyStringField(input.rationale, proposal.rationale, (next) => {
-			proposal.rationale = next;
-		});
-
-		// Handle needs_capabilities
-		if (input.needs_capabilities !== undefined) {
-			if (
-				!stringArraysEqual(
-					proposal.needs_capabilities ?? [],
-					input.needs_capabilities,
-				)
-			) {
-				proposal.needs_capabilities = [...input.needs_capabilities];
-				mutated = true;
-			}
-		}
-		if (input.required_capabilities !== undefined) {
-			if (
-				!stringArraysEqual(
-					proposal.required_capabilities ?? [],
-					input.required_capabilities,
-				)
-			) {
-				proposal.required_capabilities = [...input.required_capabilities];
-				proposal.needs_capabilities = [...input.required_capabilities];
-				mutated = true;
-			}
-		}
-		if (input.addNeedsCapabilities && input.addNeedsCapabilities.length > 0) {
-			const current = proposal.needs_capabilities ?? [];
-			proposal.needs_capabilities = [
-				...new Set([...current, ...input.addNeedsCapabilities]),
-			];
-			mutated = true;
-		}
-		if (
-			input.removeNeedsCapabilities &&
-			input.removeNeedsCapabilities.length > 0
-		) {
-			const current = proposal.needs_capabilities ?? [];
-			const toRemove = new Set(input.removeNeedsCapabilities);
-			proposal.needs_capabilities = current.filter(
-				(_, i) => !toRemove.has(i + 1),
-			);
-			mutated = true;
-		}
-
-		// Handle external_injections
-		if (input.external_injections !== undefined) {
-			if (
-				!stringArraysEqual(
-					proposal.external_injections ?? [],
-					input.external_injections,
-				)
-			) {
-				proposal.external_injections = [...input.external_injections];
-				mutated = true;
-			}
-		}
-		if (input.addExternalInjections && input.addExternalInjections.length > 0) {
-			const current = proposal.external_injections ?? [];
-			proposal.external_injections = [
-				...new Set([...current, ...input.addExternalInjections]),
-			];
-			mutated = true;
-		}
-		if (
-			input.removeExternalInjections &&
-			input.removeExternalInjections.length > 0
-		) {
-			const current = proposal.external_injections ?? [];
-			const toRemove = new Set(input.removeExternalInjections);
-			proposal.external_injections = current.filter(
-				(_, i) => !toRemove.has(i + 1),
-			);
-			mutated = true;
-		}
-
-		// Handle unlocks
-		if (input.unlocks !== undefined) {
-			if (!stringArraysEqual(proposal.unlocks ?? [], input.unlocks)) {
-				proposal.unlocks = [...input.unlocks];
-				mutated = true;
-			}
-		}
-		if (input.addUnlocks && input.addUnlocks.length > 0) {
-			const current = proposal.unlocks ?? [];
-			proposal.unlocks = [...new Set([...current, ...input.addUnlocks])];
-			mutated = true;
-		}
-		if (input.removeUnlocks && input.removeUnlocks.length > 0) {
-			const current = proposal.unlocks ?? [];
-			const toRemove = new Set(input.removeUnlocks);
-			proposal.unlocks = current.filter((_, i) => !toRemove.has(i + 1));
-			mutated = true;
-		}
-
-		// Handle proof
-		if (input.proof !== undefined) {
-			if (!stringArraysEqual(proposal.proof ?? [], input.proof)) {
-				proposal.proof = [...input.proof];
-				mutated = true;
-			}
-		}
-		if (input.addProof && input.addProof.length > 0) {
-			const current = proposal.proof ?? [];
-			proposal.proof = [...new Set([...current, ...input.addProof])];
-			mutated = true;
-		}
-		if (input.removeProof && input.removeProof.length > 0) {
-			const current = proposal.proof ?? [];
-			const toRemove = new Set(input.removeProof);
-			proposal.proof = current.filter((_, i) => !toRemove.has(i + 1));
-			mutated = true;
-		}
-
-		if (input.status !== undefined) {
-			const canonicalStatus = await statusResolver(input.status);
-			if ((proposal.status ?? "") !== canonicalStatus) {
-				// AC#1-4, AC#7: Hard gates (maturity, proof of arrival, final summary, peer audit) removed.
-				// Complete transition is now trust-based with visibility (activity log).
-				// Only machine gate remaining: blocking test issues prevent completion.
-				if (isCompleteStatus(canonicalStatus)) {
-					this.assertNoBlockingTestIssues(proposal.id, "mark as Complete");
-				}
-				proposal.status = canonicalStatus;
-				mutated = true;
-				// AC#5: Activity log records who marked proposal Complete and when
-				const actor = input.activityActor ?? input.builder ?? "unknown";
-				this.addActivityLog(
-					proposal,
-					actor,
-					"status_change",
-					`Changed to ${canonicalStatus}`,
-				);
-			}
-		}
-
-		if (input.priority !== undefined) {
-			const normalizedPriority = this.normalizePriority(String(input.priority));
-			if (proposal.priority !== normalizedPriority) {
-				proposal.priority = normalizedPriority;
-				mutated = true;
-			}
-		}
-
-		if (input.directive !== undefined) {
-			const normalizedDirective =
-				input.directive === null
-					? undefined
-					: input.directive.trim().length > 0
-						? input.directive.trim()
-						: undefined;
-			if ((proposal.directive ?? undefined) !== normalizedDirective) {
-				if (normalizedDirective === undefined) {
-					delete proposal.directive;
-				} else {
-					proposal.directive = normalizedDirective;
-				}
-				mutated = true;
-			}
-		}
-
-		if (input.parentProposalId !== undefined) {
-			const normalizedParent =
-				input.parentProposalId === null
-					? undefined
-					: input.parentProposalId.trim().length > 0
-						? input.parentProposalId.trim()
-						: undefined;
-			if ((proposal.parentProposalId ?? undefined) !== normalizedParent) {
-				if (normalizedParent === undefined) {
-					delete proposal.parentProposalId;
-				} else {
-					proposal.parentProposalId = normalizedParent;
-				}
-				mutated = true;
-			}
-		}
-
-		if (input.ordinal !== undefined) {
-			if (Number.isNaN(input.ordinal) || input.ordinal < 0) {
-				throw new Error("Ordinal must be a non-negative number.");
-			}
-			if (proposal.ordinal !== input.ordinal) {
-				proposal.ordinal = input.ordinal;
-				mutated = true;
-			}
-		}
-
-		if (input.assignee !== undefined) {
-			const sanitizedAssignee = normalizeStringList(input.assignee) ?? [];
-			if (!stringArraysEqual(sanitizedAssignee, proposal.assignee ?? [])) {
-				proposal.assignee = sanitizedAssignee;
-				mutated = true;
-			}
-		}
-
-		const resolveLabelChanges = (): void => {
-			let currentLabels = [...(proposal.labels ?? [])];
-			if (input.labels !== undefined) {
-				const sanitizedLabels = normalizeStringList(input.labels) ?? [];
-				if (!stringArraysEqual(sanitizedLabels, currentLabels)) {
-					proposal.labels = sanitizedLabels;
-					mutated = true;
-				}
-				currentLabels = sanitizedLabels;
-			}
-
-			const labelsToAdd = normalizeStringList(input.addLabels) ?? [];
-			if (labelsToAdd.length > 0) {
-				const labelSet = new Set(
-					currentLabels.map((label) => label.toLowerCase()),
-				);
-				for (const label of labelsToAdd) {
-					if (!labelSet.has(label.toLowerCase())) {
-						currentLabels.push(label);
-						labelSet.add(label.toLowerCase());
-						mutated = true;
-					}
-				}
-				proposal.labels = currentLabels;
-			}
-
-			const labelsToRemove = normalizeStringList(input.removeLabels) ?? [];
-			if (labelsToRemove.length > 0) {
-				const removalSet = new Set(
-					labelsToRemove.map((label) => label.toLowerCase()),
-				);
-				const filtered = currentLabels.filter(
-					(label) => !removalSet.has(label.toLowerCase()),
-				);
-				if (!stringArraysEqual(filtered, currentLabels)) {
-					proposal.labels = filtered;
-					mutated = true;
-				}
-			}
-		};
-
-		resolveLabelChanges();
-
-		const resolveDependencies = async (): Promise<void> => {
-			let currentDependencies = [...(proposal.dependencies ?? [])];
-
-			if (input.dependencies !== undefined) {
-				const normalized = normalizeDependencies(input.dependencies);
-				const { valid, invalid } = await validateDependencies(normalized, this);
-				if (invalid.length > 0) {
-					throw new Error(
-						`The following dependencies do not exist: ${invalid.join(", ")}. Please create these proposals first or verify the IDs.`,
-					);
-				}
-				if (!stringArraysEqual(valid, currentDependencies)) {
-					currentDependencies = valid;
-					mutated = true;
-				}
-			}
-
-			if (input.addDependencies && input.addDependencies.length > 0) {
-				const additions = normalizeDependencies(input.addDependencies);
-				const { valid, invalid } = await validateDependencies(additions, this);
-				if (invalid.length > 0) {
-					throw new Error(
-						`The following dependencies do not exist: ${invalid.join(", ")}. Please create these proposals first or verify the IDs.`,
-					);
-				}
-				const depSet = new Set(currentDependencies);
-				for (const dep of valid) {
-					if (!depSet.has(dep)) {
-						currentDependencies.push(dep);
-						depSet.add(dep);
-						mutated = true;
-					}
-				}
-			}
-
-			if (input.removeDependencies && input.removeDependencies.length > 0) {
-				const removals = new Set(
-					normalizeDependencies(input.removeDependencies),
-				);
-				const filtered = currentDependencies.filter(
-					(dep) => !removals.has(dep),
-				);
-				if (!stringArraysEqual(filtered, currentDependencies)) {
-					currentDependencies = filtered;
-					mutated = true;
-				}
-			}
-
-			proposal.dependencies = currentDependencies;
-		};
-
-		await resolveDependencies();
-
-		const resolveReferences = (): void => {
-			let currentReferences = [...(proposal.references ?? [])];
-			if (input.references !== undefined) {
-				const sanitizedReferences = normalizeStringList(input.references) ?? [];
-				if (!stringArraysEqual(sanitizedReferences, currentReferences)) {
-					proposal.references = sanitizedReferences;
-					mutated = true;
-				}
-				currentReferences = sanitizedReferences;
-			}
-
-			const referencesToAdd = normalizeStringList(input.addReferences) ?? [];
-			if (referencesToAdd.length > 0) {
-				const refSet = new Set(currentReferences);
-				for (const ref of referencesToAdd) {
-					if (!refSet.has(ref)) {
-						currentReferences.push(ref);
-						refSet.add(ref);
-						mutated = true;
-					}
-				}
-				proposal.references = currentReferences;
-			}
-
-			const referencesToRemove =
-				normalizeStringList(input.removeReferences) ?? [];
-			if (referencesToRemove.length > 0) {
-				const removalSet = new Set(referencesToRemove);
-				const filtered = currentReferences.filter(
-					(ref) => !removalSet.has(ref),
-				);
-				if (!stringArraysEqual(filtered, currentReferences)) {
-					proposal.references = filtered;
-					mutated = true;
-				}
-			}
-		};
-
-		resolveReferences();
-
-		const resolveDocumentation = (): void => {
-			let currentDocumentation = [...(proposal.documentation ?? [])];
-			if (input.documentation !== undefined) {
-				const sanitizedDocumentation =
-					normalizeStringList(input.documentation) ?? [];
-				if (!stringArraysEqual(sanitizedDocumentation, currentDocumentation)) {
-					proposal.documentation = sanitizedDocumentation;
-					mutated = true;
-				}
-				currentDocumentation = sanitizedDocumentation;
-			}
-
-			const documentationToAdd =
-				normalizeStringList(input.addDocumentation) ?? [];
-			if (documentationToAdd.length > 0) {
-				const docSet = new Set(currentDocumentation);
-				for (const doc of documentationToAdd) {
-					if (!docSet.has(doc)) {
-						currentDocumentation.push(doc);
-						docSet.add(doc);
-						mutated = true;
-					}
-				}
-				proposal.documentation = currentDocumentation;
-			}
-
-			const documentationToRemove =
-				normalizeStringList(input.removeDocumentation) ?? [];
-			if (documentationToRemove.length > 0) {
-				const removalSet = new Set(documentationToRemove);
-				const filtered = currentDocumentation.filter(
-					(doc) => !removalSet.has(doc),
-				);
-				if (!stringArraysEqual(filtered, currentDocumentation)) {
-					proposal.documentation = filtered;
-					mutated = true;
-				}
-			}
-		};
-
-		resolveDocumentation();
-
-		const resolveRequires = (): void => {
-			let currentRequires = [...(proposal.requires ?? [])];
-			if (input.requires !== undefined) {
-				const sanitizedRequires = normalizeStringList(input.requires) ?? [];
-				if (!stringArraysEqual(sanitizedRequires, currentRequires)) {
-					proposal.requires = sanitizedRequires;
-					mutated = true;
-				}
-				currentRequires = sanitizedRequires;
-			}
-
-			const requiresToAdd = normalizeStringList(input.addRequires) ?? [];
-			if (requiresToAdd.length > 0) {
-				const reqSet = new Set(currentRequires);
-				for (const req of requiresToAdd) {
-					if (!reqSet.has(req)) {
-						currentRequires.push(req);
-						reqSet.add(req);
-						mutated = true;
-					}
-				}
-				proposal.requires = currentRequires;
-			}
-
-			if (input.clearRequires) {
-				if (currentRequires.length > 0) {
-					proposal.requires = [];
-					mutated = true;
-				}
-				currentRequires = [];
-			}
-
-			const requiresToRemove = input.removeRequires ?? [];
-			if (requiresToRemove.length > 0) {
-				const filtered = currentRequires.filter(
-					(_, idx) => !requiresToRemove.includes(idx + 1),
-				);
-				if (!stringArraysEqual(filtered, currentRequires)) {
-					proposal.requires = filtered;
-					mutated = true;
-				}
-			}
-		};
-
-		resolveRequires();
-
-		const sanitizeAppendInput = (values: string[] | undefined): string[] => {
-			if (!values) return [];
-			return values
-				.map((value) => String(value).trim())
-				.filter((value) => value.length > 0);
-		};
-
-		const appendBlock = (
-			existing: string | undefined,
-			additions: string[] | undefined,
-		): { value?: string; changed: boolean } => {
-			const sanitizedAdditions = (additions ?? [])
-				.map((value) => String(value).trim())
-				.filter((value) => value.length > 0);
-			if (sanitizedAdditions.length === 0) {
-				return { value: existing, changed: false };
-			}
-			const current = (existing ?? "").trim();
-			const additionBlock = sanitizedAdditions.join("\n\n");
-			if (current.length === 0) {
-				return { value: additionBlock, changed: true };
-			}
-			return { value: `${current}\n\n${additionBlock}`, changed: true };
-		};
-
-		if (input.clearImplementationPlan) {
-			if (proposal.implementationPlan !== undefined) {
-				delete proposal.implementationPlan;
-				mutated = true;
-			}
-		}
-
-		applyStringField(
-			input.implementationPlan,
-			proposal.implementationPlan,
-			(next) => {
-				proposal.implementationPlan = next;
-			},
-		);
-
-		const planAppends = sanitizeAppendInput(input.appendImplementationPlan);
-		if (planAppends.length > 0) {
-			const { value, changed } = appendBlock(
-				proposal.implementationPlan,
-				planAppends,
-			);
-			if (changed) {
-				proposal.implementationPlan = value;
-				mutated = true;
-			}
-		}
-
-		if (input.clearImplementationNotes) {
-			if (proposal.implementationNotes !== undefined) {
-				delete proposal.implementationNotes;
-				mutated = true;
-			}
-		}
-
-		applyStringField(
-			input.implementationNotes,
-			proposal.implementationNotes,
-			(next) => {
-				proposal.implementationNotes = next;
-			},
-		);
-
-		const notesAppends = sanitizeAppendInput(input.appendImplementationNotes);
-		if (notesAppends.length > 0) {
-			const { value, changed } = appendBlock(
-				proposal.implementationNotes,
-				notesAppends,
-			);
-			if (changed) {
-				proposal.implementationNotes = value;
-				mutated = true;
-			}
-		}
-
-		if (input.clearAuditNotes) {
-			if (proposal.auditNotes !== undefined) {
-				delete proposal.auditNotes;
-				mutated = true;
-			}
-		}
-
-		applyStringField(input.auditNotes, proposal.auditNotes, (next) => {
-			proposal.auditNotes = next;
-		});
-
-		const auditAppends = sanitizeAppendInput(input.appendAuditNotes);
-		if (auditAppends.length > 0) {
-			const { value, changed } = appendBlock(proposal.auditNotes, auditAppends);
-			if (changed) {
-				proposal.auditNotes = value;
-				mutated = true;
-			}
-		}
-
-		if (input.clearFinalSummary) {
-			if (proposal.finalSummary !== undefined) {
-				proposal.finalSummary = "";
-				mutated = true;
-			}
-		}
-
-		applyStringField(input.finalSummary, proposal.finalSummary, (next) => {
-			proposal.finalSummary = next;
-		});
-
-		const finalSummaryAppends = sanitizeAppendInput(input.appendFinalSummary);
-		if (finalSummaryAppends.length > 0) {
-			const { value, changed } = appendBlock(
-				proposal.finalSummary,
-				finalSummaryAppends,
-			);
-			if (changed) {
-				proposal.finalSummary = value;
-				mutated = true;
-			}
-		}
-
-		if (input.claim !== undefined) {
-			if (input.claim === null) {
-				if (proposal.claim !== undefined) {
-					proposal.claim = undefined;
-					mutated = true;
-				}
-			} else {
-				const current = JSON.stringify(proposal.claim);
-				const next = JSON.stringify(input.claim);
-				if (current !== next) {
-					proposal.claim = input.claim;
-					mutated = true;
-				}
-			}
-		}
-
-		let acceptanceCriteria = Array.isArray(proposal.acceptanceCriteriaItems)
-			? proposal.acceptanceCriteriaItems.map((criterion) => ({ ...criterion }))
-			: [];
-
-		const rebuildIndices = () => {
-			acceptanceCriteria = acceptanceCriteria.map((criterion, index) => ({
-				...criterion,
-				index: index + 1,
-			}));
-		};
-
-		if (input.acceptanceCriteria !== undefined) {
-			const sanitized = input.acceptanceCriteria
-				.map((criterion) => ({
-					text: String(criterion.text ?? "").trim(),
-					checked: Boolean(criterion.checked),
-				}))
-				.filter((criterion) => criterion.text.length > 0)
-				.map((criterion, index) => ({
-					index: index + 1,
-					text: criterion.text,
-					checked: criterion.checked,
-				}));
-			acceptanceCriteria = sanitized;
-			mutated = true;
-		}
-
-		if (input.addAcceptanceCriteria && input.addAcceptanceCriteria.length > 0) {
-			const additions = input.addAcceptanceCriteria
-				.map((criterion) =>
-					typeof criterion === "string"
-						? criterion.trim()
-						: String(criterion.text ?? "").trim(),
-				)
-				.filter((text) => text.length > 0);
-			let index =
-				acceptanceCriteria.length > 0
-					? Math.max(
-							...acceptanceCriteria.map((criterion) => criterion.index),
-						) + 1
-					: 1;
-			for (const text of additions) {
-				acceptanceCriteria.push({ index: index++, text, checked: false });
-				mutated = true;
-			}
-		}
-
-		if (
-			input.removeAcceptanceCriteria &&
-			input.removeAcceptanceCriteria.length > 0
-		) {
-			const removalSet = new Set(input.removeAcceptanceCriteria);
-			const beforeLength = acceptanceCriteria.length;
-			acceptanceCriteria = acceptanceCriteria.filter(
-				(criterion) => !removalSet.has(criterion.index),
-			);
-			if (acceptanceCriteria.length === beforeLength) {
-				throw new Error(
-					`Acceptance criterion ${Array.from(removalSet)
-						.map((index) => `#${index}`)
-						.join(", ")} not found`,
-				);
-			}
-			mutated = true;
-			rebuildIndices();
-		}
-
-		const toggleCriteria = (
-			indices: number[] | undefined,
-			checked: boolean,
-		) => {
-			if (!indices || indices.length === 0) return;
-			const missing: number[] = [];
-			for (const index of indices) {
-				const criterion = acceptanceCriteria.find(
-					(item) => item.index === index,
-				);
-				if (!criterion) {
-					missing.push(index);
-					continue;
-				}
-				if (criterion.checked !== checked) {
-					criterion.checked = checked;
-					mutated = true;
-				}
-			}
-			if (missing.length > 0) {
-				const label = missing.map((index) => `#${index}`).join(", ");
-				throw new Error(`Acceptance criterion ${label} not found`);
-			}
-		};
-
-		toggleCriteria(input.checkAcceptanceCriteria, true);
-		toggleCriteria(input.uncheckAcceptanceCriteria, false);
-
-		proposal.acceptanceCriteriaItems = acceptanceCriteria;
-
-		// Handle verificationProposalments
-		if (input.verificationProposalments !== undefined) {
-			if (
-				!stringArraysEqual(
-					(proposal.verificationProposalments ?? []).map((c) => c.text),
-					input.verificationProposalments.map((c) => c.text),
-				)
-			) {
-				proposal.verificationProposalments =
-					input.verificationProposalments.map((c, i) => ({
-						index: i + 1,
-						text: c.text,
-						checked: !!c.checked,
-						role: c.role,
-						evidence: c.evidence,
-					}));
-				mutated = true;
-			}
-		}
-
-		let verificationProposalments = proposal.verificationProposalments ?? [];
-		const rebuildVerificationIndices = (): void => {
-			verificationProposalments = verificationProposalments.map((c, i) => ({
-				...c,
-				index: i + 1,
-			}));
-		};
-
-		if (
-			input.addVerificationProposalments &&
-			input.addVerificationProposalments.length > 0
-		) {
-			const current = verificationProposalments;
-			let nextIndex =
-				current.length > 0 ? Math.max(...current.map((c) => c.index)) + 1 : 1;
-			for (const item of input.addVerificationProposalments) {
-				if (typeof item === "string") {
-					verificationProposalments.push({
-						text: item,
-						checked: false,
-						index: nextIndex++,
-					});
-				} else {
-					verificationProposalments.push({
-						text: item.text,
-						checked: !!item.checked,
-						role: item.role,
-						evidence: item.evidence,
-						index: nextIndex++,
-					});
-				}
-			}
-			mutated = true;
-		}
-
-		const toggleVerificationItems = (
-			indices: number[] | undefined,
-			checked: boolean,
-		): void => {
-			if (!indices || indices.length === 0) return;
-			const missing: number[] = [];
-			for (const index of indices) {
-				const criterion = verificationProposalments.find(
-					(item) => item.index === index,
-				);
-				if (!criterion) {
-					missing.push(index);
-					continue;
-				}
-				if (criterion.checked !== checked) {
-					criterion.checked = checked;
-					mutated = true;
-				}
-			}
-			if (missing.length > 0) {
-				const label = missing.map((index) => `#${index}`).join(", ");
-				throw new Error(`Verification proposalment ${label} not found`);
-			}
-		};
-
-		toggleVerificationItems(input.checkVerificationProposalments, true);
-		toggleVerificationItems(input.uncheckVerificationProposalments, false);
-
-		if (
-			input.removeVerificationProposalments &&
-			input.removeVerificationProposalments.length > 0
-		) {
-			const removalSet = new Set(input.removeVerificationProposalments);
-			const beforeLength = verificationProposalments.length;
-			verificationProposalments = verificationProposalments.filter(
-				(criterion) => !removalSet.has(criterion.index),
-			);
-			if (verificationProposalments.length === beforeLength) {
-				throw new Error(
-					`Verification proposalment ${Array.from(removalSet)
-						.map((index) => `#${index}`)
-						.join(", ")} not found`,
-				);
-			}
-			mutated = true;
-			rebuildVerificationIndices();
-		}
-
-		proposal.verificationProposalments = verificationProposalments;
-
-		// --- MATURITY VALIDATION (Final Gate) ---
-
-		// Handle maturity
-		if (input.maturity) {
-			const maturity = input.maturity.toLowerCase() as any;
-			if (proposal.maturity !== maturity) {
-				// Audit Transition Gate: Cannot move to audited without builder, auditor, and checked proposalments
-				if (maturity === "audited") {
-					if (!proposal.builder && !input.builder) {
-						throw new Error(
-							`Verification Gate: Proposal ${proposal.id} cannot be marked as 'audited' without a builder.`,
-						);
-					}
-					if (!proposal.auditor && !input.auditor) {
-						throw new Error(
-							`Verification Gate: Proposal ${proposal.id} cannot be marked as 'audited' without an auditor.`,
-						);
-					}
-
-					if (!proposal.auditNotes && !input.auditNotes) {
-						throw new Error(
-							`Verification Gate: Proposal ${proposal.id} cannot be marked as 'audited' without audit notes.`,
-						);
-					}
-
-					const currentAuditor = input.auditor || proposal.auditor;
-					const currentBuilder = input.builder || proposal.builder;
-					if (currentAuditor === currentBuilder) {
-						throw new Error(
-							`Verification Gate: Peer Audit requires distinct agents. Auditor '${currentAuditor}' cannot be the same as Builder '${currentBuilder}'.`,
-						);
-					}
-
-					const proposalments = proposal.verificationProposalments ?? [];
-					if (proposalments.length > 0) {
-						const unchecked = proposalments.filter((s) => !s.checked);
-						if (unchecked.length > 0) {
-							throw new Error(
-								`Verification Gate: Proposal ${proposal.id} has ${unchecked.length} unchecked verification proposalments. Peer audit must verify all assertions.`,
-							);
-						}
-					}
-				}
-				proposal.maturity = maturity;
-				mutated = true;
-			}
-		}
-
-		// Automatic maturity transition: skeleton -> contracted
-		// If ACs or Plan are added, move to contracted
-		if (proposal.maturity === "skeleton" || !proposal.maturity) {
-			const hasACs =
-				proposal.acceptanceCriteriaItems &&
-				proposal.acceptanceCriteriaItems.length > 0;
-			const hasProposalments =
-				proposal.verificationProposalments &&
-				proposal.verificationProposalments.length > 0;
-			const hasPlan = !!proposal.implementationPlan;
-
-			if (hasACs || hasPlan || hasProposalments) {
-				proposal.maturity = "contracted";
-				mutated = true;
-			}
-		}
-
-		return { proposal, mutated };
 	}
 
 	async updateProposalFromInput(
@@ -3498,70 +2595,7 @@ export class Core {
 		timeoutMinutes?: number;
 		autoCommit?: boolean;
 	}): Promise<string[]> {
-		if (await this.isPostgresProposalBackend()) {
-			await this.ensurePgPool();
-			const releasedProposalIds = await pg.releaseExpiredLeases();
-			const recoveredIds = (
-				await Promise.all(
-					releasedProposalIds.map(
-						async (proposalId) =>
-							(
-								await pg.getProposal(proposalId)
-							)?.display_id,
-					),
-				)
-			).filter((proposalId): proposalId is string => Boolean(proposalId));
-			return recoveredIds;
-		}
-
-		const config = await this.fs.loadConfig();
-		const timeout = options?.timeoutMinutes ?? config?.activeBranchDays ?? 30; // Fallback to activeBranchDays or 30
-		const now = new Date();
-		const recoveredIds: string[] = [];
-
-		const proposals = await this.queryProposals({ includeCrossBranch: false });
-		const claimedProposals = proposals.filter((s) => s.claim);
-
-		for (const proposal of claimedProposals) {
-			if (!proposal.claim) continue;
-
-			const lastHeartbeat = proposal.claim.lastHeartbeat
-				? new Date(proposal.claim.lastHeartbeat.replace(" ", "T"))
-				: new Date(proposal.claim.created.replace(" ", "T"));
-
-			const diffMinutes = (now.getTime() - lastHeartbeat.getTime()) / 60000;
-
-			if (diffMinutes > timeout) {
-				await this.releaseClaim(proposal.id, proposal.claim.agent, {
-					force: true,
-					autoCommit: false,
-				});
-				recoveredIds.push(proposal.id);
-
-				await this.recordPulse({
-					type: "proposal_created",
-					id: proposal.id,
-					title: proposal.title,
-					impact: `STALE LEASE RECOVERED: Agent ${proposal.claim.agent} missed heartbeat for ${Math.round(
-						diffMinutes,
-					)} minutes.`,
-				});
-			}
-		}
-
-		if (
-			recoveredIds.length > 0 &&
-			(await this.shouldAutoCommit(options?.autoCommit))
-		) {
-			const roadmapDir = await this.getRoadmapDirectoryName();
-			const repoRoot = await this.git.stageRoadmapDirectory(roadmapDir);
-			await this.git.commitChanges(
-				`roadmap: Recovered ${recoveredIds.length} stale leases: ${recoveredIds.join(", ")}`,
-				repoRoot,
-			);
-		}
-
-		return recoveredIds;
+		return this._claims.pruneClaims(options);
 	}
 
 	async updateProposalsBulk(
@@ -3600,202 +2634,15 @@ export class Core {
 			autoCommit?: boolean;
 		},
 	): Promise<Proposal> {
-		if (await this.isPostgresProposalBackend()) {
-			const proposal = await this.loadPgProposalById(proposalId);
-			if (!proposal) {
-				throw new Error(`Proposal not found: ${proposalId}`);
-			}
-
-			if (!options?.force) {
-				const priority = proposal.priority ?? "medium";
-				const rateLimiter = this.getRateLimiter();
-				const check = rateLimiter.canClaim(agent, proposal.id, priority);
-
-				if (!check.allowed) {
-					throw new Error(
-						check.reason ??
-							`Rate limited: too many claims. Retry after ${check.retryAfter}.`,
-					);
-				}
-
-				rateLimiter.recordClaim(agent, proposal.id, priority);
-			}
-
-			await this.ensurePgPool();
-			const resolvedProposalId = await pg.resolveProposalId(proposalId);
-			if (resolvedProposalId === null) {
-				throw new Error(`Proposal not found: ${proposalId}`);
-			}
-
-			const currentSummary = await pg.getProposalSummary(resolvedProposalId);
-			const activeLeaseHeld =
-				Boolean(currentSummary?.leased_by) &&
-				(currentSummary?.lease_expires === null ||
-					currentSummary?.lease_expires === undefined ||
-					new Date(currentSummary.lease_expires) > new Date());
-			const expiresAt = new Date(
-				Date.now() +
-					(options?.durationMinutes ?? DEFAULT_CLAIM_DURATION_MINUTES) *
-						60 *
-						1000,
-			);
-
-			if (!activeLeaseHeld && currentSummary?.leased_by) {
-				// P934: legacy 'expired' replaced with canonical 'lease_expired'.
-				await pg.releaseLease(
-					resolvedProposalId,
-					currentSummary.leased_by,
-					"lease_expired",
-				);
-			}
-
-			if (
-				activeLeaseHeld &&
-				currentSummary?.leased_by &&
-				currentSummary.leased_by !== agent
-			) {
-				if (!options?.force) {
-					throw new Error(
-						`Proposal ${proposalId} is already claimed by ${currentSummary.leased_by}${currentSummary.lease_expires ? ` until ${currentSummary.lease_expires.toISOString()}` : ""}`,
-					);
-				}
-				await pg.releaseLease(
-					resolvedProposalId,
-					currentSummary.leased_by,
-					"reassigned",
-				);
-			}
-
-			if (activeLeaseHeld && currentSummary?.leased_by === agent) {
-				await pg.renewLease(resolvedProposalId, agent, expiresAt);
-			} else {
-				const claimed = await pg.claimLease(
-					resolvedProposalId,
-					agent,
-					expiresAt,
-				);
-				if (!claimed) {
-					throw new Error(`Proposal ${proposalId} could not be claimed.`);
-				}
-			}
-
-			const refreshed = await this.loadPgProposalById(proposalId);
-			if (!refreshed) {
-				throw new Error(`Proposal not found after claim: ${proposalId}`);
-			}
-
-			await this.recordPulse({
-				type: "proposal_claimed",
-				id: refreshed.id,
-				title: refreshed.title,
-				agent,
-			});
-
-			return refreshed;
-		}
-
-		// Check budget before claiming (unless force=true)
-		if (!options?.force) {
-			const proposal = await this.fs.loadProposal(proposalId);
-
-			// Budget guard: check if proposal has a budget limit and agent can afford it
-			if (proposal?.budgetLimitUsd && proposal.budgetLimitUsd > 0) {
-				const budgetConfig = await this.loadBudgetConfig();
-				if (budgetConfig) {
-					const agentBudget = budgetConfig.agents?.[agent];
-					if (agentBudget?.isFrozen) {
-						throw new Error(`Budget: Agent '${agent}' spending is frozen`);
-					}
-					if (agentBudget && agentBudget.dailyLimitUsd > 0) {
-						const remaining =
-							agentBudget.dailyLimitUsd - agentBudget.totalSpentTodayUsd;
-						if (proposal.budgetLimitUsd > remaining) {
-							throw new Error(
-								`Budget exceeded for '${agent}': $${agentBudget.totalSpentTodayUsd.toFixed(2)} spent of $${agentBudget.dailyLimitUsd.toFixed(2)} daily limit (need $${proposal.budgetLimitUsd.toFixed(2)})`,
-							);
-						}
-					}
-				}
-			}
-
-			// STATE-44: Check rate limit before claiming
-			const priority = proposal?.priority ?? "medium";
-			const rateLimiter = this.getRateLimiter();
-			const check = rateLimiter.canClaim(agent, proposalId, priority);
-
-			if (!check.allowed) {
-				throw new Error(
-					check.reason ??
-						`Rate limited: too many claims. Retry after ${check.retryAfter}.`,
-				);
-			}
-
-			// Record the claim for rate limiting
-			rateLimiter.recordClaim(agent, proposalId, priority);
-		}
-
-		return await FileLock.withLock(
-			this.fs.rootDir,
-			"coordination",
-			async () => await this.executeClaimProposal(proposalId, agent, options),
-		);
+		return this._claims.claimProposal(proposalId, agent, options);
 	}
 
-	/**
-	 * Internal claim logic without lock acquisition (must be called within a lock).
-	 */
-	private async executeClaimProposal(
-		proposalId: string,
-		agent: string,
-		options?: {
-			durationMinutes?: number;
-			message?: string;
-			force?: boolean;
-			autoCommit?: boolean;
-		},
-	): Promise<Proposal> {
-		const proposal = await this.fs.loadProposal(proposalId);
-		if (!proposal) throw new Error(`Proposal not found: ${proposalId}`);
-
-		const now = new Date();
-		if (!options?.force && proposal.claim && proposal.claim.agent !== agent) {
-			const expires = new Date(proposal.claim.expires.replace(" ", "T"));
-			if (expires > now) {
-				throw new Error(
-					`Proposal ${proposalId} is already claimed by ${proposal.claim.agent} until ${proposal.claim.expires}`,
-				);
-			}
-		}
-
-		const duration = options?.durationMinutes || DEFAULT_CLAIM_DURATION_MINUTES;
-		const expiresAt = new Date(now.getTime() + duration * 60000);
-
-		const claim: ProposalClaim = {
-			agent,
-			created: formatLocalDateTime(now),
-			expires: formatLocalDateTime(expiresAt),
-			lastHeartbeat: formatLocalDateTime(now),
-			message: options?.message,
-		};
-
-		return await this.updateProposalFromInput(
-			proposalId,
-			{
-				claim,
-				assignee: [agent],
-			},
-			options?.autoCommit,
-		);
-	}
 	/**
 	 * Release a claim on a proposal.
 	 * Throws if the claim is held by another agent unless force is used.
 	 *
 	 * P934: `releaseReason` MUST be a canonical caller-facing reason from
-	 * `src/core/proposal/release-reasons.ts`. When unspecified AND `force`
-	 * is set, defaults to `"force_reclaimed"` (the operator-took-back
-	 * intent). Otherwise the underlying `pg.releaseLease` call rejects
-	 * with InvalidReleaseReasonError.
+	 * `src/core/proposal/release-reasons.ts`.
 	 */
 	async releaseClaim(
 		proposalId: string,
@@ -3806,69 +2653,7 @@ export class Core {
 			releaseReason?: string;
 		},
 	): Promise<Proposal> {
-		if (await this.isPostgresProposalBackend()) {
-			const proposal = await this.loadPgProposalById(proposalId);
-			if (!proposal) throw new Error(`Proposal not found: ${proposalId}`);
-
-			const resolvedProposalId = await pg.resolveProposalId(proposalId);
-			if (resolvedProposalId === null) {
-				throw new Error(`Proposal not found: ${proposalId}`);
-			}
-
-			const summary = await pg.getProposalSummary(resolvedProposalId);
-			const activeLeaseHeld =
-				Boolean(summary?.leased_by) &&
-				(summary?.lease_expires === null ||
-					summary?.lease_expires === undefined ||
-					new Date(summary.lease_expires) > new Date());
-			if (!activeLeaseHeld || !summary?.leased_by) {
-				return proposal;
-			}
-
-			if (!options?.force && summary.leased_by !== agent) {
-				throw new Error(
-					`Proposal ${proposalId} claim is held by ${summary.leased_by}, not ${agent}`,
-				);
-			}
-
-			// P934: caller-supplied releaseReason takes precedence; otherwise map
-			// from the existing semantic. Force mode → 'force_reclaimed' (admin
-			// reclaimed, incomplete bucket). Plain release → require explicit reason
-			// from the caller (default 'manual_release' as a safe-but-explicit value
-			// that matches the prior 'released' behavior of demoting to maturity='new').
-			const releaseReason =
-				options?.releaseReason ??
-				(options?.force ? "force_reclaimed" : "manual_release");
-			const released = await pg.releaseLease(
-				resolvedProposalId,
-				options?.force ? summary.leased_by : agent,
-				releaseReason,
-			);
-			if (!released) {
-				throw new Error(`Proposal ${proposalId} claim could not be released.`);
-			}
-
-			return (await this.loadPgProposalById(proposalId)) ?? proposal;
-		}
-
-		const proposal = await this.fs.loadProposal(proposalId);
-		if (!proposal) throw new Error(`Proposal not found: ${proposalId}`);
-
-		if (!proposal.claim) {
-			return proposal;
-		}
-
-		if (!options?.force && proposal.claim.agent !== agent) {
-			throw new Error(
-				`Proposal ${proposalId} claim is held by ${proposal.claim.agent}, not ${agent}`,
-			);
-		}
-
-		return await this.updateProposalFromInput(
-			proposalId,
-			{ claim: null },
-			options?.autoCommit,
-		);
+		return this._claims.releaseClaim(proposalId, agent, options);
 	}
 
 	/**
@@ -3879,73 +2664,7 @@ export class Core {
 		agent: string,
 		options?: { durationMinutes?: number; autoCommit?: boolean },
 	): Promise<Proposal> {
-		if (await this.isPostgresProposalBackend()) {
-			const proposal = await this.loadPgProposalById(proposalId);
-			if (!proposal) throw new Error(`Proposal not found: ${proposalId}`);
-
-			const resolvedProposalId = await pg.resolveProposalId(proposalId);
-			if (resolvedProposalId === null) {
-				throw new Error(`Proposal not found: ${proposalId}`);
-			}
-
-			const summary = await pg.getProposalSummary(resolvedProposalId);
-			const activeLeaseHeld =
-				Boolean(summary?.leased_by) &&
-				(summary?.lease_expires === null ||
-					summary?.lease_expires === undefined ||
-					new Date(summary.lease_expires) > new Date());
-			if (!activeLeaseHeld || !summary?.leased_by) {
-				throw new Error(`Proposal ${proposalId} has no active claim to renew`);
-			}
-			if (summary.leased_by !== agent) {
-				throw new Error(
-					`Proposal ${proposalId} claim is held by ${summary.leased_by}, not ${agent}`,
-				);
-			}
-
-			const renewed = await pg.renewLease(
-				resolvedProposalId,
-				agent,
-				new Date(
-					Date.now() +
-						(options?.durationMinutes || DEFAULT_CLAIM_DURATION_MINUTES) *
-							60000,
-				),
-			);
-			if (!renewed) {
-				throw new Error(`Proposal ${proposalId} claim could not be renewed.`);
-			}
-
-			return (await this.loadPgProposalById(proposalId)) ?? proposal;
-		}
-
-		const proposal = await this.fs.loadProposal(proposalId);
-		if (!proposal) throw new Error(`Proposal not found: ${proposalId}`);
-
-		if (!proposal.claim) {
-			throw new Error(`Proposal ${proposalId} has no active claim to renew`);
-		}
-
-		if (proposal.claim.agent !== agent) {
-			throw new Error(
-				`Proposal ${proposalId} claim is held by ${proposal.claim.agent}, not ${agent}`,
-			);
-		}
-
-		const now = new Date();
-		const duration = options?.durationMinutes || DEFAULT_CLAIM_DURATION_MINUTES;
-		const expiresAt = new Date(now.getTime() + duration * 60000);
-
-		const claim: ProposalClaim = {
-			...proposal.claim,
-			expires: formatLocalDateTime(expiresAt),
-			lastHeartbeat: formatLocalDateTime(now),
-		};
-		return await this.updateProposalFromInput(
-			proposalId,
-			{ claim },
-			options?.autoCommit,
-		);
+		return this._claims.renewClaim(proposalId, agent, options);
 	}
 
 	async reorderProposal(params: {
@@ -4507,7 +3226,24 @@ export class Core {
 		decision: Decision,
 		autoCommit?: boolean,
 	): Promise<void> {
-		return decisionsCreate(this._decisionDeps(), decision, autoCommit);
+		await this.fs.saveDecision(decision);
+
+		// Record Pulse event
+		await this.recordPulse({
+			type: "decision_made",
+			id: decision.id,
+			title: decision.title,
+			impact: `Status: ${decision.status}`,
+		});
+
+		if (await this.shouldAutoCommit(autoCommit)) {
+			const roadmapDir = await this.getRoadmapDirectoryName();
+			const repoRoot = await this.git.stageRoadmapDirectory(roadmapDir);
+			await this.git.commitChanges(
+				`roadmap: Add decision ${decision.id}`,
+				repoRoot,
+			);
+		}
 	}
 
 	async updateDecisionFromContent(
@@ -4515,32 +3251,44 @@ export class Core {
 		content: string,
 		autoCommit?: boolean,
 	): Promise<void> {
-		return decisionsUpdateFromContent(
-			this._decisionDeps(),
-			decisionId,
-			content,
-			autoCommit,
-		);
-	}
+		const existingDecision = await this.fs.loadDecision(decisionId);
+		if (!existingDecision) {
+			throw new Error(`Decision ${decisionId} not found`);
+		}
 
-	private _decisionDeps() {
-		return {
-			saveDecision: (d: Decision) => this.fs.saveDecision(d),
-			loadDecision: (id: string) => this.fs.loadDecision(id),
-			recordPulse: (event: {
-				type: string;
-				id: string;
-				title: string;
-				impact: string;
-			}) => this.recordPulse(event),
-			commitIfNeeded: async (message: string, autoCommit?: boolean) => {
-				if (await this.shouldAutoCommit(autoCommit)) {
-					const roadmapDir = await this.getRoadmapDirectoryName();
-					const repoRoot = await this.git.stageRoadmapDirectory(roadmapDir);
-					await this.git.commitChanges(message, repoRoot);
-				}
-			},
+		// Parse the markdown content to extract the decision data
+		const matter = await import("gray-matter");
+		const { data } = matter.default(content);
+
+		const extractSection = (
+			content: string,
+			sectionName: string,
+		): string | undefined => {
+			const regex = new RegExp(
+				`## ${sectionName}\\s*([\\s\\S]*?)(?=## |$)`,
+				"i",
+			);
+			const match = content.match(regex);
+			return match ? match[1]?.trim() : undefined;
 		};
+
+		const updatedDecision = {
+			...existingDecision,
+			title: data.title || existingDecision.title,
+			status: data.status || existingDecision.status,
+			date: data.date || existingDecision.date,
+			context: extractSection(content, "Context") || existingDecision.context,
+			decision:
+				extractSection(content, "Decision") || existingDecision.decision,
+			consequences:
+				extractSection(content, "Consequences") ||
+				existingDecision.consequences,
+			alternatives:
+				extractSection(content, "Alternatives") ||
+				existingDecision.alternatives,
+		};
+
+		await this.createDecision(updatedDecision, autoCommit);
 	}
 
 	async createDecisionWithTitle(
@@ -5213,6 +3961,14 @@ export class Core {
 		const pulsePath = join(this.fs.rootDir, "roadmap", "pulse.log");
 		const line = `${JSON.stringify(event)}\n`;
 		fs.appendFileSync(pulsePath, line);
+	}
+
+	/** Add timestamp and emit a pulse event (alias used by extracted modules). */
+	async recordPulse(event: Omit<PulseEvent, "timestamp">): Promise<void> {
+		await this.emitPulse({
+			...event,
+			timestamp: new Date().toISOString().slice(0, 19).replace("T", " "),
+		});
 	}
 
 	/**

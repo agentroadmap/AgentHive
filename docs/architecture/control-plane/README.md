@@ -71,7 +71,7 @@ P429 (parent component)
 
 1. **Foundation** — P430, P431 (boundary classification + control DB creation)
 2. **Schema cleanup** — P436 (reconciliation), P446 (MCP reliability)
-3. **Project isolation** — P432 (per-project DBs + PoolManager extending P300)
+3. **Project isolation** — P432 (per-project DBs + PoolManager; extends the early multi-project design, now superseded by P429/P483)
 4. **Dispatch hardening core** — P433, P437, P438, P439, P440 (dedupe, idempotency, fail-closed, ceilings, retry)
 5. **Provider plane** — P434, P444 (provider accounts, routes, budgets, host separation)
 6. **Service topology** — P441 (one owner per responsibility)

@@ -1,12 +1,175 @@
-# 🗺️ AgentHive Roadmap
+# AgentHive Roadmap
 
-> Generated: 2026-06-17 | Source: Postgres `agenthive` | 569 proposals
+> Generated: 2026-06-16 13:00 EDT | Source: Postgres `agenthive` | 760 total proposals (569 active, 191 obsolete)
 
-> **How to regenerate:** Run the query in `docs/pillars/1-proposal/product-roadmap.md` footer against the live DB.
+## How to Regenerate
 
+Run against the live DB to refresh this file:
 
-## ✅ COMPLETE (546)
+```sql
+-- Summary by state + maturity (non-obsolete)
+SELECT status, maturity, COUNT(*) AS count
+FROM roadmap.proposal
+WHERE maturity != 'obsolete'
+GROUP BY status, maturity
+ORDER BY status, maturity;
 
+-- Active proposals (not obsolete, not COMPLETE) for the detailed sections below
+SELECT display_id, title, status, maturity
+FROM roadmap.proposal
+WHERE status != 'COMPLETE' AND maturity != 'obsolete'
+ORDER BY status, display_id;
+```
+
+Connection: `postgresql://admin:<PGPASSWORD>@127.0.0.1:5432/agenthive`
+
+---
+
+## Summary (non-obsolete)
+
+| State | Count | Notes |
+|-------|-------|-------|
+| ✅ COMPLETE | 547 | 155 mature, 392 new |
+| 🔀 MERGE | 1 | In integration |
+| 🔨 DEVELOP | 7 | 4 mature (code-ready to gate), 3 new |
+| 🔍 REVIEW | 1 | 1 mature (awaiting gate decision) |
+| 📝 DRAFT | 13 | 2 active, 9 mature, 2 new |
+| ⚪ Obsolete | 191 | Across all states — superseded or invalidated |
+| **Total** | **760** | |
+
+---
+
+## 🔀 MERGE (1)
+
+| ID | Title | Maturity |
+|----|-------|---------|
+| P1441 | V3-C9: Rollout step 1 — claude-gary-bot single agency, 1→N workers (e2e gate) | new |
+
+---
+
+## 🔨 DEVELOP (7 active)
+
+| ID | Title | Maturity |
+|----|-------|---------|
+| P1391 | Lease lifecycle as TTL + first-class hold/reject verdict wiring | mature |
+| P3535 | Decouple maturity lifecycle from lease occupancy — monotonic progress + lease-based exclusive claim | mature |
+| P3566 | Gate-advance authorization integrity (non-terminal gates): independent reviewer, blocking-review respected, no review-only bypass | mature |
+| P477 | Web control-plane redesign for multi-project AgentHive operations | mature |
+| P1024 | Pillar 8: Web and Operator Experience — Dashboard, Operator CLI, TUI Board, Activity Feed, Discord Bridge | new |
+| P1442 | V3-C10: Rollout steps 2-4 — multi-agency, multi-OS-user, multi-host | new |
+| P2326 | Ad-hoc A2A task bucket (sentinel proposal for no-proposal task_requests) | new |
+
+---
+
+## 🔍 REVIEW (1 active)
+
+| ID | Title | Maturity |
+|----|-------|---------|
+| P3564 | Board pg pool doesn't survive a Postgres restart — route queries via pgbouncer + auto-heal pool | mature |
+
+---
+
+## 📝 DRAFT (13 active)
+
+| ID | Title | Maturity |
+|----|-------|---------|
+| P3563 | Acceptance loop must have ground truth: independent, evidenced, non-vacuous AC verification as a hard gate invariant | mature |
+| P3565 | Intake triage + risk-tiering: proposals opt-IN to autonomy, high-blast-radius work requires human approval | mature |
+| P3781 | Configuration Management: categorize runtime_flag, web config UI, and hardcoded-constant migration | mature |
+| P3782 | Config taxonomy: add category to runtime_flag schema + ConfigKey registry + set() schema reconciliation, backfill existing keys | mature |
+| P3784 | Config introspection API: list all config keys with category, value, default, scope, editability | mature |
+| P3785 | Web config interface: category-grouped browse + audited inline edit in dashboard | mature |
+| P3787 | Hardcoded-constant migration: inventory + move high-value core/infra literals into categorized runtime flags | mature |
+| P3793 | Codebase Gap Analysis: architecture, implementation, operational, and governance gaps | mature |
+| P3794 | CI: SIGTERM regression test suite for long-running services | new |
+| P3795 | Hard routing gate on provider health — block dispatch to unhealthy providers | new |
+| P3796 | Monolith decomposition plan: roadmap.ts (6191 lines) and server/index.ts (6761 lines) | new |
+| P3797 | Wire agenthive-scan-* rule packs as required CI gates in .gitlab-ci.yml | new |
+| P3798 | Docs update sweep: stale proposal references, V2 architecture, CLI migration | active |
+
+---
+
+## ✅ COMPLETE (547 active, 49 obsolete)
+
+547 proposals are in COMPLETE state. Full listing is available via MCP or direct DB query:
+
+```sql
+SELECT display_id, title
+FROM roadmap.proposal
+WHERE status = 'COMPLETE' AND maturity != 'obsolete'
+ORDER BY id DESC
+LIMIT 50;
+```
+
+**Most recently completed (top-20 by proposal ID):**
+
+| ID | Title |
+|----|-------|
+| P3566 | Gate-advance authorization integrity (non-terminal gates) |
+| P3508 | Multi-project access control — project-creation ACLs + token/route scoping |
+| P3326 | gate_decision D2 advance target + prop_transition validator |
+| P1107 | Wire AC-8 CI gates — mcp-bundle + message-drift + migration-continuity |
+| P1071 | Close unclosed it() block in AC-4 self-parent test |
+| P477 | Web control-plane redesign (partially — routing layer complete) |
+| P3198 | SIGTERM clean-exit handler for long-running services |
+| P2496 | Retract-on-terminal-state trigger |
+| P1144 | Orchestrator dead-const cleanup |
+| P893 | System-init deploy scripts |
+| P3310 | Difficulty signal for adaptive work-model matching |
+| P3311 | Beta-Bernoulli reliability ledger |
+| P3312 | Unified matcher shadow-wiring |
+| P3313 | Closed feedback loop for adaptive matching |
+| P1376 | Agency-aware cooldown filter + throttle resolver |
+| P1356 | Agent personality migration |
+| P1375 | Workforce state machine visualization |
+| P1352 | Multi-project cross-reference schema |
+| P906 | Gate bypass removal + fn_guard_gate_advance hardening |
+| P1124 | MCP tool clearance improvements |
+
+*For complete history, query `roadmap.proposal WHERE status = 'COMPLETE' ORDER BY id DESC`.*
+
+---
+
+**Stats:** 760 total | 547 COMPLETE | 1 MERGE | 7 DEVELOP | 1 REVIEW | 13 DRAFT | 191 obsolete
+**Note:** This file is generated from Postgres `agenthive`. See "How to Regenerate" above.
+> Generated: 2026-06-17 05:01 UTC | Source: Postgres `agenthive` | 574 proposals (excluding obsolete)
+
+## Status Summary
+
+| State | Count |
+|-------|-------|
+| COMPLETE | 544 |
+| DEVELOP | 18 |
+| DRAFT | 10 |
+| MERGE | 1 |
+| REVIEW | 1 |
+| **Total (non-obsolete)** | **574** |
+
+Proposals marked `obsolete` maturity are excluded from this count. To include them, remove the `maturity != 'obsolete'` filter from the regeneration query.
+
+**Note on formerly-referenced proposals now obsolete:**
+- **P300** (Multi-Project Registry v1) — superseded by P429/P483/P495. Do not depend on P300; use P483 and the hiveCentral tenant-DB design.
+- **P482** (Project Registry) — superseded by P483 (project lifecycle operations) and P495 (per-project tenant DB). References in older docs should point to P483.
+- **P674** (Notification Router) — obsolete. The notification architecture was absorbed into the A2A messaging layer (P907/P1132).
+
+## Active High-Priority Proposals
+
+The following proposals are the most impactful currently in-flight work:
+
+| ID | State | Title |
+|----|-------|-------|
+| P3796 | DEVELOP | Monolith decomposition: roadmap.ts (6 191 lines) / server/index.ts (6 761 lines) |
+| P3566 | DEVELOP | Gate-advance authorization integrity (reviewer independence) |
+| P3535 | DEVELOP | Decouple maturity lifecycle from lease occupancy |
+| P1391 | DEVELOP | Lease lifecycle as TTL + first-class hold/reject verdict wiring |
+| P3781 | DEVELOP | Configuration Management: runtime_flag categorization + web UI |
+| P3840 | DEVELOP | Unified orchestrator job-posting pool |
+| P3793 | DEVELOP | Codebase Gap Analysis (see `docs/architecture/gap-analysis-2026-06.md`) |
+| P3563 | DRAFT | Acceptance loop ground-truth: independent, evidenced, non-vacuous AC verification |
+
+For a full gap assessment, see `docs/architecture/gap-analysis-2026-06.md` (P3793). That analysis identified documentation drift, config-management layer gaps, and CLI migration status as priority areas.
+
+## COMPLETE (544)
 | ID | Title | AC |
 |----|-------|----|
 | P044 | agentRoadmap — Autonomous AI Agent-Native Product Development Platform | 0/17 |
@@ -31,39 +194,39 @@
 | P065 | MCP Server & Tool Surface | 0/8 |
 | P066 | Web Dashboard & TUI Board | 17/17 |
 | P067 | Document, Note & Messaging System | 0/18 |
-| P069 | roadmap board hangs indefinitely on "Loading roadmap data from Postgres..." | — |
+| P069 | roadmap board hangs indefinitely on "Loading roadmap data from Postgres..." | 0/0 |
 | P070 | pool.ts ignores .env.agent — board hangs silently in worktree context | 5/5 |
-| P071 | Migrations 007 & 008 grant public schema — all agents denied on roadmap schema | — |
+| P071 | Migrations 007 & 008 grant public schema — all agents denied on roadmap schema | 0/0 |
 | P072 | fn_set_updated_at trigger fails on proposal_type_config (column is modified_at) | 3/3 |
 | P073 | No seed data for model_metadata — multi-LLM router blind at startup | 4/4 |
-| P074 | workflow_load_builtin populates workflow_stages but prop_transition reads proposal_valid_transitions — all transitions blocked | — |
+| P074 | workflow_load_builtin populates workflow_stages but prop_transition reads proposal_valid_transitions — all transitions blocked | 0/0 |
 | P075 | agent_register MCP tool crashes on comma-separated skills — missing ::jsonb cast | 3/3 |
-| P076 | transitionProposal() FK violation when transitioned_by agent not yet registered | — |
-| P077 | proposal.maturity never updated on status transitions — always shows {"Draft":"New"} | — |
+| P076 | transitionProposal() FK violation when transitioned_by agent not yet registered | 0/0 |
+| P077 | proposal.maturity never updated on status transitions — always shows {"Draft":"New"} | 0/0 |
 | P078 | Directive Lifecycle & Escalation Management | 0/12 |
 | P079 | Federation sync conflicts with cross-branch DAG proposal resolution in src/core/dag/cross-branch-proposals.ts | 0/8 |
 | P080 | P044 gap: No cryptographic agent identity — string-handle impersonation risk in federated deployments | 22/22 |
 | P081 | P044 gap: No SLA or availability contract defined for the platform | 23/24 |
 | P082 | DAG cycle detected: P048→P045 dependency path already exists | 0/5 |
-| P086 | Rename proposal.maturity_state and dependency in live Postgres schema | — |
+| P086 | Rename proposal.maturity_state and dependency in live Postgres schema | 0/0 |
 | P089 | Review the schema and define early cross-domain data architecture improvements | 6/6 |
 | P090 | Token Efficiency — Three-Tier Cost Reduction Architecture | 1/5 |
-| P091 | P068 naming discrepancy: MCP lists as Web Dashboard but roadmap shows as Risk Alert & Mitigation | — |
+| P091 | P068 naming discrepancy: MCP lists as Web Dashboard but roadmap shows as Risk Alert & Mitigation | 0/0 |
 | P143 | CLI help text lists wrong proposal types and maturity values | 6/6 |
 | P144 | CLI proposal create fails: type case mismatch between CLI and DB | 2/5 |
-| P146 | Fix conflicting SQL migration file numbering | — |
+| P146 | Fix conflicting SQL migration file numbering | 0/0 |
 | P148 | Auto-merge worktree changes to main and sync back to agents | 5/5 |
 | P149 | Channel subscription and push notifications for MCP messaging | 647/647 |
 | P150 | prop_update bypasses Decision Gate — no D1 gate decision recorded when transitioning DRAFT → REVIEW | 5/5 |
-| P153 | Issue proposals created in RFC workflow (Draft) instead of Quick Fix (TRIAGE) | — |
+| P153 | Issue proposals created in RFC workflow (Draft) instead of Quick Fix (TRIAGE) | 0/0 |
 | P154 | roadmap board TUI hangs after loading Postgres data | 0/3 |
-| P155 | roadmap overview is reading the wrong database or schema | — |
+| P155 | roadmap overview is reading the wrong database or schema | 0/0 |
 | P156 | add_acceptance_criteria splits text into individual characters instead of storing as single AC | 8/8 |
 | P157 | verify_ac returns 'undefined' values instead of AC details | 8/8 |
 | P158 | list_ac returns 600+ items when add_acceptance_criteria splits by character | 4/4 |
 | P159 | agent-identity.ts not wired to agent_registry — public_key columns exist but are never populated | 10/10 |
 | P160 | CORRECTED: 2 dead files in dashboard-web — SearchResultsPage + Settings.tsx (was: 13 unimplemented stubs) | 0/1 |
-| P161 | Duplicate scripts in worktree — seed-proposals, cli, ws-bridge variants | — |
+| P161 | Duplicate scripts in worktree — seed-proposals, cli, ws-bridge variants | 0/0 |
 | P162 | CLI proposal list should group by proposal type then show states in natural workflow order | 0/701 |
 | P163 | Effective blocking protocol — mature proposals don't block downstream work | 733/733 |
 | P164 | Briefing assembler — complete context in one query before LLM decisions | 826/826 |
@@ -80,12 +243,12 @@
 | P182 | Agent governance: no team-level governance layer — only individual and society | 9/9 |
 | P183 | Agent onboarding document — read this before your first lease | 0/3 |
 | P185 | Governance memory — decisions and rationale preserved across sessions | 3/3 |
-| P186 | discord-bridge.ts destroyed by commit 73a505c — replaced full implementation with template | — |
+| P186 | discord-bridge.ts destroyed by commit 73a505c — replaced full implementation with template | 0/0 |
 | P187 | Reference Catalog System — unified controlled vocabulary for all proposals, workflow states, and domain values | 8/8 |
 | P188 | Directive Proposal Type — human-issued commands with elevated priority and conflict detection | 17/18 |
-| P189 | P090 semantic cache table exists but no code populates or reads it — zero cache hits | — |
+| P189 | P090 semantic cache table exists but no code populates or reads it — zero cache hits | 0/0 |
 | P191 | Daily Efficiency Views and Combined Metrics Dashboard | 8/8 |
-| P192 | AC corruption bug: multi-character criteria split into individual characters | — |
+| P192 | AC corruption bug: multi-character criteria split into individual characters | 0/0 |
 | P193 | Cubic Lifecycle Management — concurrency limits, automatic cleanup, and recycling | 0/8 |
 | P194 | Project and agent memory from queue, liaison, and transition events | 8/8 |
 | P195 | Enhanced Token Tracking with Per-Proposal Accounting and Budget Circuit Breaker | 0/8 |
@@ -100,7 +263,7 @@
 | P210 | Crash Recovery & Automatic Handover Protocol | 9/16 |
 | P221 | Discord Bridge — A2A Integration & Production Service | 10/10 |
 | P222 | SMDL workflow registry - queue definitions, transitions, and gate role policy | 18/33 |
-| P224 | State transitions require active lease to prevent duplicate gating | — |
+| P224 | State transitions require active lease to prevent duplicate gating | 0/0 |
 | P225 | Tool agents: autonomous mechanical workers with LLM escalation | 0/9 |
 | P226 | Tiered model routing with frontier oversight via queue-role policy | 6/10 |
 | P228 | Cubic Runtime Abstraction — multi-CLI, host auth, cross-host A2A | 15/15 |
@@ -117,31 +280,31 @@
 | P241 | Optional Standby Gating Mode for Builder-Gate Collaboration | 8/8 |
 | P242 | Complete Mature Re-Evaluation Loop for Optimization and Transformation | 11/11 |
 | P243 | Architecture Proposal Type and Business Architecture RFC Workflow | 11/11 |
-| P244 | Collapse transition_queue — implement Implicit Maturity Gating per P240 | — |
-| P245 | Hermes host spawn policy — forbid Anthropic models on non-Claude hosts | — |
+| P244 | Collapse transition_queue — implement Implicit Maturity Gating per P240 | 0/0 |
+| P245 | Hermes host spawn policy — forbid Anthropic models on non-Claude hosts | 0/0 |
 | P246 | Per-million pricing + cache read/write cost columns in model_metadata and model_routes | 0/7 |
-| P247 | TUI board: W and TAB workflow/view switch not firing — duplicate key registration | — |
+| P247 | TUI board: W and TAB workflow/view switch not firing — duplicate key registration | 0/0 |
 | P248 | Board workflow visualization from SMDL queues and transition audit | 10/10 |
 | P249 | Actual-cost tracking + model_* table consolidation | 3/9 |
-| P250 | Roadmap board live feed should be chronological and keep the side panel readable | — |
+| P250 | Roadmap board live feed should be chronological and keep the side panel readable | 0/0 |
 | P251 | Liaison liveness - heartbeat, poke/pong, capacity, and dormancy signals | 10/10 |
-| P254 | Add TimeoutStopSec to agenthive service units | — |
-| P266 | Track in-flight dispatches in orchestrator shutdown path | — |
-| P267 | Add SIGTERM drain to a2a-dispatcher | — |
+| P254 | Add TimeoutStopSec to agenthive service units | 0/0 |
+| P266 | Track in-flight dispatches in orchestrator shutdown path | 0/0 |
+| P267 | Add SIGTERM drain to a2a-dispatcher | 0/0 |
 | P268 | AbortController plumbing for in-flight MCP cubic_focus and cubic_create | 3/3 |
-| P271 | Extend v_capable_agents to expose current_proposal, current_cubic, active_model | — |
+| P271 | Extend v_capable_agents to expose current_proposal, current_cubic, active_model | 0/0 |
 | P272 | Create v_proposal_activity unified projection for board feed | 0/5 |
-| P273 | Multi-assignment tracking for agents on multiple proposals | — |
-| P274 | Agent scorer must pre-filter by host_model_policy before picking candidates | — |
+| P273 | Multi-assignment tracking for agents on multiple proposals | 0/0 |
+| P274 | Agent scorer must pre-filter by host_model_policy before picking candidates | 0/0 |
 | P276 | Proposal Detail Timeline and Canonical Export | 0/6 |
 | P277 | Vertically Stacked All-Workflows Board View | 4/4 |
 | P282 | Agent Communication Protocol — Bidirectional Agent-Orchestrator Dialogue | 0/10 |
-| P285 | Dependency integrity guard for proposal obsolescence | — |
+| P285 | Dependency integrity guard for proposal obsolescence | 0/0 |
 | P286 | Resource hierarchy: Branch → Worktree → Cubic → Agent | 8/9 |
-| P287 | Federation: multi-product, multi-host, multi-agency AgentHive | — |
-| P290 | Gate enforcement: status advancement requires gate_decision_log entry | — |
+| P287 | Federation: multi-product, multi-host, multi-agency AgentHive | 0/0 |
+| P290 | Gate enforcement: status advancement requires gate_decision_log entry | 0/0 |
 | P291 | D1 gate (Draft→Review) dispatches skeptic agent, not generic reviewer | 0/4 |
-| P293 | Web UI board-api.ts: broken SQL queries, injection, missing statuses | — |
+| P293 | Web UI board-api.ts: broken SQL queries, injection, missing statuses | 0/0 |
 | P295 | Web UI: dispatch/offer/claim visibility — P281/P289 dashboard | 7/7 |
 | P296 | Web UI: model routing management page | 7/7 |
 | P299 | Orchestrator migration - retire direct spawn paths under unified queue scanner | 21/24 |
@@ -151,8 +314,8 @@
 | P305 | DDL baseline does not match live schema — new agents get wrong assumptions | 6/6 |
 | P307 | CLI state-machine commands use hardcoded PGPASSWORD=*** literal | 11/11 |
 | P308 | 34 proposals stuck in orphaned DEPLOYED status — not in any workflow | 0/12 |
-| P371 | fn_sync_proposal_maturity resets COMPLETE proposals to 'mature', causing pg_notify gate-loop noise | — |
-| P372 | Stale squad_dispatch rows block orchestrator re-dispatch — no TTL-based cleanup for active/assigned dispatches | — |
+| P371 | fn_sync_proposal_maturity resets COMPLETE proposals to 'mature', causing pg_notify gate-loop noise | 0/0 |
+| P372 | Stale squad_dispatch rows block orchestrator re-dispatch — no TTL-based cleanup for active/assigned dispatches | 0/0 |
 | P373 | proposal_valid_transitions empty while workflow_transitions populated — MCP vs DB transition validation split-brain | 3/3 |
 | P374 | SMDL Review: expressiveness, efficiency, comparative analysis, visualization, and expansion to weighted scoring and multi-agent coordination | 5/6 |
 | P375 | Suppress gate-ready notifications and freeze maturity for terminal workflow states | 4/4 |
@@ -161,7 +324,7 @@
 | P380 | MCP RFC tools fail with type errors: add_discussion and list_ac reject valid proposal IDs | 3/3 |
 | P381 | fn_sync_proposal_maturity unconditionally resets terminal state maturity to new | 0/10 |
 | P383 | Spin detection: auto-hold proposals with repeated failures | 0/9 |
-| P386 | Single-call prop_get_detail returning all child entities | — |
+| P386 | Single-call prop_get_detail returning all child entities | 0/0 |
 | P387 | Universal Web Dashboard — Multi-Project, Multi-Host, Multi-Agency Configuration Interface | 3/3 |
 | P389 | Information Architecture & Navigation | 10/10 |
 | P390 | Design System & Component Library | 18/18 |
@@ -228,43 +391,43 @@
 | P467 | Subagent stuck-detection and auto-escalation — N-strikes, forced checkpoints, request_assistance MCP action | 0/3 |
 | P468 | Two-way orchestrator↔liaison messaging protocol — control + telemetry plane, idempotent, replay-safe | 10/10 |
 | P469 | Liaison and agency observability surface — web/TUI feeds for operator visibility | 3/3 |
-| P470 | add_dependency MCP handler writes to in-memory singleton, not Postgres — dependency graph is fiction | — |
+| P470 | add_dependency MCP handler writes to in-memory singleton, not Postgres — dependency graph is fiction | 0/0 |
 | P472 | Unified auth and identity model — keys, sessions, tokens, OAuth across agents/liaisons/operators | 0/7 |
 | P474 | Configuration resolution-order spec — env vs roadmap.yaml vs control DB vs feature flags | 0/35 |
 | P475 | MCP Tool Surface Contract Hardening — single-source schema, runtime validation, action=help, ban in-memory state | 7/7 |
-| P476 | Review verdict vocabulary expansion + post-gate change tracking — fix coarse 3-state CHECK | — |
+| P476 | Review verdict vocabulary expansion + post-gate change tracking — fix coarse 3-state CHECK | 0/0 |
 | P483 | Project lifecycle operations — create/attach/archive/delete + operator playbook (companion to P482) | 9/21 |
 | P486 | MCP router extractArgs hardening + tool-name collision detection | 4/4 |
 | P495 | Per-project tenant DB bootstrap + connection registry (supersedes P482's project_id-discriminator) | 0/5 |
-| P496 | File-based vault adapter for tenant DSN secrets (Stage A2 of P429) | — |
+| P496 | File-based vault adapter for tenant DSN secrets (Stage A2 of P429) | 0/0 |
 | P499 | PgBouncer in front of Postgres for tenant + control pool fanout (Stage A5 of P429) | 20/20 |
-| P500 | Two-tier DB test infrastructure with single-DB compatibility flag (Stage A6 of P429, scope: helper only) | — |
-| P501 | hiveControl database creation + control-plane DDL deployment (Stage B1 of P429) | — |
-| P502 | Logical replication agenthive→hiveControl for control-plane baseline + tail (Stage B2 of P429) | — |
-| P503 | Control-plane read-shadow flag for delta detection (Stage B3 of P429) | — |
-| P504 | Cutover rehearsal on production-clone Postgres (Stage C1 of P429) | — |
-| P505 | Production cutover PLAN FREEZE: lock the runbook before execution (Stage C2a of P429) | — |
-| P506 | Drop control schemas from agenthive AND drop dead project_id columns (Stage C3 of P429, merged with E1) | — |
-| P507 | Self-grandfather agenthive as project_id=1 tenant DB via project_attach (Stage D2 of P429) | — |
+| P500 | Two-tier DB test infrastructure with single-DB compatibility flag (Stage A6 of P429, scope: helper only) | 0/0 |
+| P501 | hiveControl database creation + control-plane DDL deployment (Stage B1 of P429) | 0/0 |
+| P502 | Logical replication agenthive→hiveControl for control-plane baseline + tail (Stage B2 of P429) | 0/0 |
+| P503 | Control-plane read-shadow flag for delta detection (Stage B3 of P429) | 0/0 |
+| P504 | Cutover rehearsal on production-clone Postgres (Stage C1 of P429) | 0/0 |
+| P505 | Production cutover PLAN FREEZE: lock the runbook before execution (Stage C2a of P429) | 0/0 |
+| P506 | Drop control schemas from agenthive AND drop dead project_id columns (Stage C3 of P429, merged with E1) | 0/0 |
+| P507 | Self-grandfather agenthive as project_id=1 tenant DB via project_attach (Stage D2 of P429) | 0/0 |
 | P508 | Tenant schema bootstrap templates (database/ddl/tenant/) (Stage D3 of P429) | 6/7 |
 | P509 | Tenant DB ops bundle: pg_dump cron + monitoring + backup retention (Stage D4 of P429) | 12/13 |
-| P510 | Drop project_id columns from shared control-plane tables (Stage E1 of P429 cleanup) | — |
-| P511 | Drop agenthive→hiveControl FDW views (Stage E2 of P429 cleanup) | — |
-| P512 | Remove AGENTHIVE_DB_MODE=single test-mode flag (Stage E3 of P429 cleanup) | — |
+| P510 | Drop project_id columns from shared control-plane tables (Stage E1 of P429 cleanup) | 0/0 |
+| P511 | Drop agenthive→hiveControl FDW views (Stage E2 of P429 cleanup) | 0/0 |
+| P512 | Remove AGENTHIVE_DB_MODE=single test-mode flag (Stage E3 of P429 cleanup) | 0/0 |
 | P513 | Bring up monkeyKing-audio tenant DB (Stage F1 of P429) | 13/13 |
 | P514 | Bring up georgia-singer tenant DB (Stage F2 of P429) | 13/13 |
 | P515 | Vault v2: HashiCorp Vault or AWS Secrets Manager for tenant DSNs (Stage G1 of P429) | 10/10 |
 | P516 | Per-project git repo separation (tenant code lives in tenant repos) (Stage G2 of P429) | 11/11 |
-| P517 | Move a tenant DB to a dedicated Postgres host (operational pattern) | — |
+| P517 | Move a tenant DB to a dedicated Postgres host (operational pattern) | 0/0 |
 | P518 | Production cutover EXECUTE: agenthive control schemas → hiveControl (≤60s window) (Stage C2b of P429) | 0/5 |
-| P519 | Rewrite multi-project Phase 1 tests off vitest onto node:test (urgent unblock) | — |
-| P520 | DDL drift sentinel during cutover window (Stage B/C safety net for P429) | — |
-| P521 | submit_review FK opacity blocks subagent reviews — needs auto-register or typed error | — |
+| P519 | Rewrite multi-project Phase 1 tests off vitest onto node:test (urgent unblock) | 0/0 |
+| P520 | DDL drift sentinel during cutover window (Stage B/C safety net for P429) | 0/0 |
+| P521 | submit_review FK opacity blocks subagent reviews — needs auto-register or typed error | 0/0 |
 | P523 | HOTFIX: Share single MCP server across all SSE + StreamableHTTP sessions; release NOTIFY client on bootstrap failure | 5/6 |
-| P524 | Unified Feature Flag System — DB-backed, hot-reloadable, per-tenant | — |
-| P525 | Global DDL Migration Runner with Rollback Policy — control-plane versioning | — |
-| P526 | Structured Agent Error Catalog with Auto-Recovery — unified failure modes and retry policies | — |
-| P590 | hiveCentral data-model overhaul (parent) | — |
+| P524 | Unified Feature Flag System — DB-backed, hot-reloadable, per-tenant | 0/0 |
+| P525 | Global DDL Migration Runner with Rollback Policy — control-plane versioning | 0/0 |
+| P526 | Structured Agent Error Catalog with Auto-Recovery — unified failure modes and retry policies | 0/0 |
+| P590 | hiveCentral data-model overhaul (parent) | 0/0 |
 | P602 | dependency schema — cross-project graph (was P530.11) | 15/15 |
 | P604 | observability schema — spans, lifecycle events, routing, explainability (was P530.13) | 12/12 |
 | P605 | governance schema — hash-chained decision log and event spine (was P530.14) | 0/10 |
@@ -288,7 +451,7 @@
 | P704 | Maturity field is workflow-stage poisoned, not lease-state — wire lease triggers and remove status→active mapping | 2/11 |
 | P707 | Gate-Agent AC Verification Reform - Mandatory Evidence at D3 | 0/6 |
 | P720 | Activity Feed redesign — Discord posts + roadmap-board live panel | 8/8 |
-| P721 | Detect Claude usage-cap exits as throttle, not failure (don't trip circuit breaker) | — |
+| P721 | Detect Claude usage-cap exits as throttle, not failure (don't trip circuit breaker) | 0/0 |
 | P738 | HOTFIX HF-B: developer/enhancer prompts must not self-promote maturity | 0/5 |
 | P739 | HOTFIX HF-A: dispatcher must claim gate-ready proposals as gate-reviewer, not developer | 0/5 |
 | P740 | HOTFIX HF-C: gate-evaluator must verify persistence + demote maturity on non-approve verdicts | 0/7 |
@@ -344,11 +507,11 @@
 | P826 | V2: application code migration — schema-aware pool + search_path | 0/5 |
 | P827 | P474 Phase 2: RegistryKeys + FlagKeys DB resolution via hiveCentral | 16/19 |
 | P828 | P474 Phase 3: Config mutation surface + audit log | 38/50 |
-| P833 | A2A Unified Message Envelope — extend message_ledger + ACK/reply MCP tools | — |
+| P833 | A2A Unified Message Envelope — extend message_ledger + ACK/reply MCP tools | 0/0 |
 | P834 | A2A Identity & Trust — agent_secret, HMAC dispatch gate, spawn grant verification | 13/13 |
 | P835 | A2A Message Reliability — timeout tracking cron, dead letter, escalation paths | 0/4 |
 | P836 | A2A Cross-Host Delivery — HTTP callback relay via agent_registry | 2/2 |
-| P837 | A2A Legacy Cleanup — consolidate liaison_message into message_ledger, delete relay.ts | — |
+| P837 | A2A Legacy Cleanup — consolidate liaison_message into message_ledger, delete relay.ts | 0/0 |
 | P840 | Wire ConfigResolver into pool.ts — eliminate bare process.env.PG* reads | 3/10 |
 | P841 | Agent Authentication & Resource Access Distribution Architecture | 6/13 |
 | P842 | P841-D: Hard Budget Enforcement per Agent (Principal-Based Spending Caps) | 7/14 |
@@ -364,7 +527,7 @@
 | P891 | G1 (audit): camelCase identifier folding fix — agentHive2 DDL silently lowercased | 6/6 |
 | P892 | G2 (audit): port observability schema (P604) into agentHive2 control plane | 6/6 |
 | P893 | G3 (audit): tenant lifecycle state machine for agentHive2 (port P601) | 5/5 |
-| P894 | G4 (audit): partition maintenance job for agentHive2 time-series tables | — |
+| P894 | G4 (audit): partition maintenance job for agentHive2 time-series tables | 0/0 |
 | P895 | G5 (audit): backup harness + verify cron for agentHive2 | 7/7 |
 | P896 | G6 (audit): cross-project dependency graph + consistency check for agentHive2 | 7/7 |
 | P897 | G7 (audit): budget unblock reserve on spBudget for cross-project deadlock prevention | 14/14 |
@@ -379,7 +542,7 @@
 | P909 | P902-E: Resolver cleanup (sweep dead duplicate, audit gate-role-resolver boundary) | 3/3 |
 | P912 | Agency self-registration and liaison bootstrap on provider startup | 7/8 |
 | P913 | HOTFIX: agency-self-registration.ts — wrong FK type, no transaction, race on concurrent calls | 7/7 |
-| P914 | HOTFIX: push-dispatch payload missing offer_id/claim_token — zero offers claimed since P912 cutover | — |
+| P914 | HOTFIX: push-dispatch payload missing offer_id/claim_token — zero offers claimed since P912 cutover | 0/0 |
 | P915 | Tighten roadmap.v_agency_status dispatchable threshold from 10min to 60s | 9/12 |
 | P918 | Agency runtime contract + shared messaging gateway libraries | 0/8 |
 | P919 | Tiered Agent Identity — Human-Readable Roles + Scalable Instances | 13/13 |
@@ -410,7 +573,7 @@
 | P1004 | Agent Cost & Quota Self-Reporting — Provider-Aware Budget Intelligence | 8/8 |
 | P1005 | Task Tier Routing — Free-Model Labour Pool for Mechanical Ops | 0/10 |
 | P1007 | P907-A: A2A reply-semantics P1 fixes — msg_send correlation_id + msg_reply reply_to | 4/4 |
-| P1008 | P907-B: A2A reply-semantics P2 fixes — escalation, A2AMessenger, liaison handlers + schema enforcement | — |
+| P1008 | P907-B: A2A reply-semantics P2 fixes — escalation, A2AMessenger, liaison handlers + schema enforcement | 0/0 |
 | P1018 | Wire CLI Token Capture into Existing Budget Tables — make schema-complete budget machinery actually work | 17/17 |
 | P1029 | OpenClaw Provider Adapter — WebSocket-based agent runtime interface | 14/16 |
 | P1065 | TUI Board — Agent Presence & Per-Agent Messaging/Trust Inspector | 25/26 |
@@ -434,9 +597,9 @@
 | P1109 | Encapsulate agent-side DB operations behind MCP tools — close raw-SQL footguns | 14/15 |
 | P1113 | Role-Based Persona Injection for Spawned Agents | 20/20 |
 | P1114 | Tiered clearance for MCP tools — every action declares a minimum trust_tier + role | 7/7 |
-| P1115 | D4-gate-smoke-test-alpha — synthetic merge gate validation | — |
-| P1116 | D4-gate-smoke-test-beta — synthetic merge gate validation | — |
-| P1117 | D4-gate-smoke-test-gamma — synthetic merge gate validation | — |
+| P1115 | D4-gate-smoke-test-alpha — synthetic merge gate validation | 0/0 |
+| P1116 | D4-gate-smoke-test-beta — synthetic merge gate validation | 0/0 |
+| P1117 | D4-gate-smoke-test-gamma — synthetic merge gate validation | 0/0 |
 | P1120 | P1107 child: operator user-inbox consumer — surface user/<operator> messages, write read_at, stream to state-feed | 29/29 |
 | P1123 | HOTFIX agenthive-board pool poisoning — stray pool.end() kills long-running services | 12/12 |
 | P1124 | D4 Merge-Gate E2E Validator — dispatch-wired AC verification job (P1094 Branch C) | 10/10 |
@@ -502,7 +665,6 @@
 | P1438 | V3-C6: Smart AI-agent liaison with emergent presence — orchestrator becomes pure matchmaker | 13/19 |
 | P1439 | V3-C7: Deliverable verification (artifact, not exit code) | 0/4 |
 | P1440 | V3-C8: Capability matching + per-role/provider timeout budgets + quota-as-routing | 0/4 |
-| P1441 | V3-C9: Rollout step 1 — claude-gary-bot single agency, 1→N workers (e2e gate) | 2/6 |
 | P1444 | Fix MCP agency tools and register Gemini agency | 5/5 |
 | P1445 | Multi-agent concurrency isolation: worktree-per-agent + lease-gated branch/main writes | 5/6 |
 | P1447 | Complete the P1132 a2a-host cutover — retire per-agency liaison units | 18/18 |
@@ -515,7 +677,7 @@
 | P1681 | Obsolete superseded DRAFT/new proposals after June 2026 compatibility review | 6/6 |
 | P1682 | Duration-aware usage-limit handling: claude-CLI detection → cooldown → hold-and-wake | 9/9 |
 | P1696 | issue: dashboard server returns HTTP 404 for unknown SPA paths — NotFoundPage unreachable via direct URL, deep-links to new routes break | 1/1 |
-| P1697 | Phase 1: Hot-configurable global in-flight dispatch cap (no restart) | — |
+| P1697 | Phase 1: Hot-configurable global in-flight dispatch cap (no restart) | 0/0 |
 | P1698 | Phase 2: Per-agency dispatch cap via MCP/CLI action | 9/9 |
 | P1699 | Phase 3: Dynamic usage-driven dispatch capacity controller (AIMD) | 2/3 |
 | P1729 | Cumulative gate convergence guard — auto-pause slow re-dispatch loops the per-hour breaker misses | 5/5 |
@@ -554,16 +716,18 @@
 | P3326 | Gate/transition workflow drift: gate_decision D2 advances REVIEW→COMPLETE (skips DEVELOP) + prop_transition REVIEW→DEVELOP rejected despite valid edge | 6/6 |
 | P3507 | P477-B: Control-plane portal shell + cross-project aggregation views (Fleet/Efficiency/Identity/Platform) | 12/12 |
 | P3508 | P477-C: Multi-project access control — project-creation ACLs + token/route scoping (replaces dead P482 dependency) | 9/9 |
-| P3787 | Hardcoded-constant migration: inventory + move high-value core/infra literals into categorized runtime flags | 7/7 |
 
-## 🔀 MERGE (1)
-
+## MERGE (1)
 | ID | Title | AC |
 |----|-------|----|
-| P3784 | Config introspection API: list all config keys with category, value, default, scope, editability | 11/11 |
+| P1441 | V3-C9: Rollout step 1 — claude-gary-bot single agency, 1→N workers (e2e gate) | 2/6 |
 
-## 🔨 DEVELOP (16)
+## REVIEW (1)
+| ID | Title | AC |
+|----|-------|----|
+| P3795 | Hard routing gate on provider health — block dispatch to unhealthy providers | 0/7 |
 
+## DEVELOP (18)
 | ID | Title | AC |
 |----|-------|----|
 | P477 | Web control-plane redesign for multi-project AgentHive operations | 12/13 |
@@ -574,23 +738,18 @@
 | P3535 | Decouple maturity lifecycle from lease occupancy — monotonic progress + lease-based exclusive claim | 11/11 |
 | P3564 | Board pg pool doesn't survive a Postgres restart — route queries via pgbouncer + auto-heal pool (dual-signature getPool refusal pins it to direct 5432) | 6/6 |
 | P3566 | Gate-advance authorization integrity (non-terminal gates): independent reviewer, blocking-review respected, no review-only bypass | 5/8 |
-| P3781 | Configuration Management: categorize runtime_flag, web config UI, and hardcoded-constant migration | 2/14 |
-| P3785 | Web config interface: category-grouped browse + audited inline edit in dashboard | 12/12 |
+| P3781 | Configuration Management: categorize runtime_flag, web config UI, and hardcoded-constant migration | 0/14 |
+| P3784 | Config introspection API: list all config keys with category, value, default, scope, editability | 0/11 |
+| P3785 | Web config interface: category-grouped browse + audited inline edit in dashboard | 0/12 |
+| P3787 | Hardcoded-constant migration: inventory + move high-value core/infra literals into categorized runtime flags | 0/7 |
 | P3793 | Codebase Gap Analysis: architecture, implementation, operational, and governance gaps | 4/5 |
 | P3794 | CI: SIGTERM regression test suite for long-running services | 5/5 |
-| P3796 | Monolith decomposition plan: roadmap.ts (6191 lines) and server/index.ts (6761 lines) | 15/40 |
+| P3796 | Monolith decomposition plan: roadmap.ts (6191 lines) and server/index.ts (6761 lines) | 0/24 |
 | P3797 | Wire agenthive-scan-* rule packs as required CI gates in .gitlab-ci.yml | 5/5 |
 | P3798 | Docs update sweep: stale proposal references, V2 architecture, CLI migration | 3/3 |
-| P3840 | Unified orchestrator job-posting pool — post offers for every non-terminal proposal (work offers for new/active, gate-review offers for mature); no auto-gating | 8/8 |
+| P3840 | Unified orchestrator job-posting pool — post offers for every non-terminal proposal (work offers for new/active, gate-review offers for mature); no auto-gating | 0/7 |
 
-## 🔍 REVIEW (1)
-
-| ID | Title | AC |
-|----|-------|----|
-| P3795 | Hard routing gate on provider health — block dispatch to unhealthy providers | 0/7 |
-
-## 📝 DRAFT (5)
-
+## DRAFT (10)
 | ID | Title | AC |
 |----|-------|----|
 | P3563 | Acceptance loop must have ground truth: independent, evidenced, non-vacuous AC verification as a hard gate invariant | 12/12 |
@@ -598,19 +757,29 @@
 | P3782 | Config taxonomy: add category to runtime_flag schema + ConfigKey registry + set() schema reconciliation, backfill existing keys | 0/10 |
 | P3839 | Gating-as-a-job: mature proposals must post a claimable gate-decision job at every gate (D1-D4), agent records the decision | 0/7 |
 | P3841 | Enforce revised P996 agent naming — clean-slate re-registration + validator | 0/7 |
+| P3842 | SIGTERM regression CI test suite for long-running services | 0/0 |
+| P3843 | Provider health hard-routing gate: block dispatch to unhealthy providers | 0/0 |
+| P3844 | Monolith decomposition plan: roadmap.ts (6 191 lines) and server/index.ts (6 761 lines) | 3/4 |
+| P3845 | Scanner rule packs as mandatory CI gates in .gitlab-ci.yml | 0/0 |
+| P3846 | Documentation update sweep: fix stale proposal references, V2 arch gaps, and CLI migration docs | 0/0 |
 
 ---
 
 ## How to Regenerate
 
+Run this query against the `agenthive` database (via pgbouncer on port 6432):
+
 ```sql
--- Connect to agenthive DB (psql or pgbouncer:6432)
-SELECT p.display_id, p.title, p.status,
-       COUNT(ac.id) AS ac_total,
-       COUNT(ac.id) FILTER (WHERE ac.status = 'pass') AS ac_passing
-FROM roadmap.proposal p
-LEFT JOIN roadmap.proposal_acceptance_criteria ac ON ac.proposal_id = p.id
+SELECT
+  p.display_id,
+  p.title,
+  p.status,
+  (SELECT COUNT(*) FROM roadmap_proposal.proposal_acceptance_criteria ac WHERE ac.proposal_id = p.id) as ac_total,
+  (SELECT COUNT(*) FROM roadmap_proposal.proposal_acceptance_criteria ac WHERE ac.proposal_id = p.id AND ac.status = 'pass') as ac_pass
+FROM roadmap_proposal.proposal p
 WHERE p.maturity != 'obsolete'
-GROUP BY p.id, p.display_id, p.title, p.status
-ORDER BY p.status, CAST(regexp_replace(p.display_id, '[^0-9]', '', 'g') AS INTEGER) NULLS LAST;
+ORDER BY p.status, p.id;
 ```
+
+Then update the header line with the current date and total count.
+

@@ -567,7 +567,7 @@ Endpoints **not yet** scoped (transitional — control-plane / filesystem):
 
 | Endpoint | Why unscoped today |
 |---|---|
-| `/api/proposals` (REST), `proposal_snapshot` / `proposal_insert` / `proposal_update` (WS) | `roadmap.proposal` has no `project_id` column; it lives in the control plane. Scoping moves to tenant-DB resolution once P429/P482-P485 lands. The WS subscribe still records the operator's project so the wiring is in place; the broadcast already short-circuits the scope check when payloads carry `project_id`. |
+| `/api/proposals` (REST), `proposal_snapshot` / `proposal_insert` / `proposal_update` (WS) | `roadmap.proposal` has no `project_id` column; it lives in the control plane. Scoping moves to tenant-DB resolution once P429/P483-P485 lands (P483 supersedes the original project-registry work). The WS subscribe still records the operator's project so the wiring is in place; the broadcast already short-circuits the scope check when payloads carry `project_id`. |
 | `/api/channels`, `/api/messages`, `/api/pulse` | Filesystem-backed (markdown messages dir, `pulse.log`); naturally scoped per project worktree. Will gain `project_id` filtering only if we migrate to `roadmap.message_ledger`. |
 | `/api/routes` | Global infra config — model routes are shared across projects by design. |
 

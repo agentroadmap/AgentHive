@@ -12,6 +12,7 @@ import AgentsPage from "./components/AgentsPage";
 import AppNav from "./components/AppNav";
 import BoardPage from "./components/BoardPage";
 import ChannelsPage from "./components/ChannelsPage";
+import ConfigPage from "./components/ConfigPage";
 import DashboardPage from "./components/DashboardPage";
 import DecisionsPage from "./components/DecisionsPage";
 import DirectivesPage from "./components/DirectivesPage";
@@ -407,6 +408,9 @@ export default function App() {
 						</Route>
 						<Route path="/achievements">
 							<AchievementsView proposals={sharedProposals} />
+						</Route>
+						<Route path="/config">
+							<ConfigPage />
 						</Route>
 						<Route path="/config">
 							<ConfigPage />

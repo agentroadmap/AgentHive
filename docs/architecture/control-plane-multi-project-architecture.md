@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft architecture. This document consolidates and supersedes the split assumptions in the current P298/P300 design notes.
+Draft architecture. This document consolidates and supersedes the split assumptions in the P298 design notes (the earlier multi-project registry design is now obsolete; the active successor is P429/P483).
 
 ## Problem
 

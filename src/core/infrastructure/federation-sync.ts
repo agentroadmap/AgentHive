@@ -26,8 +26,8 @@
 import * as crypto from "node:crypto";
 import { EventEmitter } from "node:events";
 import { query } from "../../infra/postgres/pool.ts";
-import * as runtimeConfig from "../../shared/runtime/config.ts";
 import { FlagKeys } from "../../shared/runtime/config-keys.ts";
+import * as runtimeConfig from "../../shared/runtime/config.ts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -59,32 +59,22 @@ const SENSITIVE_FIELDS = new Set([
 	"private_key",
 ]);
 
-const DEFAULT_POLL_INTERVAL_MS = 30_000;
-const HEALTH_FAIL_QUARANTINE_THRESHOLD = 3;
+// STALE_SYNC_THRESHOLD_MS is used in a synchronous map() — DEFER (restart required for change)
 const STALE_SYNC_THRESHOLD_MS = 60 * 60 * 1000; // 1 hour
-const PING_TIMEOUT_MS = 5_000;
 
-async function resolveFederationSyncPollMs(): Promise<number> {
+async function resolveFederationPollIntervalMs(): Promise<number> {
 	try {
-		return await runtimeConfig.get(FlagKeys.FEDERATION_SYNC_POLL_MS);
+		return await runtimeConfig.get(FlagKeys.FEDERATION_SYNC_POLL_INTERVAL_MS);
 	} catch {
-		return DEFAULT_POLL_INTERVAL_MS;
+		return 30_000;
 	}
 }
 
 async function resolveFederationQuarantineThreshold(): Promise<number> {
 	try {
-		return await runtimeConfig.get(FlagKeys.FEDERATION_QUARANTINE_THRESHOLD);
+		return await runtimeConfig.get(FlagKeys.FEDERATION_HEALTH_QUARANTINE_THRESHOLD);
 	} catch {
-		return HEALTH_FAIL_QUARANTINE_THRESHOLD;
-	}
-}
-
-async function resolveFederationStaleSyncMs(): Promise<number> {
-	try {
-		return await runtimeConfig.get(FlagKeys.FEDERATION_STALE_SYNC_MS);
-	} catch {
-		return STALE_SYNC_THRESHOLD_MS;
+		return 3;
 	}
 }
 
@@ -92,7 +82,7 @@ async function resolveFederationPingTimeoutMs(): Promise<number> {
 	try {
 		return await runtimeConfig.get(FlagKeys.FEDERATION_PING_TIMEOUT_MS);
 	} catch {
-		return PING_TIMEOUT_MS;
+		return 5_000;
 	}
 }
 
@@ -239,7 +229,7 @@ export class FederationSync extends EventEmitter {
 			instanceId: config.instanceId,
 			instanceName: config.instanceName,
 			sharedSecret: config.sharedSecret,
-			pollIntervalMs: config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
+			pollIntervalMs: config.pollIntervalMs ?? 30_000,
 		};
 		this.db = config.queryFn ?? query;
 	}
@@ -450,8 +440,9 @@ export class FederationSync extends EventEmitter {
 				[peer.peer_uuid],
 			);
 			const failCount = rows[0]?.health_fail_count ?? 0;
+			const quarantineThreshold = await resolveFederationQuarantineThreshold();
 
-			if (failCount >= await resolveFederationQuarantineThreshold()) {
+			if (failCount >= quarantineThreshold) {
 				await this.db(
 					`UPDATE roadmap.federation_peers
                         SET status = 'quarantined', updated_at = now()
@@ -485,7 +476,6 @@ export class FederationSync extends EventEmitter {
 		);
 
 		const now = Date.now();
-		const staleSyncMs = await resolveFederationStaleSyncMs();
 		return {
 			peers: rows.map((p) => ({
 				peer_uuid: p.peer_uuid,
@@ -496,7 +486,7 @@ export class FederationSync extends EventEmitter {
 				stale:
 					p.is_active &&
 					(!p.last_sync_at ||
-						now - new Date(p.last_sync_at).getTime() > staleSyncMs),
+						now - new Date(p.last_sync_at).getTime() > STALE_SYNC_THRESHOLD_MS),
 				health_fail_count: p.health_fail_count,
 			})),
 		};
@@ -920,10 +910,10 @@ export class FederationSync extends EventEmitter {
 
 	async start(): Promise<void> {
 		this.stopped = false;
-		const pollMs = await resolveFederationSyncPollMs();
+		const pollIntervalMs = await resolveFederationPollIntervalMs();
 		this.pollTimer = setInterval(
 			() => this.runSyncCycle().catch((err) => this.emit("error", err)),
-			this.config.pollIntervalMs ?? pollMs,
+			pollIntervalMs,
 		);
 	}
 
