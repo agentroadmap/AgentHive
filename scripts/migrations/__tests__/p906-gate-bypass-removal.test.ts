@@ -150,7 +150,7 @@ describe("P906: gate advance without app.gate_bypass", { skip: !DB_TEST }, () =>
 							`UPDATE roadmap_proposal.proposal SET status = 'DEVELOP' WHERE id = $1`,
 							[pid],
 						),
-					/requires a gate decision/,
+					/requires (a gate decision|record_gate_decision)/,
 					"guard must block a bare UPDATE with no gate_decision_log + no bypass",
 				);
 			});
