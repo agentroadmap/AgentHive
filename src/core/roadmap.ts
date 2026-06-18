@@ -153,11 +153,6 @@ import {
 	listAcceptanceCriteria as acList,
 	removeAcceptanceCriteria as acRemove,
 } from "./proposal/criteria.ts";
-import {
-	buildLatestProposalMap,
-	filterProposalsByProposalSnapshots,
-	getActiveAndCompletedIdsFromProposalMap,
-} from "./proposal/id-generation.ts";
 
 interface BlessedScreen {
 	program: {
