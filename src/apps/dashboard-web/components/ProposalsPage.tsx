@@ -58,7 +58,7 @@ const PRIORITY_ORDER: Record<string, number> = {
 };
 
 const STATUS_ORDER = ["DRAFT", "REVIEW", "DEVELOP", "MERGE", "COMPLETE"];
-const HIDDEN_STATUSES = new Set(["DISCARDED"]);
+// P706: HIDDEN_STATUSES removed. Use maturity=obsolete filter instead of status-based hiding.
 
 const ProposalsPage: React.FC<ProposalsPageProps> = ({
 	proposals: propProposals,
@@ -83,9 +83,12 @@ const ProposalsPage: React.FC<ProposalsPageProps> = ({
 	}, [propProposals]);
 
 	const statuses = useMemo(() => {
-		const seen = [...new Set(proposals.map((p) => p.status))]
-			.filter(Boolean)
-			.filter((s) => !HIDDEN_STATUSES.has(s));
+		// P706: Filter out obsolete proposals by maturity, not by status
+		const visibleProposals = proposals.filter(
+			(p) => (p.maturity ?? "").toLowerCase() !== "obsolete",
+		);
+		const seen = [...new Set(visibleProposals.map((p) => p.status))]
+			.filter(Boolean);
 		return seen.sort((a, b) => {
 			const ai = STATUS_ORDER.indexOf(a);
 			const bi = STATUS_ORDER.indexOf(b);

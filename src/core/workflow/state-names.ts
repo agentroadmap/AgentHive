@@ -542,12 +542,8 @@ export const RfcStates = {
 	get COMPLETE(): string {
 		return getViewSafe("Standard RFC")?.stages.find((s) => s.name === "COMPLETE")?.name ?? "COMPLETE";
 	},
-	get REJECTED(): string {
-		return getViewSafe("Standard RFC")?.stages.find((s) => s.name === "REJECTED")?.name ?? "REJECTED";
-	},
-	get DISCARDED(): string {
-		return getViewSafe("Standard RFC")?.stages.find((s) => s.name === "DISCARDED")?.name ?? "DISCARDED";
-	},
+	// P706: REJECTED and DISCARDED states removed. Terminal decisions are now
+	// represented via maturity=obsolete with obsoleted_reason free-text field.
 };
 
 /**
@@ -569,3 +565,14 @@ export const HotfixStates = {
 	},
 	// Get all stages dynamically; callers can access stages via the view
 };
+
+/**
+ * P706: Load workflow stages from SMDL definition.
+ *
+ * Returns the list of stage names for a given workflow template,
+ * resolving from the StateNamesRegistry (which loads from DB on startup).
+ */
+export function loadWorkflowStages(workflowTemplateName: string): string[] {
+	const view = getView(workflowTemplateName);
+	return view.stages.map((stage) => stage.name);
+}
