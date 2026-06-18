@@ -91,8 +91,8 @@ SET category = CASE flag_name
 
   -- ── liaison ───────────────────────────────────────────────────────────────
   WHEN 'LIAISON_CONTEXT_REFRESH_MS'          THEN 'liaison'
-  WHEN 'LIAISON_LLM_TIMEOUT_MS'              THEN 'liaison'
-  WHEN 'LIAISON_SELF_CLAIM_AGENCIES'         THEN 'liaison'
+  WHEN 'AGENTHIVE_LIAISON_LLM_TIMEOUT_MS'    THEN 'liaison'
+  WHEN 'AGENTHIVE_SELF_CLAIM_AGENCIES'       THEN 'liaison'
 
   -- ── pause_backoff ─────────────────────────────────────────────────────────
   WHEN 'PAUSE_FAILURE_THRESHOLD'             THEN 'pause_backoff'
@@ -159,5 +159,30 @@ SET category = CASE flag_name
 
   ELSE category  -- preserve any existing category value (or DEFAULT 'general')
 END;
+
+-- Seed FlagKeys that may not have existing rows yet (idempotent ON CONFLICT DO NOTHING).
+-- These two were formerly raw process.env reads; promoting them to runtime_flag rows
+-- allows operators to tune via the web config UI without a restart.
+INSERT INTO core.runtime_flag (flag_name, scope, value_jsonb, category, description, modified_by_did, owner_did)
+VALUES
+  (
+    'AGENTHIVE_LIAISON_LLM_TIMEOUT_MS',
+    'global',
+    '30000',
+    'liaison',
+    'Global LLM call timeout in ms for liaison agents. Per-provider env overrides (AGENTHIVE_LIAISON_LLM_TIMEOUT_MS_<PROVIDER>) still take precedence.',
+    'migration',
+    'migration'
+  ),
+  (
+    'AGENTHIVE_SELF_CLAIM_AGENCIES',
+    'global',
+    '""',
+    'liaison',
+    'Comma-separated list of agency identities allowed to use the self-claim loop. Empty string = all agencies allowed when AGENCY_OFFER_CLAIM_ENABLED is true.',
+    'migration',
+    'migration'
+  )
+ON CONFLICT (flag_name, scope) DO NOTHING;
 
 COMMIT;

@@ -208,18 +208,10 @@ export async function runLiaisonAgent(
 	// mirrors a2a-host's AGENTHIVE_AGENCY_FILTER) restricts self-claim to listed
 	// agencies even when the global flag is on — enabling a single-agency canary.
 	// Empty allowlist = all agencies (backward-compatible with the pre-allowlist
-	// behavior). Parsed per-call so it composes with the global flag.
-	let rawSelfClaimAllowlist = "";
-	try {
-		rawSelfClaimAllowlist = await runtimeConfig.get(FlagKeys.SELF_CLAIM_AGENCIES);
-	} catch {
-		// config unavailable — treat as empty (all agencies allowed)
-	}
-	const selfClaimAllowlist = rawSelfClaimAllowlist
-		.split(",")
-		.map((s: string) => s.trim())
-		.filter(Boolean);
-	const allowedByList =
+	// behavior). Reads from config resolver (DB with env override via FlagKeys.LIAISON_SELF_CLAIM_AGENCIES).
+	const selfClaimAllowlist = await runtimeConfig
+		.get(FlagKeys.LIAISON_SELF_CLAIM_AGENCIES)
+		.catch(() => []) as string[];	const allowedByList =
 		selfClaimAllowlist.length === 0 || selfClaimAllowlist.includes(identity);
 	const claimLoopEnabled = claimLoopFlag && allowedByList;
 	if (claimLoopFlag && !allowedByList) {
