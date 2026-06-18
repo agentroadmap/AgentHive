@@ -38,6 +38,8 @@ import {
 	type RouteCandidate,
 	type WorkItem,
 } from "./match-work-to-route.ts";
+import { softSortProviderHealthCandidates } from "./agent-spawner.ts";
+import { getCached } from "../provider-health/cache.ts";
 
 const obs = new ObservabilityWriter("agency:offer-dispatch");
 
@@ -359,7 +361,11 @@ export class OrchestratorOfferDispatcher implements OfferDispatcher {
 					provider: routeHint,
 					proposalId: claim.proposalId,
 				};
-				const matcherResult = await matchWorkToRoute(workItem, candidates);
+				// P3795 AC-5: soft-sort healthy providers to the front before
+				// passing to the adaptive matcher, preserving P796's intent as
+				// a secondary preference signal.
+				const sortedCandidates = softSortProviderHealthCandidates(candidates, getCached);
+				const matcherResult = await matchWorkToRoute(workItem, sortedCandidates);
 				const topCandidate =
 					matcherResult.kind === "ranked" ? matcherResult.candidates[0] : null;
 				if (topCandidate) {
