@@ -1,8 +1,29 @@
-// Legacy config text parsers.
+// Legacy config text parsers and migration helpers.
 //
 // Extracted from Core (src/core/roadmap.ts) during the Phase 1 monolith
 // decomposition. These are pure functions used to migrate the historical
 // YAML-style config directives into the current structured format.
+//
+// Standalone wrappers for LegacyConfigMigrator methods are exported here so
+// roadmap.ts can import them without instantiating the class directly.
+
+import type { FileSystem } from "../../file-system/operations.ts";
+import { LegacyConfigMigrator } from "../config-migration.ts";
+
+export async function extractLegacyConfigDirectives(
+	fs: FileSystem,
+): Promise<string[]> {
+	return new LegacyConfigMigrator(fs).extractLegacyConfigDirectives();
+}
+
+export async function migrateLegacyConfigDirectivesToFiles(
+	fs: FileSystem,
+	legacyDirectives: string[],
+): Promise<void> {
+	return new LegacyConfigMigrator(fs).migrateLegacyConfigDirectivesToFiles(
+		legacyDirectives,
+	);
+}
 
 export function parseLegacyInlineArray(value: string): string[] {
 	const items: string[] = [];
