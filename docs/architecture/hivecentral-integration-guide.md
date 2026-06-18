@@ -1,167 +1,114 @@
-> **Type:** architecture
-> **Source proposals:** P590–P608 (hiveCentral V2 data-model group)
-> **DDL location:** `database/ddl/hivecentral/`
-
 # hiveCentral Integration Guide
 
-hiveCentral is the AgentHive **control-plane database**. It is a dedicated PostgreSQL instance that holds cross-project state: agencies, models, routes, credentials, workforce, governance, and observability. Project-scoped data (proposals, dispatches, agent runs) lives in per-project **tenant databases**.
-
-This guide is for engineers integrating new code with hiveCentral, running the DDL for the first time, or onboarding to the V2 database architecture.
-
----
-
-## 1. Connection Topology
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                       Clients                           │
-│   Orchestrator  │  MCP Server  │  Web Dashboard  │  CLI │
-└───────┬─────────┴──────┬───────┴────────┬────────┴───┬──┘
-        │                │                │            │
-        ▼                ▼                ▼            ▼
-┌────────────────────────────────────────────────────────┐
-│                     PgBouncer :6432                    │
-│         (transaction-mode pooler; P499)                │
-└────────┬──────────────────────────────┬───────────────┘
-         │                              │
-         ▼                              ▼
-┌─────────────────┐           ┌──────────────────────────┐
-│   hiveCentral   │           │   Tenant DBs (per project)│
-│  (control plane)│           │  agenthive, monkeyKing-  │
-│  PostgreSQL 16  │           │  audio, georgia-singer … │
-└─────────────────┘           └──────────────────────────┘
-```
-
-**Key points:**
-- All application code connects through PgBouncer on port **6432**, not directly to Postgres on 5432.
-- hiveCentral and tenant DBs are separate databases on the same Postgres host (currently) but can be split to dedicated hosts (P517 pattern).
-- The orchestrator, MCP server, and web dashboard each hold a connection pool; they do NOT share a pool (P523).
-
-### Environment Variables
-
-| Variable | Purpose | Example |
-|----------|---------|---------|
-| `AGENTHIVE_V2_DB_URL` | hiveCentral DSN (primary access) | `postgresql://agenthive_orchestrator:***@localhost:6432/hiveCentral` |
-| `DATABASE_URL` | Legacy agenthive tenant DB (for backward compat) | `postgresql://agenthive_app:***@localhost:6432/agenthive` |
-| `PGPORT` | pgbouncer port (queries) | `6432` |
-| `PGDATABASE` | Default DB for psql sessions | `agenthive` |
-
-To connect to hiveCentral from psql:
-```bash
-psql -h localhost -p 6432 -U agenthive_admin -d hiveCentral
-```
-
-### Code: Acquiring a Connection Pool
-
-Use `config.getProjectDb(slug)` for tenant-scoped queries. For hiveCentral control-plane queries:
-
-```typescript
-import { getPool } from '../shared/db/pool.ts';
-
-// Control-plane pool (hiveCentral)
-const pool = await getPool({ database: 'hiveCentral' });
-const result = await pool.query('SELECT * FROM core.host WHERE lifecycle_status = $1', ['active']);
-```
-
-**Do NOT** add `WHERE project_id = $1` filters to control-plane tables — `project_id` is a tenant-DB pointer, not a row discriminator. See CLAUDE.md §DB topology.
+> **Status:** hiveCentral is **NOT YET LIVE** (see GAP-1.1 in P3793). The single `agenthive` DB currently serves both control-plane and tenant data. This guide documents the topology, env vars, and DDL steps needed when the preconditions in §5 are met.
+>
+> **Last updated:** 2026-06-17 (P3846 doc sweep)
+>
+> **Full DDL reference:** `database/ddl/hivecentral/README.md` — apply order, role grant matrix, hygiene field spec.
 
 ---
 
-## 2. Schema Overview
+## 1. Schema Topology
 
-hiveCentral contains **15 schemas**. Each maps to one or more DDL files under `database/ddl/hivecentral/`.
+```
+┌─────────────────────────────────────────┐
+│              hiveCentral DB             │
+│  (control-plane, shared across all      │
+│   projects and agents)                  │
+├─────────────────────────────────────────┤
+│ core        – host, user, runtime flags │
+│ identity    – DIDs, principals, keys    │
+│ agency      – providers, sessions       │
+│ model       – routes, capability vocab  │
+│ credential  – secrets vault             │
+│ workforce   – agent registry, skills    │
+│ template    – workflow state machines   │
+│ tooling     – MCP/CLI tool catalog      │
+│ sandbox     – execution isolation       │
+│ control_project – project registry      │
+│ messaging   – A2A message bus           │
+│ observability – tracing, telemetry      │
+│ governance  – policy, audit, compliance │
+│ efficiency  – cost, dispatch metrics    │
+└─────────────────────────────────────────┘
 
-| File | Schema | Proposal | Purpose |
-|------|--------|----------|---------|
-| `000-roles.sql` | *(roles only)* | — | PostgreSQL service roles + password setup. Run against the `postgres` DB, not hiveCentral. |
-| `001-core.sql` | `core` | P592 | Installation record, hosts, OS users, `runtime_flag`, `service_heartbeat`. Platform-wide globals. |
-| `002-identity.sql` | `control_identity` | P593 | Principal (DID), DID document, principal keys, audit actions. Identity root of trust. |
-| `003-agency.sql` | `agency` | P594 | Agencies, agency sessions, liaison messages, `agency_route_policy`. Applied after `control_model`. |
-| `004-model.sql` | `control_model` | P595 | Model catalog, model routes, `host_model_policy`. Routing source of truth. |
-| `004-template.sql` | *(extends template)* | — | Additional template seeds (applied after `007-template.sql`). |
-| `005-credential.sql` | `control_credential` | P596 | Vault providers, credentials, credential grants, rotation log. Secret references (not plaintext). |
-| `006-workforce.sql` | `workforce` | P597 | Agent registry, agent skills, agent capabilities. Workforce identity layer. |
-| `007-template.sql` | `template` | P598 | Workflow templates (immutable), state names, gate definitions, `agent_role_profile`, proposal templates. |
-| `008-tooling.sql` | `tooling` | P599 | Tool catalog (MCP tools, CLI tools), tool grants. |
-| `009-sandbox.sql` | `sandbox` | P600 | Sandbox definitions, boundary policies, egress rules, mount grants. |
-| `010-project.sql` | `control_project` | P601 | Project registry, project DB pointers, project hosts, repos, permission grants. |
-| `010b-project-ext.sql` | *(extends control_project)* | P744/P747 | Project worktrees, members, budget policies, capacity config, route policies, sandbox grants. Requires `009-sandbox.sql`. |
-| `011-dependency.sql` | `dependency` | P602 | Cross-project dependency graph, dependency kind catalog. |
-| `012-messaging.sql` | `messaging` | P603 | A2A topics, messages, subscriptions, dead-letter queue, message archive. |
-| `013-observability.sql` | `observability` | P604 | Trace spans, agent execution spans, proposal lifecycle events, model routing outcomes, decision explainability. |
-| `013-observability-stub.sql` | *(stub)* | — | Lightweight observability stub for environments without full observability schema. |
-| `014-governance.sql` | `governance` | P605 | Policy versions (immutable), hash-chained decision log, compliance checks, event spine. |
-| `015-efficiency.sql` | `efficiency` | P606 | Efficiency metrics, cost ledger summary, dispatch metric summary, route token budgets. |
-| `070-p1350-agent-personality-memory.sql` | *(extends workforce)* | P1350 | Agent personality JSONB + long-term memory (display metadata on `agent_registry`). |
+            ↓ one DB per project tenant
 
-### Catalog Hygiene Fields
-
-Every central catalog table carries **seven hygiene fields**:
-
-```sql
-owner_did         TEXT         NOT NULL,
-lifecycle_status  TEXT         NOT NULL DEFAULT 'active'
-                              CHECK (lifecycle_status IN ('active','deprecated','retired','blocked')),
-deprecated_at     TIMESTAMPTZ,
-retire_after      TIMESTAMPTZ,
-notes             TEXT,
-created_at        TIMESTAMPTZ  NOT NULL DEFAULT now(),
-updated_at        TIMESTAMPTZ  NOT NULL DEFAULT now()
+┌────────────────────┐  ┌─────────────────────────┐
+│  agenthive DB      │  │  monkeyKing-audio DB     │
+│  (project tenant)  │  │  (planned, not live)     │
+│  roadmap.* tables  │  │                          │
+└────────────────────┘  └─────────────────────────┘
 ```
 
-**Never hard-delete catalog rows** — deprecate or retire them instead. The `service_heartbeat` table is the one exception (high-write, no ownership concept).
+**Separation of concerns:**
+- **hiveCentral** owns identity, model routing, agent registry, workflow templates, credentials, and cross-project governance — shared infrastructure.
+- **Per-project tenant DBs** own proposals, leases, dispatches, gate decisions, and project-specific operational data.
+- The link between them is `control_project.project` in hiveCentral, which holds `schema_name` pointing to the tenant DB.
 
 ---
 
-## 3. DDL Application Sequence
+## 2. Environment Variables
 
-### Prerequisites
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `AGENTHIVE_V2_DB_URL` | Yes (when live) | Connection string for the hiveCentral control-plane DB. Format: `postgresql://admin:<PASSWORD>@<HOST>:5432/hivecentral` |
+| `DATABASE_URL` | Yes | Connection string for the current `agenthive` tenant DB (pgbouncer port 6432 for queries; direct 5432 for LISTEN/NOTIFY) |
 
-Install these PostgreSQL extensions before applying DDL:
+> **Note:** `AGENTHIVE_V2_DB_URL` is defined in the environment but **not yet wired** in the AgentHive application code as of 2026-06-17. See GAP-1.2 in P3793. The application still resolves all DB connections through `DATABASE_URL`. Use `config.getProjectDb(slug)` for project-scoped connections (post-P474).
+
+---
+
+## 3. DDL File Inventory
+
+All 22 DDL files live in `database/ddl/hivecentral/`. See that directory's `README.md` for the full apply-order table, role grant matrix, and catalog hygiene field spec.
+
+| File | Schema | Key Tables / Objects | Proposal |
+|------|--------|---------------------|---------|
+| `000-roles.sql` | (global) | Postgres role bootstrap — run against the `postgres` DB, not hiveCentral | P592 |
+| `001-core.sql` | `core` | `installation`, `host_registry`, `os_user`, `runtime_flag`, `service_heartbeat` | P592 |
+| `002-identity.sql` | `identity` | `principal`, `did_document`, `public_key`, audit actions | P593 |
+| `003-agency.sql` | `agency` | `provider`, `agency`, `session`, `capacity`, message kind catalog | P594 |
+| `004-model.sql` | `model` | `model_capability`, `model`, `model_route`, `host_model_policy`; views `v_active_routes`, `v_route_policy` | P595 |
+| `004-template.sql` | `template` | Immutable versioned workflow templates (first stub) | P598 |
+| `005-credential.sql` | `credential` | `credential_provider`, `credential`, `credential_grant`, rotation audit log | P596 |
+| `005-dispatch-stub.sql` | `dispatch` | `dispatch.work_claim` with `cost_snapshot` JSONB (coordination stub for P603) | P595 |
+| `006-workforce.sql` | `workforce` | `agent`, `skill`, `agent_skill`, `agent_project`, `skill_grant_log`; views `v_agent_capabilities` | P597 |
+| `007-template.sql` | `template` | Full workflow template, state machine, gate criteria, agent role profiles | P598 |
+| `008-tooling.sql` | `tooling` | MCP + CLI tool catalog, per-principal access grants | — |
+| `009-sandbox.sql` | `sandbox` | Sandbox types, resource boundary policies, egress rules, filesystem mount grants | — |
+| `010-project.sql` | `control_project` | Project catalog, tenant DB bindings, host assignments, repo references | P601 |
+| `010b-project-ext.sql` | `control_project` | Worktrees, members, budget policy, capacity config, route policy, sandbox grants | — |
+| `011-dependency.sql` | `dependency` | Cross-project dependency links with resolution tracking + pg_notify | — |
+| `012-messaging.sql` | `messaging` | Topic bus, message log, subscriptions, dead-letter queue, cold-tier archive | — |
+| `013-observability-stub.sql` | `observability` | `model_routing_outcome` with `selection_reason_kind`, `candidate_routes_scored` (stub) | P604 |
+| `013-observability.sql` | `observability` | Full distributed tracing + execution telemetry (append-only, partitioned monthly) | — |
+| `014-governance.sql` | `governance` | Policy versioning, audit decision log, compliance checks, event-sourcing spine | — |
+| `015-efficiency.sql` | `efficiency` | Cost attribution, dispatch metrics, token budget tracking | — |
+| `070-p1350-agent-personality-memory.sql` | `workforce` | `personality` + `memory_pointer` columns on `workforce.agent` | P1350/P1352 |
+
+---
+
+## 4. Applying the DDL
+
+**Prerequisites** before running any DDL against hiveCentral:
+
+1. **Postgres 16+** with `pgvector` extension: `SELECT extversion FROM pg_extension WHERE extname = 'vector';`
+2. **Database created:** `CREATE DATABASE hivecentral;`
+3. **pg_partman 5.x** — for monthly auto-partitioning on append-only tables:
+   ```sql
+   CREATE SCHEMA IF NOT EXISTS partman;
+   CREATE EXTENSION IF NOT EXISTS pg_partman SCHEMA partman;
+   ```
+4. **pgcrypto 1.3** — for SHA-256 hash chain in `governance.decision_log`:
+   ```sql
+   CREATE EXTENSION IF NOT EXISTS pgcrypto;
+   ```
+
+Apply in **strict dependency order** (see `database/ddl/hivecentral/README.md` §Apply order for the rationale):
 
 ```bash
-# pg_partman 5.x (monthly auto-partitioning for time-series tables)
-docker exec postgres-db apt-get install -y postgresql-16-partman
-psql -d hiveCentral -c "CREATE SCHEMA IF NOT EXISTS partman;"
-psql -d hiveCentral -c "CREATE EXTENSION IF NOT EXISTS pg_partman SCHEMA partman;"
-
-# pgcrypto (SHA-256 hash chain in governance.decision_log)
-psql -d hiveCentral -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
-```
-
-Minimum PostgreSQL version: **16** (declarative partitioning + pg_partman 5.x required).
-
-### Apply Order
-
-Apply in strict dependency order — FK references require earlier schemas to exist:
-
-```
-Step  File                     Schema created
-----  -----------------------  ----------------------
- 1    000-roles.sql            (roles — run on postgres DB)
- 2    001-core.sql             core
- 3    002-identity.sql         control_identity
- 4    004-model.sql            control_model
- 5    005-credential.sql       control_credential
- 6    006-workforce.sql        workforce
- 7    010-project.sql          control_project
- 8    009-sandbox.sql          sandbox
- 9    010b-project-ext.sql     (extends control_project)
-10    003-agency.sql           agency
-11    007-template.sql         template
-12    008-tooling.sql          tooling
-13    011-dependency.sql       dependency
-14    012-messaging.sql        messaging
-15    013-observability.sql    observability
-16    014-governance.sql       governance
-17    015-efficiency.sql       efficiency
-18    070-p1350-agent-personality-memory.sql  (extends workforce)
-```
-
-### Apply Commands
-
-```bash
-# Step 1 — roles (run against postgres DB as superuser)
+# Step 1: roles — run against the postgres DB (NOT hiveCentral)
 PGOPTIONS='-c agenthive.admin_password=<vault> \
            -c agenthive.orchestrator_password=<vault> \
            -c agenthive.agency_password=<vault> \
@@ -170,117 +117,56 @@ PGOPTIONS='-c agenthive.admin_password=<vault> \
            -c agenthive.repl_password=<vault>' \
   psql -d postgres -f database/ddl/hivecentral/000-roles.sql
 
-# IMPORTANT: Use PGOPTIONS GUC syntax above, NOT psql -v admin_password=<vault>
-# The -v flag sets psql substitution variables (:admin_password), not GUC parameters
-# (agenthive.admin_password), and will produce a runtime error.
-
-# Steps 2–17 — apply to hiveCentral DB in order
-cd database/ddl/hivecentral
-psql -d hiveCentral -f 001-core.sql
-psql -d hiveCentral -f 002-identity.sql
-psql -d hiveCentral -f 004-model.sql
-psql -d hiveCentral -f 005-credential.sql
-psql -d hiveCentral -f 006-workforce.sql
-psql -d hiveCentral -f 010-project.sql
-psql -d hiveCentral -f 009-sandbox.sql
-psql -d hiveCentral -f 010b-project-ext.sql
-psql -d hiveCentral -f 003-agency.sql
-psql -d hiveCentral -f 007-template.sql
-psql -d hiveCentral -f 008-tooling.sql
-psql -d hiveCentral -f 011-dependency.sql
-psql -d hiveCentral -f 012-messaging.sql
-psql -d hiveCentral -f 013-observability.sql
-psql -d hiveCentral -f 014-governance.sql
-psql -d hiveCentral -f 015-efficiency.sql
-
-# Optional personality/memory extension (P1350)
-psql -d hiveCentral -f 070-p1350-agent-personality-memory.sql
+# Steps 2–17: apply to hiveCentral in dependency order
+DDL_DIR=database/ddl/hivecentral
+for f in \
+  001-core.sql 002-identity.sql 004-model.sql \
+  005-credential.sql 006-workforce.sql 010-project.sql \
+  009-sandbox.sql 010b-project-ext.sql 003-agency.sql \
+  007-template.sql 008-tooling.sql 011-dependency.sql \
+  012-messaging.sql 013-observability.sql 014-governance.sql \
+  015-efficiency.sql 070-p1350-agent-personality-memory.sql; do
+  echo "Applying $f..."
+  psql -d hivecentral -f "$DDL_DIR/$f" || { echo "FAILED: $f"; exit 1; }
+done
+echo "hiveCentral DDL applied."
 ```
 
-The full runbook for initial provisioning lives at `docs/migration/p501-runbook.md`.
+All files use `CREATE TABLE IF NOT EXISTS`, `CREATE OR REPLACE`, or `ALTER … IF NOT EXISTS` — re-running is safe.
+
+> ⚠️ **File 004 applies before 003**: `004-model.sql` and `004-template.sql` must run before `003-agency.sql` due to FK dependencies. The file naming is intentional — see `database/ddl/hivecentral/README.md` §Apply order.
 
 ---
 
-## 4. Tenant Bootstrap Sequence
+## 5. Tenant Bootstrap Sequence
 
-After hiveCentral is running, bootstrapping a new project tenant follows this sequence:
-
-1. **Create the tenant DB** — `CREATE DATABASE <slug>;` on the Postgres host.
-2. **Register in hiveCentral** — insert a row into `control_project.project` and `control_project.project_db`.
-3. **Apply tenant DDL** — apply files from `database/ddl/tenant/` (P508 schema templates) against the tenant DB.
-4. **Seed the project** — run the project-seed script (proposals, workflow templates, agent_role_profile seeds).
-5. **Register with pgbouncer** — add the tenant DB to the pgbouncer `databases` config; reload.
-6. **Verify** — `hive doctor --project <slug>` runs full readiness checks.
-
-Existing tenants:
-- `agenthive` — the AgentHive platform itself (project_id=1, self-hosted)
-- `monkeyKing-audio` — audio-book generation project (P513)
-- `georgia-singer` — AI singer project (P514)
-
----
-
-## 5. Role Grant Matrix (core schema)
-
-| Role | `core.installation` | `core.host` | `core.os_user` | `core.runtime_flag` | `core.service_heartbeat` |
-|------|:---:|:---:|:---:|:---:|:---:|
-| `agenthive_admin` | ALL | ALL | ALL | ALL | ALL |
-| `agenthive_orchestrator` | SELECT | SELECT | SELECT | SELECT, INSERT, UPDATE | SELECT, INSERT, UPDATE |
-| `agenthive_agency` | — | SELECT | SELECT | SELECT | INSERT, UPDATE |
-| `agenthive_a2a` | — | — | — | SELECT | INSERT, UPDATE |
-| `agenthive_observability` | SELECT | SELECT | SELECT | SELECT | SELECT |
-| `agenthive_repl` | replication slot access only | | | | |
-
-**Least-privilege note:** `agenthive_orchestrator` holds SELECT-only on `host`, `os_user`, and `installation`. Catalog writes belong to provisioning workflows, not the orchestrator.
-
----
-
-## 6. Key Integration Patterns
-
-### Reading a runtime flag
-
-```typescript
-import { config } from '../shared/config/index.ts';
-
-// Reads from hiveCentral.core.runtime_flag (via ConfigResolver, P827)
-const maxInflight = await config.get('ORCHESTRATOR_MAX_INFLIGHT_OFFERS');
-```
-
-### Registering a new model route
-
-Insert via SQL (admin only) or the MCP `register_model` tool (P1129):
-```bash
-hive mcp smoke --include tool-availability  # Verify MCP is healthy first
-# Then use the mcp_agent register_model action
-```
-
-### Querying cross-project dependencies
+After hiveCentral DDL is applied, each project tenant requires a bootstrap record in `control_project.project`:
 
 ```sql
-SELECT * FROM dependency.cross_project_dependency
-WHERE source_project_id = $1 OR target_project_id = $1;
+-- Register the agenthive project tenant
+INSERT INTO control_project.project (slug, display_name, schema_name, db_url, owner_did)
+VALUES ('agenthive', 'AgentHive', 'roadmap', '<AGENTHIVE_DB_URL>', '<ADMIN_DID>');
+
+-- Future tenants follow the same pattern:
+-- ('monkeyKing-audio', 'MonkeyKing Audio', 'public', '<MK_DB_URL>', '<ADMIN_DID>');
+-- ('georgia-singer', 'Georgia Singer', 'public', '<GS_DB_URL>', '<ADMIN_DID>');
 ```
 
-### Checking agency liveness
-
-```sql
-SELECT agency_id, lifecycle_status, last_heartbeat_at
-FROM agency.agency
-WHERE lifecycle_status = 'active'
-  AND last_heartbeat_at > now() - interval '2 minutes';
-```
+After bootstrap, `config.getProjectDb(slug)` resolves the correct tenant DB URL from the hiveCentral registry.
 
 ---
 
-## 7. Reference
+## 6. Deployment Preconditions
 
-| Resource | Path / Location |
-|----------|-----------------|
-| DDL files | `database/ddl/hivecentral/` |
-| DDL README (apply order + role matrix) | `database/ddl/hivecentral/README.md` |
-| Multi-project architecture spec | `docs/multi-project-redesign.md` |
-| Disaster recovery design | `docs/dr/hivecentral-dr-design.md` |
-| P501 provisioning runbook | `docs/migration/p501-runbook.md` |
-| Control-plane table classification | `database/control-plane-tables.md` |
-| Gap analysis (current implementation status) | `docs/architecture/gap-analysis-2026-06.md` |
-| Proposal group | `roadmap_proposal.proposal` rows P590–P608 |
-| hiveCentral CONVENTIONS | `docs/hiveCentral/CONVENTIONS.md` |
+**Current state (2026-06-17):** hiveCentral is not live. The application runs against a single `agenthive` DB mixing control-plane and tenant data. See GAP-1 in P3793.
+
+| # | Precondition | Tracking |
+|---|-------------|---------|
+| 1 | `AGENTHIVE_V2_DB_URL` wired in application config and service startup | P3793 GAP-1.2 |
+| 2 | `config.getProjectDb(slug)` routing live | P474 COMPLETE |
+| 3 | Tenant bootstrap DDL applied for each project | P3793 GAP-1.3 |
+| 4 | pgbouncer pool routing updated for dual-DB connections | P3564 REVIEW |
+| 5 | Migration plan: current single-DB → two-tier topology | P429 COMPLETE (DDL exists, not deployed) |
+| 6 | Data migration: copy existing `roadmap.*` control-plane rows to hiveCentral schemas | Not yet filed |
+
+**Related proposals:** P429 (hiveCentral DDL), P601 (project schema), P592–P598 (per-schema proposals), P3793 (gap analysis), P3564 (pgbouncer pool).
