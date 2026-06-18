@@ -1727,6 +1727,30 @@ export const FlagKeys = {
 		envOverride: false,
 	} satisfies ConfigKey<number>,
 
+	// P3795: hard routing gate on provider health. When ON (default), a provider
+	// whose P796 probe cache shows a fresh timeout/error is excluded from the
+	// dispatch path entirely (isProviderHealthyForDispatch → allowed=false).
+	// When OFF, the gate is bypassed (reason='gate_disabled') and behavior
+	// reverts to the pre-P3795 soft-sort-only signal. Fails open on stale/absent.
+	PROVIDER_HEALTH_GATE_ENABLED: {
+		name: "PROVIDER_HEALTH_GATE_ENABLED",
+		class: "flag" as const,
+		parse: (v: string) => {
+			try {
+				return JSON.parse(v) === true;
+			} catch {
+				return v.toLowerCase() === "true" || v === "1";
+			}
+		},
+		required: false,
+		defaultValue: true,
+		description:
+			"P3795: block dispatch to providers whose health probe is a fresh timeout/error. Default ON; fails open on stale/unknown.",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies ConfigKey<boolean>,
+
 	AGENT_PROPOSAL_LEASE_TTL_MS: {
 		name: "AGENT_PROPOSAL_LEASE_TTL_MS",
 		class: "flag" as const,

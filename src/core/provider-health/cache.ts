@@ -50,6 +50,21 @@ export class HealthCache {
 		return entry;
 	}
 
+	/**
+	 * Return the raw entry regardless of staleness (null only when truly absent).
+	 * P3795: the routing gate must distinguish "no probe yet" (unknown) from
+	 * "probe ran but is stale" — `get()` collapses both to null, so callers that
+	 * care about that distinction use `peek()` and compute staleness themselves
+	 * via {@link isCacheStale}.
+	 */
+	peek(provider: string, model?: string | null): HealthEntry | null {
+		return (
+			this.entries.get(healthCacheKey(provider, model)) ??
+			this.entries.get(healthCacheKey(provider)) ??
+			null
+		);
+	}
+
 	set(
 		provider: string,
 		model: string | null | undefined,
@@ -78,6 +93,18 @@ export function getCached(
 	model?: string | null,
 ): HealthEntry | null {
 	return defaultCache.get(provider, model);
+}
+
+/**
+ * Staleness-agnostic read of the shared cache (P3795). Returns the entry even
+ * when stale; null only when no probe has ever populated it. The routing gate
+ * uses this to tell `unknown` (absent) apart from `stale`.
+ */
+export function peekCached(
+	provider: string,
+	model?: string | null,
+): HealthEntry | null {
+	return defaultCache.peek(provider, model);
 }
 
 export function setCached(
