@@ -2,7 +2,38 @@
 
 Target schema files for the v3 redesign control-plane database. These run **only** against `hiveCentral`, never against `agenthive` (which becomes the first project tenant DB after Wave 4) or any other tenant DB.
 
-**15 schemas. Apply in dependency order (see below).**
+**16 physical schemas covering all 17 AC-1 logical families. Apply in dependency order (see below).**
+
+## AC-1 Logical-Family → Physical-Schema Mapping
+
+P820 AC-1 specifies 17 schema families. The physical DDL consolidates three families to reduce schema-count overhead:
+
+| AC-1 Logical Family | Physical Schema | DDL File | Notes |
+| :--- | :--- | :--- | :--- |
+| core | `core` | 001-core.sql | installation, host, os_user, config_mutation_log |
+| runtime | `core` | 001-core.sql | runtime_flag, service_heartbeat — co-located with core (same lifecycle, same ownership) |
+| identity | `control_identity` | 002-identity.sql | principal, did_document, principal_key, audit_action |
+| agency | `agency` | 003-agency.sql | agency_provider, agency, agency_session, liaison_message, agency_route_policy |
+| model | `hivecentral` | 004-model.sql | model, model_route, host_model_policy |
+| credential | `control_credential` | 005-credential.sql | vault_provider, credential, credential_grant, rotation_log |
+| queue | `dispatch` | 005-dispatch-stub.sql + 005-dispatch-full.sql | work_claim, work_offer, proposal_lease, dispatch_audit, capacity_snapshot |
+| proposal | `dispatch` | 005-dispatch-full.sql | proposal_lease is the hiveCentral-side record for each active proposal context; full proposal rows live in tenant DBs (cross-DB app-level FK) |
+| workflow | `template` | 007-template.sql | workflow_template (immutable), state_name, gate_definition, agent_role_profile, proposal_template |
+| workforce | `workforce` | 006-workforce.sql | agent, skill, agent_skill, agent_project, skill_grant_log |
+| project | `control_project` | 010-project.sql + 010b-project-ext.sql | project, project_db, project_host, project_repo, project_worktree, project_budget_policy, project_capacity_config, project_route_policy |
+| sandbox | `sandbox` | 009-sandbox.sql | sandbox_definition, boundary_policy, egress_rule, mount_grant |
+| tooling | `tooling` | 008-tooling.sql | tool, mcp_tool, cli_tool, tool_grant |
+| messaging | `messaging` | 012-messaging.sql | a2a_topic, a2a_message, a2a_subscription, a2a_dlq, a2a_message_archive |
+| observability | `observability` | 013-observability.sql | trace_span, agent_execution_span, proposal_lifecycle_event, model_routing_outcome, decision_explainability |
+| governance | `governance` | 014-governance.sql | policy_version (immutable), decision_log (hash-chained), compliance_check, event_log |
+| efficiency | `efficiency` | 015-efficiency.sql | efficiency_metric, cost_ledger_summary, dispatch_metric_summary, route_token_budget |
+
+`dependency` (011-dependency.sql) is an additional schema added beyond the 17 AC-1 families to capture cross-project proposal dependency edges; it has no AC-1 coverage gap.
+
+**Consolidation decisions (AC-3):**
+- `runtime` → `core`: runtime_flag and service_heartbeat share the same owner_did, lifecycle, and bootstrap timing as core catalog tables. Keeping them separate would require a circular FK (core needs runtime_flag before runtime can reference core.installation). Co-location is cleaner.
+- `queue` + `proposal` → `dispatch`: In hiveCentral, a "proposal" is represented only by its dispatch-side records (offer, lease). Proposal content lives in the tenant DB. A separate proposal schema with only FK stubs would be misleading; merging into dispatch makes the cross-DB boundary explicit.
+- `workflow` → `template`: Workflow templates are immutable reference data, not runtime state. Merging into a `template` schema alongside other immutable reference tables (gate_definition, agent_role_profile) keeps the runtime/reference distinction sharp.
 
 ## Layout
 
@@ -65,6 +96,8 @@ The `set_updated_at()` trigger is **not** attached to `core.service_heartbeat`.
 
 ## Role grant matrix
 
+### core schema
+
 | Role                    | core.installation | core.host | core.os_user | core.runtime_flag | core.service_heartbeat | Views           |
 |-------------------------|:-----------------:|:---------:|:------------:|:-----------------:|:----------------------:|:---------------:|
 | `agenthive_admin`       | ALL               | ALL       | ALL          | ALL               | ALL                    | ALL             |
@@ -78,6 +111,152 @@ Notes:
 - `agenthive_orchestrator` holds **SELECT-only** on `host`, `os_user`, and `installation`. It must NOT hold INSERT/UPDATE on these catalog tables — catalog writes belong to provisioning workflows (not the orchestrator); granting write access is a least-privilege violation.
 - `agenthive_agency` holds SELECT on `os_user` so it can look up the OS user a process runs as.
 - `agenthive_a2a` needs SELECT on `runtime_flag` to pick up per-project config and INSERT/UPDATE on `service_heartbeat` to publish its own heartbeat.
+
+### control_identity schema
+
+| Role                     | principal | did_document | principal_key | audit_action |
+|--------------------------|:---------:|:------------:|:-------------:|:------------:|
+| `agenthive_admin`        | ALL       | ALL          | ALL           | ALL          |
+| `agenthive_orchestrator` | SELECT    | SELECT       | SELECT        | SELECT       |
+| `agenthive_agency`       | SELECT    | SELECT       | SELECT        | INSERT       |
+| `agenthive_a2a`          | —         | —            | —             | —            |
+| `agenthive_observability`| SELECT    | SELECT       | SELECT        | SELECT       |
+
+Notes: Agencies may INSERT to `audit_action` to log their own authentication events; they cannot modify principal or key catalog rows.
+
+### hivecentral (control_model) schema
+
+| Role                     | model | model_route | host_model_policy |
+|--------------------------|:-----:|:-----------:|:-----------------:|
+| `agenthive_admin`        | ALL   | ALL         | ALL               |
+| `agenthive_orchestrator` | SELECT| SELECT      | SELECT            |
+| `agenthive_agency`       | SELECT| SELECT      | —                 |
+| `agenthive_a2a`          | SELECT| SELECT      | —                 |
+| `agenthive_observability`| SELECT| SELECT      | SELECT            |
+
+### control_credential schema
+
+| Role                     | vault_provider | credential | credential_grant | rotation_log |
+|--------------------------|:--------------:|:----------:|:----------------:|:------------:|
+| `agenthive_admin`        | ALL            | ALL        | ALL              | ALL          |
+| `agenthive_orchestrator` | SELECT         | SELECT     | SELECT           | SELECT       |
+| `agenthive_agency`       | —              | —          | SELECT           | —            |
+| `agenthive_a2a`          | —              | —          | —                | —            |
+| `agenthive_observability`| SELECT         | —          | —                | SELECT       |
+
+Notes: Agencies may SELECT `credential_grant` to verify they hold a valid grant, but may never SELECT `credential` (which contains vault URIs) directly — they must use the provisioned env/secret path.
+
+### dispatch schema
+
+| Role                     | work_claim | work_offer | proposal_lease | dispatch_audit | capacity_snapshot | Views |
+|--------------------------|:----------:|:----------:|:--------------:|:--------------:|:-----------------:|:-----:|
+| `agenthive_admin`        | ALL        | ALL        | ALL            | INSERT         | ALL               | ALL   |
+| `agenthive_orchestrator` | SELECT, INSERT, UPDATE | SELECT, INSERT, UPDATE | SELECT, INSERT, UPDATE | INSERT | SELECT, INSERT | SELECT |
+| `agenthive_agency`       | SELECT, UPDATE | SELECT | SELECT, UPDATE | INSERT        | SELECT            | SELECT|
+| `agenthive_a2a`          | —          | —          | —              | —              | —                 | —     |
+| `agenthive_observability`| SELECT     | SELECT     | SELECT         | SELECT         | SELECT            | SELECT|
+
+Notes:
+- `dispatch_audit` is append-only; only INSERT is granted (no UPDATE/DELETE to any role). A trigger enforces this.
+- `capacity_snapshot` INSERT is granted to `agenthive_orchestrator` for polling cycles; agencies SELECT their own capacity rows.
+
+### workforce schema
+
+| Role                     | agent | skill | agent_skill | agent_project | skill_grant_log |
+|--------------------------|:-----:|:-----:|:-----------:|:-------------:|:---------------:|
+| `agenthive_admin`        | ALL   | ALL   | ALL         | ALL           | INSERT          |
+| `agenthive_orchestrator` | SELECT, INSERT, UPDATE | SELECT | SELECT, INSERT, UPDATE | SELECT, INSERT | INSERT |
+| `agenthive_agency`       | SELECT| SELECT| SELECT      | SELECT        | SELECT          |
+| `agenthive_a2a`          | —     | —     | —           | —             | —               |
+| `agenthive_observability`| SELECT| SELECT| SELECT      | SELECT        | SELECT          |
+
+### agency schema
+
+| Role                     | agency_provider | agency | agency_session | liaison_message | agency_route_policy | agency_capacity |
+|--------------------------|:---------------:|:------:|:--------------:|:---------------:|:-------------------:|:---------------:|
+| `agenthive_admin`        | ALL             | ALL    | ALL            | ALL             | ALL                 | ALL             |
+| `agenthive_orchestrator` | SELECT          | SELECT, INSERT, UPDATE | SELECT, INSERT, UPDATE | SELECT | SELECT | SELECT, INSERT, UPDATE |
+| `agenthive_agency`       | —               | SELECT | SELECT, UPDATE | INSERT, SELECT  | SELECT              | SELECT          |
+| `agenthive_a2a`          | SELECT          | —      | —              | SELECT          | —                   | —               |
+| `agenthive_observability`| SELECT          | SELECT | SELECT         | SELECT          | SELECT              | SELECT          |
+
+### control_project schema
+
+| Role                     | project | project_db | project_host | project_worktree | project_budget_policy | project_capacity_config | project_route_policy |
+|--------------------------|:-------:|:----------:|:------------:|:----------------:|:---------------------:|:-----------------------:|:--------------------:|
+| `agenthive_admin`        | ALL     | ALL        | ALL          | ALL              | ALL                   | ALL                     | ALL                  |
+| `agenthive_orchestrator` | SELECT  | SELECT     | SELECT       | SELECT           | SELECT                | SELECT, INSERT, UPDATE  | SELECT               |
+| `agenthive_agency`       | SELECT  | —          | SELECT       | SELECT           | —                     | —                       | SELECT               |
+| `agenthive_a2a`          | SELECT  | —          | —            | —                | —                     | —                       | SELECT               |
+| `agenthive_observability`| SELECT  | SELECT     | SELECT       | SELECT           | SELECT                | SELECT                  | SELECT               |
+
+Notes: `project_db` (contains `tenant_db_url` DSN reference) is not readable by agencies or a2a — DSN access is mediated by the pool factory using the provisioned vault path.
+
+### template schema
+
+| Role                     | workflow_template | state_name | gate_definition | agent_role_profile | proposal_template |
+|--------------------------|:-----------------:|:----------:|:---------------:|:-----------------:|:-----------------:|
+| `agenthive_admin`        | ALL               | ALL        | ALL             | ALL               | ALL               |
+| `agenthive_orchestrator` | SELECT            | SELECT     | SELECT          | SELECT            | SELECT            |
+| `agenthive_agency`       | SELECT            | SELECT     | SELECT          | SELECT            | SELECT            |
+| `agenthive_a2a`          | SELECT            | —          | —               | SELECT            | —                 |
+| `agenthive_observability`| SELECT            | SELECT     | SELECT          | SELECT            | SELECT            |
+
+Notes: Template tables are immutable reference data. No role (including admin) holds UPDATE on them — changes require a new version row.
+
+### sandbox, tooling, dependency schemas
+
+| Role                     | sandbox.* (all) | tooling.* (all) | dependency.* (all) |
+|--------------------------|:---------------:|:---------------:|:------------------:|
+| `agenthive_admin`        | ALL             | ALL             | ALL                |
+| `agenthive_orchestrator` | SELECT          | SELECT          | SELECT, INSERT, UPDATE |
+| `agenthive_agency`       | SELECT          | SELECT          | SELECT             |
+| `agenthive_a2a`          | —               | SELECT          | —                  |
+| `agenthive_observability`| SELECT          | SELECT          | SELECT             |
+
+### messaging schema
+
+| Role                     | a2a_topic | a2a_message | a2a_subscription | a2a_dlq | a2a_message_archive |
+|--------------------------|:---------:|:-----------:|:----------------:|:-------:|:-------------------:|
+| `agenthive_admin`        | ALL       | ALL         | ALL              | ALL     | ALL                 |
+| `agenthive_orchestrator` | SELECT    | SELECT      | SELECT           | SELECT  | SELECT              |
+| `agenthive_agency`       | SELECT    | INSERT, SELECT | SELECT, INSERT, UPDATE | SELECT | SELECT         |
+| `agenthive_a2a`          | SELECT    | INSERT, SELECT | SELECT, INSERT, UPDATE | SELECT | SELECT         |
+| `agenthive_observability`| SELECT    | SELECT      | SELECT           | SELECT  | SELECT              |
+
+### observability schema
+
+| Role                     | trace_span | agent_execution_span | proposal_lifecycle_event | model_routing_outcome | decision_explainability |
+|--------------------------|:----------:|:--------------------:|:------------------------:|:---------------------:|:-----------------------:|
+| `agenthive_admin`        | ALL        | ALL                  | ALL                      | ALL                   | ALL                     |
+| `agenthive_orchestrator` | INSERT     | INSERT               | INSERT                   | INSERT                | SELECT                  |
+| `agenthive_agency`       | INSERT     | INSERT               | —                        | INSERT                | —                       |
+| `agenthive_a2a`          | INSERT     | —                    | —                        | —                     | —                       |
+| `agenthive_observability`| SELECT     | SELECT               | SELECT                   | SELECT                | SELECT                  |
+
+Notes: All observability tables are effectively append-only event logs; only INSERT is granted to producers.
+
+### governance schema
+
+| Role                     | policy_version | decision_log | compliance_check | event_log |
+|--------------------------|:--------------:|:------------:|:----------------:|:---------:|
+| `agenthive_admin`        | ALL            | INSERT       | ALL              | INSERT    |
+| `agenthive_orchestrator` | SELECT         | INSERT       | SELECT, INSERT   | INSERT    |
+| `agenthive_agency`       | SELECT         | —            | SELECT           | —         |
+| `agenthive_a2a`          | SELECT         | —            | —                | INSERT    |
+| `agenthive_observability`| SELECT         | SELECT       | SELECT           | SELECT    |
+
+Notes: `decision_log` and `event_log` are append-only (hash-chained). No UPDATE/DELETE granted to any role.
+
+### efficiency schema
+
+| Role                     | efficiency_metric | cost_ledger_summary | dispatch_metric_summary | route_token_budget |
+|--------------------------|:-----------------:|:-------------------:|:-----------------------:|:------------------:|
+| `agenthive_admin`        | ALL               | ALL                 | ALL                     | ALL                |
+| `agenthive_orchestrator` | SELECT, INSERT    | SELECT, INSERT      | SELECT, INSERT          | SELECT, UPDATE     |
+| `agenthive_agency`       | SELECT            | —                   | —                       | SELECT             |
+| `agenthive_a2a`          | —                 | —                   | —                       | —                  |
+| `agenthive_observability`| SELECT            | SELECT              | SELECT                  | SELECT             |
 
 ## Prerequisites
 
