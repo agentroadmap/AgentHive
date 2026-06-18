@@ -13,11 +13,31 @@
  *
  * AC-6: writes/upserts a `silent_spawn_timeout` row into
  * roadmap.agency_observability_alert_state for Discord dedup alerting.
+ *
+ * Lease release: when a silent run is reaped, the associated proposal_lease is
+ * released immediately so the proposal can be redispatched without waiting for
+ * the 10-min lease-expiry reaper (AC-3 requirement).
  */
 
 import type { Pool } from "pg";
-import type { ReaperLogger } from "./reap-stale-rows.ts";
-import { incrementSpawnFailure } from "../orchestration/resolvers/agency-resolver.ts";
+
+/** Minimal logger interface; mirrors ReaperLogger in reap-stale-rows.ts. */
+export interface ReaperLogger {
+	log: (msg: string) => void;
+	warn: (msg: string) => void;
+}
+
+/** Lazy-loaded at call time so the module is testable without agent-spawner side effects. */
+async function defaultIncrementFn(
+	agencyIdentity: string,
+	threshold: number,
+	errorClass: "timeout",
+): Promise<void> {
+	const { incrementSpawnFailure } = await import(
+		"../orchestration/resolvers/agency-resolver.ts"
+	);
+	await incrementSpawnFailure(agencyIdentity, threshold, errorClass);
+}
 
 const SPAWN_NO_PROGRESS_MS = Number(
 	process.env.AGENTHIVE_SPAWN_NO_PROGRESS_MS ?? 5 * 60 * 1_000,
@@ -25,6 +45,19 @@ const SPAWN_NO_PROGRESS_MS = Number(
 
 export interface SilentWatchdogResult {
 	silentSpawnsTimedOut: number;
+}
+
+/** Injectable options — used by tests to stub out the failure counter. */
+export interface SilentWatchdogOptions {
+	/**
+	 * Override for incrementSpawnFailure — injected in tests to avoid a real
+	 * DB write. Defaults to the real implementation from agency-resolver.
+	 */
+	incrementFailureFn?: (
+		agencyIdentity: string,
+		threshold: number,
+		errorClass: "timeout",
+	) => Promise<void>;
 }
 
 interface SilentRunRow {
@@ -37,9 +70,11 @@ export async function detectAndReapSilentSpawns(
 	pool: Pool,
 	logger: ReaperLogger,
 	tag = "SilentWatchdog",
+	opts: SilentWatchdogOptions = {},
 ): Promise<SilentWatchdogResult> {
 	const thresholdMs = SPAWN_NO_PROGRESS_MS;
 	const thresholdInterval = `${thresholdMs} milliseconds`;
+	const incrementFn = opts.incrementFailureFn ?? defaultIncrementFn;
 
 	// Find running rows past threshold with no tool calls on their briefing.
 	// A NULL briefing_id means legacy spawns without tracking — also silent.
@@ -90,9 +125,23 @@ export async function detectAndReapSilentSpawns(
 				[row.id],
 			);
 
+			// Release the associated proposal_lease immediately so the proposal
+			// can be redispatched without waiting for the 10-min lease-expiry reaper.
+			if (row.agency_identity && row.proposal_id) {
+				await pool.query(
+					`UPDATE roadmap_proposal.proposal_lease
+					 SET released_at  = now(),
+					     release_reason = 'silent_spawn_timeout'
+					 WHERE proposal_id = $1::bigint
+					   AND agent_identity = $2
+					   AND released_at IS NULL`,
+					[row.proposal_id, row.agency_identity],
+				);
+			}
+
 			// AC-5: throttle counter so P1360 can gate repeated silent agencies
 			if (row.agency_identity) {
-				await incrementSpawnFailure(row.agency_identity, 3, "timeout");
+				await incrementFn(row.agency_identity, 3, "timeout");
 			}
 
 			// AC-6: upsert observability alert for Discord dedup

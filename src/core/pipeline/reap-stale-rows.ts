@@ -13,11 +13,7 @@
 import type { Pool } from "pg";
 import { reapOrphanScratch } from "../../shared/utils/agent-scratch.ts";
 import { detectAndReapSilentSpawns } from "./silent-spawn-watchdog.ts";
-
-export interface ReaperLogger {
-	log: (msg: string) => void;
-	warn: (msg: string) => void;
-}
+export type { ReaperLogger } from "./silent-spawn-watchdog.ts";
 
 export interface ReapResult {
 	leases: number;
