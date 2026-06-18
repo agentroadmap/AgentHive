@@ -372,9 +372,36 @@ export class Orchestrator {
 		// Schedule the five legacy poll timers. Each is parity with the
 		// scripts/orchestrator.ts main() interval; toggles preserved.
 		if (ENABLE_POLLING) {
+			// P3840 fix: when the unified pool is on, the periodic poll must drive
+			// scanQueues() — otherwise the unified pool (which posts gate-review
+			// offers for mature proposals AND work offers for new/active) is never
+			// invoked and mature proposals sit ungated. _statePollTick only covers
+			// new/active via handleStateChange and never calls scanQueues, so the
+			// unified path was dead code until wired here. Legacy path unchanged.
+			if (this.unifiedPoolEnabled) {
+				// Initial drain at boot so the first gate offers do not wait 2 min.
+				void this.trackInFlight(
+					this.scanQueues().catch((err) =>
+						console.error("[Orchestrator] startup unified scan failed:", err),
+					),
+				);
+			}
 			this.pollTimers.set(
 				"state-change",
-				setInterval(() => this._statePollTick(), 2 * 60 * 1000),
+				setInterval(() => {
+					if (this.unifiedPoolEnabled) {
+						void this.trackInFlight(
+							this.scanQueues().catch((err) =>
+								console.error(
+									"[Orchestrator] unified scanQueues poll failed:",
+									err,
+								),
+							),
+						);
+					} else {
+						void this._statePollTick();
+					}
+				}, 2 * 60 * 1000),
 			);
 			console.log("[Orchestrator] 2-min state-change polling enabled");
 		} else {
