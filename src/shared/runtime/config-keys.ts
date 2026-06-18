@@ -1767,6 +1767,26 @@ export const FlagKeys = {
 		envOverride: false,
 	} satisfies ConfigKey<number>,
 
+	// P3847 Part B: the no-progress watchdog reaps a status='running' agent_run
+	// that has shown no tool-call/checkpoint/output progress for this long (well
+	// under the ~20-min hard spawn timeout). Floor 30 s so startup quiet never
+	// trips it.
+	AGENTHIVE_SPAWN_NO_PROGRESS_MS: {
+		name: "AGENTHIVE_SPAWN_NO_PROGRESS_MS",
+		class: "flag" as const,
+		parse: (v: string) => {
+			const n = Number(JSON.parse(v));
+			if (!Number.isFinite(n) || n < 30_000) throw new Error("must be >= 30000");
+			return n;
+		},
+		required: false,
+		defaultValue: 300_000,
+		description: "P3847: silent no-progress watchdog threshold in ms — a running spawn with no tool-call/output for this long is reaped before the hard timeout (default 5 min).",
+		dbTable: "core.runtime_flag",
+		dbColumn: "value_jsonb",
+		envOverride: true,
+	} satisfies ConfigKey<number>,
+
 	GATEWAY_WAKE_TIMEOUT_MS: {
 		name: "GATEWAY_WAKE_TIMEOUT_MS",
 		class: "flag" as const,
