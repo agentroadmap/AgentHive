@@ -45,6 +45,9 @@ Thumbs.db
 /test-*.out
 /test-output.txt
 
+# Test-run artifacts: timestamps updated on each run, not source-of-truth
+tests/test-temp/
+
 # Local agent and scratch space
 /.copilot/
 /.gemini/
