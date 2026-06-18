@@ -1705,6 +1705,16 @@ export async function renderBoardTui(
 			focusColumn(currentCol, targetIndex);
 			updateFooter();
 		});
+		// Track the last applied panel layout so we can force a full repaint
+		// exactly once per real transition. neo-neo-bblessed never clears its line
+		// buffer between renders (see screen.ts render() TODO: "clearRegion ...
+		// for the sake of clearing a spot where an element used to be e.g. when an
+		// element ... is hidden"). So when the full-width feed panel (S) shrinks
+		// back to 25% (S again), the left region it painted is only covered by
+		// transparent panes/list-row gaps and the stale feed text lingers as
+		// scattered characters across the columns. realloc() blanks both screen
+		// buffers and clears the terminal so the next render() repaints cleanly.
+		let lastLayoutMode: string | null = null;
 		const syncBoardAreaLayout = () => {
 			const headerHeight = filterHeader?.getHeight() ?? 0;
 			boardArea.top = headerHeight;
@@ -1720,6 +1730,11 @@ export async function renderBoardTui(
 				eventPanel.right = 0;
 				eventPanel.width = "25%";
 			}
+			const layoutMode = `${feedOnlyMode ? "feed" : "board"}:${agencyViewMode ? "agency" : "kanban"}`;
+			if (lastLayoutMode !== null && lastLayoutMode !== layoutMode) {
+				screen.realloc();
+			}
+			lastLayoutMode = layoutMode;
 		};
 		syncBoardAreaLayout();
 
