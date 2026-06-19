@@ -39,6 +39,18 @@ const ROLLBACK_299 = join(
 	"299-p3929-rollback.sql",
 );
 
+// Applying the migration INSIDE a withRollback transaction must NOT execute the
+// migration's own BEGIN;/COMMIT;. The COMMIT would commit the outer test
+// transaction and PERSIST the seeded throwaway proposals into the live queue —
+// that is the source of the `p3929-test-*` storm (163 leaked proposals). Strip
+// the transaction-control statements so the DDL runs inside the test
+// transaction and rolls back cleanly. (Same gotcha the P3566 gate test
+// documents and avoids.) Text-scan tests still read the raw file.
+const MIGRATION_299_TXN_SQL = readFileSync(MIGRATION_299, "utf8").replace(
+	/^[ \t]*(?:BEGIN|COMMIT)[ \t]*;[ \t]*$/gim,
+	"",
+);
+
 describe("P3929: non-terminal gate bypass removal", { skip: !DB_TEST }, () => {
 	async function withRollback(
 		fn: (client: import("pg").Client) => Promise<void>,
@@ -143,7 +155,7 @@ describe("P3929: non-terminal gate bypass removal", { skip: !DB_TEST }, () => {
 				const pid = await seedProposal(client, "DRAFT", decider);
 
 				// Apply mig 299.
-				await client.query(readFileSync(MIGRATION_299, "utf8"));
+				await client.query(MIGRATION_299_TXN_SQL);
 
 				// Set the bypass flag (what the regression allowed).
 				await client.query(`SET LOCAL app.gate_bypass = 'true'`);
@@ -170,7 +182,7 @@ describe("P3929: non-terminal gate bypass removal", { skip: !DB_TEST }, () => {
 				const decider = "p3929-test-decider-r2d";
 				const pid = await seedProposal(client, "REVIEW", decider);
 
-				await client.query(readFileSync(MIGRATION_299, "utf8"));
+				await client.query(MIGRATION_299_TXN_SQL);
 				await client.query(`SET LOCAL app.gate_bypass = 'true'`);
 
 				await assert.rejects(
@@ -201,7 +213,7 @@ describe("P3929: non-terminal gate bypass removal", { skip: !DB_TEST }, () => {
 					[reviewer],
 				);
 
-				await client.query(readFileSync(MIGRATION_299, "utf8"));
+				await client.query(MIGRATION_299_TXN_SQL);
 
 				// Submit an independent approve.
 				await client.query(
@@ -259,7 +271,7 @@ describe("P3929: non-terminal gate bypass removal", { skip: !DB_TEST }, () => {
 				);
 				const pid = pidRows[0].id;
 
-				await client.query(readFileSync(MIGRATION_299, "utf8"));
+				await client.query(MIGRATION_299_TXN_SQL);
 
 				// Terminal gate D3 (DEVELOP→MERGE): no independence check required.
 				await client.query(
