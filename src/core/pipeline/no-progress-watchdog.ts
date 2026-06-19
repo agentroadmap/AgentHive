@@ -131,6 +131,31 @@ export async function reapSilentNoProgressRuns(
 					`[${tag}] lease release failed for run ${run.id} (proposal ${run.proposal_id}): ${err instanceof Error ? err.message : String(err)}`,
 				);
 			}
+
+			// V3-C2 (P1434): pre-stamp the live offer as a TRANSIENT failure
+			// (lease_expired) so the cause-aware circuit breaker in
+			// post-work-offer.ts — which counts only failure_class='unknown' AND
+			// NOT transient — does NOT count this no-progress reap toward a
+			// dispatch-loop pause, and stake-admission does NOT slash the agency
+			// (SLASHABLE_FAILURE_CLASSES = {'unknown'}). A silent spawn is a
+			// capacity/timeout failure, NOT an agent-attributable hallucination;
+			// without this stamp fn_complete_work_offer defaults it to 'unknown'
+			// and poisons the marketplace at multi-agency scale. Mirrors
+			// fn_reap_expired_offers, which stamps lease_expired on its reaps.
+			try {
+				await db.query(
+					`UPDATE roadmap_workforce.squad_dispatch
+					 SET failure_class = 'lease_expired', failure_is_transient = true
+					 WHERE proposal_id = $1 AND agency_identity = $2
+					   AND completed_at IS NULL
+					   AND failure_class IS NULL`,
+					[run.proposal_id, agency],
+				);
+			} catch (err) {
+				logger.warn(
+					`[${tag}] offer failure-class stamp failed for run ${run.id} (proposal ${run.proposal_id}): ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
 		}
 
 		if (!agency) continue;
