@@ -15,7 +15,8 @@ CREATE SCHEMA IF NOT EXISTS hivecentral;
 CREATE TABLE IF NOT EXISTS hivecentral.model_capability (
     id          SMALLINT     GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name        TEXT         NOT NULL UNIQUE,
-    description TEXT         NOT NULL
+    description TEXT         NOT NULL,
+    owner_did   TEXT         NOT NULL DEFAULT 'agenthive'   -- catalog hygiene (AC-1)
 );
 
 COMMENT ON TABLE hivecentral.model_capability IS
@@ -34,6 +35,7 @@ CREATE TABLE IF NOT EXISTS hivecentral.model (
     successor_model_id  BIGINT       REFERENCES hivecentral.model(id) ON DELETE SET NULL,
     capabilities        TEXT[]       NOT NULL DEFAULT '{}',
     metadata            JSONB        NOT NULL DEFAULT '{}',
+    owner_did           TEXT         NOT NULL DEFAULT 'agenthive',   -- catalog hygiene (AC-1)
     created_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
@@ -88,6 +90,7 @@ CREATE TABLE IF NOT EXISTS hivecentral.model_route (
     spawn_toolsets          TEXT,
     objective_rating        NUMERIC,
 
+    owner_did               TEXT         NOT NULL DEFAULT 'agenthive',   -- catalog hygiene (AC-1)
     created_at              TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at              TIMESTAMPTZ  NOT NULL DEFAULT now(),
 
@@ -121,6 +124,7 @@ CREATE TABLE IF NOT EXISTS hivecentral.host_model_policy (
     route_id     BIGINT       NOT NULL REFERENCES hivecentral.model_route(id) ON DELETE CASCADE,
     is_allowed   BOOLEAN      NOT NULL,
     deny_reason  TEXT,
+    owner_did    TEXT         NOT NULL DEFAULT 'agenthive',   -- catalog hygiene (AC-1)
     updated_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
     UNIQUE (host, route_id),
     CONSTRAINT deny_requires_reason CHECK (

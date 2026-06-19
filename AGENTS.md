@@ -27,6 +27,7 @@
 - Prefer tests that reproduce the bug or validate the behavior you changed.
 - Don't litter workspace with random files, especially project root folder.
 - If a section becomes stale, prefer moving the detail into docs and keeping this file short.
+- **Gate verdicts (P1391):** when `AGENTHIVE_GATE_AUTHORITY_ENABLED` is ON, `record_gate_decision` accepts only `advance | request_for_change | reject` for new writes. `reject` (→ obsolete) is ELEVATED: it needs an `operator_token` or an active `authority_grant`, and the agent path also needs a frontier-model route + a `superseded_by`/`conflicts_with` dependency edge. Flag OFF keeps the legacy `hold`/`reject`/`waive`/`escalate` vocabulary with no who-check. See CONVENTIONS.md "Gate-verdict vocabulary (P1391)".
 
 ### Repo Context
 
