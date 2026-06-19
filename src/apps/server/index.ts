@@ -64,6 +64,7 @@ import pLimit from "p-limit";
 import { sendMessage as sendLiaisonMessage } from "../../infra/agency/liaison-message-service.ts";
 import { agentNotifyChannel } from "../../infra/messaging/a2a-access-control.ts";
 import { discordSend } from "../../infra/discord/notify.ts";
+import { enqueueNotification } from "../../core/notifications/enqueue.ts";
 import { runObservabilityAlertTick } from "../../infra/agency/observability-alerting.ts";
 import type { Client as PgClient } from "pg";
 import { hashOperatorToken, requireOperator } from "./operator-auth.ts";
@@ -4504,6 +4505,34 @@ export class RoadmapServer {
 						},
 					},
 				});
+
+				// P1024 AC-5/AC-9 (Discord leg): enqueue a gate-decision notification so
+				// the P674 NotificationRouter routes it to Discord per notification_route
+				// (kind='gate_decision'). The websocket activity-feed leg is already
+				// covered by the proposal_state_changed trigger cascade; this closes the
+				// "Discord post within 5s" clause. Non-fatal: a notification-queue failure
+				// must never block the operator's gate advance.
+				try {
+					await enqueueNotification({
+						severity: "INFO",
+						kind: "gate_decision",
+						title: `Gate advance: P${proposalId} ${currentStatus}→${nextStatus}`,
+						body: rationale || `Operator advanced P${proposalId} to ${nextStatus}.`,
+						proposalId,
+						payload: {
+							proposal_id: proposalId,
+							from_state: currentStatus,
+							to_state: nextStatus,
+							decided_by: "operator",
+							source: "operator-dashboard",
+						},
+					});
+				} catch (notifyErr) {
+					console.warn(
+						`[p1024] gate-decision notification enqueue failed for P${proposalId} (non-fatal):`,
+						(notifyErr as Error).message,
+					);
+				}
 
 				results.push({
 					proposal_id: proposalId,
