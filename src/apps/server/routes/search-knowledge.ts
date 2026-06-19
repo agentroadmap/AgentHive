@@ -187,3 +187,30 @@ export async function handleMarkKnowledgeHelpful(id: string): Promise<Response> 
 		);
 	}
 }
+
+// Dispatch the search + knowledge routes. Returns a Response when the request
+// matches one of them, or null so the caller (src/apps/server/index.ts) falls
+// through to its remaining routes. Restores the export the index imports +
+// calls after the Phase-1 extraction (340a94b1) left it undefined.
+export async function routeSearchKnowledgeRequest(
+	req: Request,
+	ctx: ServerContext,
+): Promise<Response | null> {
+	const url = new URL(req.url);
+	const { pathname } = url;
+	const method = req.method;
+
+	if (pathname === "/api/search" && method === "GET") {
+		return await handleSearch(req, ctx);
+	}
+	if (pathname === "/api/knowledge" && method === "GET") {
+		return await handleListKnowledge(req);
+	}
+	if (method === "POST") {
+		const helpful = pathname.match(/^\/api\/knowledge\/([^/]+)\/helpful$/);
+		if (helpful) {
+			return await handleMarkKnowledgeHelpful(decodeURIComponent(helpful[1]));
+		}
+	}
+	return null;
+}
