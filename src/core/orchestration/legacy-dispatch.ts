@@ -242,11 +242,7 @@ function builtinFallbackForState(state: string): RoleProfile[] {
 				source: "builtin-fallback" as const,
 			},
 		],
-		// P706: DEPLOYED consolidated to COMPLETE
-				priority: 10,
-				source: "builtin-fallback" as const,
-			},
-		],
+		// P706: DEPLOYED consolidated to COMPLETE (no separate DEPLOYED entry)
 	};
 
 	return JOB_ROLES_FALLBACK[state] ?? [];
