@@ -2,6 +2,13 @@
 -- 013-observability: Distributed tracing + execution telemetry schema
 -- All tables are append-only and partitioned monthly.
 -- ============================================================
+-- owner_did exempt (AC-1, whole schema): every table here is an append-only,
+-- monthly-partitioned event/metric stream (REVOKE UPDATE,DELETE + deny-mutation
+-- trigger on each). These are telemetry rows, not managed catalog entities — there
+-- is no owner to retire/deprecate, and per-row hygiene columns would waste I/O on a
+-- high-volume write path. Provenance is carried in-row (agency_id / actor_agency_id /
+-- trigger_source). Exempt tables: trace_span, agent_execution_span,
+-- proposal_lifecycle_event, model_routing_outcome, decision_explainability.
 -- Target DB:  hiveCentral
 -- Owner:      agenthive_admin
 -- Roles:      agenthive_orchestrator (r all),

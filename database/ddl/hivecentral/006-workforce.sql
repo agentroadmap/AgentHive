@@ -1,7 +1,8 @@
 -- P597: workforce schema — agent, skill, capability (hivecentral)
 -- Tables : agent, skill, agent_skill, agent_project, skill_grant_log
 -- Views  : v_agent_capabilities, v_project_coverage, v_skill_roster
--- Enum   : agent_type, agent_status, skill_lifecycle, proficiency_level, grant_action
+-- Domains: agent_type, agent_status, skill_lifecycle, proficiency_level, grant_action
+--          (soft TEXT+CHECK value sets — NO PG ENUM, per hiveCentral single-strategy invariant)
 -- Slot   : 006 (canonical slot for P597 per DDL README)
 -- Dep    : none (standalone; migration from roadmap_workforce.* → 056-workforce-from-roadmap.sql)
 -- 2026-04-27
@@ -12,33 +13,18 @@ BEGIN;
 
 CREATE SCHEMA IF NOT EXISTS workforce;
 
--- ── Enum types ────────────────────────────────────────────────────────────────
-
-DO $$ BEGIN
-    CREATE TYPE workforce.agent_type AS ENUM ('human', 'ai', 'hybrid');
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
-
-DO $$ BEGIN
-    CREATE TYPE workforce.agent_status AS ENUM ('active', 'inactive', 'suspended');
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
-
-DO $$ BEGIN
-    CREATE TYPE workforce.skill_lifecycle AS ENUM ('active', 'deprecated', 'proposed');
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
-
-DO $$ BEGIN
-    -- Ordered: none < basic < intermediate < advanced < expert
-    CREATE TYPE workforce.proficiency_level AS ENUM ('none', 'basic', 'intermediate', 'advanced', 'expert');
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
-
-DO $$ BEGIN
-    CREATE TYPE workforce.grant_action AS ENUM ('grant', 'revoke', 'update', 'expire');
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
+-- ── Enumerated value sets (soft TEXT+CHECK strategy) ──────────────────────────
+-- Per the hiveCentral single-strategy invariant (README §catalog-hygiene + enum
+-- policy): enumerated domains are modeled as TEXT columns with inline
+-- CHECK (col IN (...)) constraints, NOT PG `CREATE TYPE ... AS ENUM`. This keeps
+-- value-set evolution a cheap ALTER (no type rewrite / no catalog-type churn) and
+-- uniform with every other schema family. Allowed value sets (formerly PG enums):
+--   agent_type        : 'human', 'ai', 'hybrid'
+--   agent_status      : 'active', 'inactive', 'suspended'
+--   skill_lifecycle   : 'active', 'deprecated', 'proposed'
+--   proficiency_level : 'none', 'basic', 'intermediate', 'advanced', 'expert'
+--                       (ordered: none < basic < intermediate < advanced < expert)
+--   grant_action      : 'grant', 'revoke', 'update', 'expire'
 
 -- ── 1. workforce.agent — project-agnostic agent catalog ───────────────────────
 -- Project assignment is via workforce.agent_project (join table), not here.
@@ -48,10 +34,12 @@ CREATE TABLE IF NOT EXISTS workforce.agent (
     id             BIGINT                  GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     agent_identity TEXT                    NOT NULL UNIQUE,
     display_name   TEXT                    NOT NULL,
-    agent_type     workforce.agent_type    NOT NULL DEFAULT 'ai',
+    agent_type     TEXT                    NOT NULL DEFAULT 'ai'
+                                           CHECK (agent_type IN ('human', 'ai', 'hybrid')),
     persona        TEXT,
     contact        TEXT,
-    status         workforce.agent_status  NOT NULL DEFAULT 'active',
+    status         TEXT                    NOT NULL DEFAULT 'active'
+                                           CHECK (status IN ('active', 'inactive', 'suspended')),
     metadata       JSONB                   NOT NULL DEFAULT '{}',
     -- Catalog hygiene: uniform across all hiveCentral catalog tables (see DDL README §catalog-hygiene).
     owner_did      TEXT                    NOT NULL DEFAULT 'agenthive',
@@ -86,7 +74,8 @@ CREATE TABLE IF NOT EXISTS workforce.skill (
     display_name       TEXT                     NOT NULL,
     description        TEXT,
     category           TEXT                     NOT NULL,
-    lifecycle          workforce.skill_lifecycle NOT NULL DEFAULT 'active',
+    lifecycle          TEXT                     NOT NULL DEFAULT 'active'
+                                                CHECK (lifecycle IN ('active', 'deprecated', 'proposed')),
     successor_skill_id BIGINT                   REFERENCES workforce.skill(id) ON DELETE SET NULL,
     created_at         TIMESTAMPTZ              NOT NULL DEFAULT now(),
     updated_at         TIMESTAMPTZ              NOT NULL DEFAULT now()
@@ -112,7 +101,8 @@ COMMENT ON COLUMN workforce.skill.successor_skill_id IS
 CREATE TABLE IF NOT EXISTS workforce.agent_skill (
     agent_id    BIGINT                      NOT NULL REFERENCES workforce.agent(id) ON DELETE CASCADE,
     skill_id    BIGINT                      NOT NULL REFERENCES workforce.skill(id) ON DELETE CASCADE,
-    proficiency workforce.proficiency_level NOT NULL DEFAULT 'basic',
+    proficiency TEXT                        NOT NULL DEFAULT 'basic'
+                                            CHECK (proficiency IN ('none', 'basic', 'intermediate', 'advanced', 'expert')),
     granted_by  TEXT                        NOT NULL,
     granted_at  TIMESTAMPTZ                 NOT NULL DEFAULT now(),
     expires_at  TIMESTAMPTZ,
@@ -173,9 +163,12 @@ CREATE TABLE IF NOT EXISTS workforce.skill_grant_log (
     id              BIGINT                      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     agent_id        BIGINT                      NOT NULL REFERENCES workforce.agent(id),
     skill_id        BIGINT                      NOT NULL REFERENCES workforce.skill(id),
-    action          workforce.grant_action      NOT NULL,
-    old_proficiency workforce.proficiency_level,
-    new_proficiency workforce.proficiency_level,
+    action          TEXT                        NOT NULL
+                                                CHECK (action IN ('grant', 'revoke', 'update', 'expire')),
+    old_proficiency TEXT
+                                                CHECK (old_proficiency IS NULL OR old_proficiency IN ('none', 'basic', 'intermediate', 'advanced', 'expert')),
+    new_proficiency TEXT
+                                                CHECK (new_proficiency IS NULL OR new_proficiency IN ('none', 'basic', 'intermediate', 'advanced', 'expert')),
     acted_by        TEXT                        NOT NULL,
     notes           TEXT,
     created_at      TIMESTAMPTZ                 NOT NULL DEFAULT now()
@@ -361,7 +354,7 @@ ON CONFLICT (skill_name) DO NOTHING;
 -- ── Seed: Agent×Skill capability grants ──────────────────────────────────────
 
 INSERT INTO workforce.agent_skill (agent_id, skill_id, proficiency, granted_by)
-SELECT a.id, s.id, v.prof::workforce.proficiency_level, 'system'
+SELECT a.id, s.id, v.prof, 'system'
 FROM (VALUES
     ('senior-backend',      'backend-development',    'expert'),
     ('senior-backend',      'code-review',            'advanced'),

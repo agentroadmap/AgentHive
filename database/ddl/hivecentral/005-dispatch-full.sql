@@ -72,6 +72,11 @@ $$;
 -- Audit query: SELECT o.id, o.proposal_id FROM dispatch.work_offer o
 --              LEFT JOIN dispatch.proposal_lease l ON l.offer_id = o.id
 --              WHERE o.state = 'claimed' AND l.lease_id IS NULL  → orphaned offers.
+--
+-- owner_did exempt: transient queue record, not a managed catalog entity. Offers are
+-- created and reach a terminal state (claimed/expired/retracted/released) within their
+-- TTL; they are never deprecated/retired. Provenance is carried by agency_id + actor
+-- fields in dispatch.dispatch_audit. No row-ownership/lifecycle hygiene applies.
 CREATE TABLE IF NOT EXISTS dispatch.work_offer (
   offer_id         BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   proposal_id      BIGINT       NOT NULL,           -- app-FK → tenant_db.roadmap.proposal.id
@@ -162,6 +167,11 @@ CREATE TRIGGER trg_work_offer_guard_cost_snapshot
 -- this hiveCentral table is the canonical control-plane version used after P501 cutover.
 --
 -- Application-level invariant: proposal_id references the tenant DB matching tenant_db_slug.
+--
+-- owner_did exempt: transient work-lease record, not a managed catalog entity. A lease is
+-- created when an offer is claimed and is released/expired within its TTL; leases are
+-- never deprecated/retired. The holding agency is captured by agency_id (NOT NULL). No
+-- row-ownership/lifecycle hygiene applies.
 CREATE TABLE IF NOT EXISTS dispatch.proposal_lease (
   lease_id         BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   proposal_id      BIGINT       NOT NULL,           -- app-FK → tenant_db.roadmap.proposal.id
@@ -225,6 +235,10 @@ COMMENT ON COLUMN dispatch.proposal_lease.renewal_count IS
 -- event_type vocabulary:
 --   offer_created, offer_claimed, offer_expired, offer_retracted, offer_released
 --   lease_created, lease_renewed, lease_released, lease_expired, lease_force_released
+--
+-- owner_did exempt: append-only event log (REVOKE + deny-mutation trigger below). Rows are
+-- immutable telemetry of state transitions, not managed catalog entities; the triggering
+-- principal is recorded in actor_did. No row-ownership/lifecycle hygiene applies.
 CREATE TABLE IF NOT EXISTS dispatch.dispatch_audit (
   audit_id         BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   event_type       TEXT         NOT NULL
@@ -299,6 +313,10 @@ COMMENT ON TABLE dispatch.dispatch_audit IS
 -- Snapshots are written by the orchestrator at offer-evaluation time to
 -- record exactly what capacity state drove routing decisions.
 -- Append-only (time-series), partitioned monthly.
+--
+-- owner_did exempt: append-only, monthly-partitioned time-series metric (REVOKE +
+-- deny-mutation trigger, 90d retention). High-volume point-in-time snapshots, not managed
+-- catalog entities. No row-ownership/lifecycle hygiene applies.
 CREATE TABLE IF NOT EXISTS dispatch.capacity_snapshot (
   snapshot_id      BIGINT       GENERATED ALWAYS AS IDENTITY,
   agency_id        TEXT         NOT NULL REFERENCES agency.agency(agency_id) ON DELETE CASCADE,

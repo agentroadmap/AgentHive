@@ -4,6 +4,14 @@
 -- Written by the stats collector on the slow path; never on the
 -- hot dispatch path except route_token_budget.
 -- ============================================================
+-- owner_did exempt (AC-1, whole schema): every table here is a metric/counter
+-- stream, not a managed catalog entity, so per-row ownership/lifecycle hygiene does
+-- not apply. efficiency_metric, cost_ledger_summary, dispatch_metric_summary are
+-- append-only, monthly-partitioned rollups (REVOKE UPDATE,DELETE + deny-mutation
+-- trigger each). route_token_budget is a high-frequency anonymous counter mutated on
+-- the hot dispatch path with lazy-reset windows (same rationale as the
+-- core.service_heartbeat carve-out — adding hygiene columns would waste hot-path I/O).
+-- Provenance is carried in-row via project_id / route_id / agency_id.
 -- Target DB:  hiveCentral
 -- Owner:      agenthive_admin
 -- Roles:      agenthive_orchestrator (rw route_token_budget, r all),

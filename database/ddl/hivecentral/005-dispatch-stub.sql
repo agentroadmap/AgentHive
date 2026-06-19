@@ -20,6 +20,9 @@ BEGIN;
 
 CREATE SCHEMA IF NOT EXISTS dispatch;
 
+-- owner_did exempt: per-claim transactional billing record (not a managed catalog
+-- entity). Ownership is conveyed by agent_identity; one row per work claim with an
+-- immutable cost_snapshot audit. Not deprecated/retired — no lifecycle hygiene applies.
 CREATE TABLE IF NOT EXISTS dispatch.work_claim (
     id             BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     proposal_id    BIGINT,
