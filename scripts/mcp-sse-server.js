@@ -397,12 +397,12 @@ function shutdown(sig) {
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
 
-// AC-2 (P3794): hard-exit failsafe — if server.close() hangs (e.g. long-lived
-// SSE connections never drain), force process.exit(1) after 10 000 ms.
-// Called after SIGTERM handler registration so the timer only starts on SIGTERM.
-if (typeof armHardExit === "function") {
-	armHardExit("mcp-sse-server");
-}
+// NOTE: the hard-exit failsafe is armed INSIDE shutdown() (above), i.e. only
+// once a real SIGTERM/SIGINT begins a graceful stop. It must NOT be armed here
+// at module top-level: armHardExit() starts its timer immediately, so a
+// top-level call self-destructs the process ~8s after every boot regardless of
+// any signal (the cause of the 6000+ restart loop fixed here). The prior
+// comment ("the timer only starts on SIGTERM") was incorrect.
 
 process.on("uncaughtException", (err) => {
 	console.error("[MCP] Uncaught exception:", err);
