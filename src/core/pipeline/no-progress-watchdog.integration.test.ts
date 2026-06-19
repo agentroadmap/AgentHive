@@ -76,23 +76,32 @@ async function withRollback(
 async function seedRun(
 	client: import("pg").Client,
 	suffix: string,
-	opts: { ageMin: number; output: string; toolCalls: number; tag: string },
+	opts: {
+		ageMin: number;
+		output: string;
+		toolCalls: number;
+		tag: string;
+		proposalId?: number;
+		agency?: string;
+	},
 ): Promise<SeededRun> {
 	const briefingId = randomUUID();
+	const agencyIdentity = opts.agency ?? `wd-agency-${suffix}`;
 	const { rows } = await client.query<{ id: string }>(
 		`INSERT INTO roadmap_workforce.agent_runs
 		   (agent_identity, stage, model_used, status, started_at,
-		    output_summary, briefing_id, agency_identity)
+		    output_summary, briefing_id, agency_identity, proposal_id)
 		 VALUES ($1, 'DEVELOP', 'test-model', 'running',
 		         now() - ($2 || ' minutes')::interval,
-		         $3, $4::uuid, $5)
+		         $3, $4::uuid, $5, $6)
 		 RETURNING id`,
 		[
 			`worker-${opts.tag}-${suffix}`,
 			String(opts.ageMin),
 			opts.output,
 			briefingId,
-			`wd-agency-${suffix}`,
+			agencyIdentity,
+			opts.proposalId ?? null,
 		],
 	);
 	if (opts.toolCalls > 0) {
@@ -217,6 +226,73 @@ describe("P3847 no-progress watchdog live integration", { skip: !DB_TEST }, () =
 				"a run younger than the no-progress threshold must NOT be reaped",
 			);
 			assert.equal(await statusOf(client, young.id), "running");
+		});
+	});
+
+	test("V3-C2: a reaped run's live offer is stamped lease_expired/transient (NOT unknown — no breaker poison / stake slash)", async () => {
+		await withRollback(async (client, suffix) => {
+			// Use a real proposal id (agent_runs.proposal_id may FK to proposal).
+			const { rows: pr } = await client.query<{ id: string }>(
+				`SELECT id FROM roadmap_proposal.proposal ORDER BY id DESC LIMIT 1`,
+			);
+			const proposalId = Number(pr[0].id);
+			// squad_dispatch.agency_identity FKs to agent_registry → use a real one.
+			const { rows: ag } = await client.query<{ agent_identity: string }>(
+				`SELECT agent_identity FROM roadmap_workforce.agent_registry
+				  WHERE agent_identity = 'claude-bot-gary.a' LIMIT 1`,
+			);
+			const agency = ag[0]?.agent_identity ?? "claude-bot-gary.a";
+
+			const silent = await seedRun(client, suffix, {
+				ageMin: 10,
+				output: "persona=wdtest ",
+				toolCalls: 0,
+				tag: "silent",
+				proposalId,
+				agency,
+			});
+			// A live, unclassified offer for the same proposal+agency. Satisfy the
+			// squad_dispatch CHECKs: claimed ⇒ worker_identity NOT NULL,
+			// required_capabilities non-empty array, project_id NOT NULL.
+			const { rows: od } = await client.query<{ id: string }>(
+				`INSERT INTO roadmap_workforce.squad_dispatch
+				   (proposal_id, squad_name, dispatch_role, agency_identity,
+				    dispatch_status, offer_status, worker_identity,
+				    required_capabilities, project_id)
+				 VALUES ($1, $2, 'developer', $3,
+				         'claimed', 'claimed', $4,
+				         '["text_generation"]'::jsonb,
+				         (SELECT COALESCE(project_id, 1) FROM roadmap_proposal.proposal WHERE id = $1))
+				 RETURNING id`,
+				[proposalId, `wd-offer-${suffix}`, agency, agency],
+			);
+			const offerId = Number(od[0].id);
+
+			await reapSilentNoProgressRuns(client as unknown as Pool, silentLogger, {
+				noProgressMs: 300_000,
+				tag: `wd-${suffix}`,
+			});
+
+			assert.equal(
+				await statusOf(client, silent.id),
+				"timeout",
+				"the silent run should have been reaped",
+			);
+
+			const { rows } = await client.query<{
+				failure_class: string | null;
+				failure_is_transient: boolean | null;
+			}>(
+				`SELECT failure_class, failure_is_transient
+				   FROM roadmap_workforce.squad_dispatch WHERE id = $1`,
+				[offerId],
+			);
+			assert.equal(
+				rows[0].failure_class,
+				"lease_expired",
+				"the reaped offer must be stamped lease_expired (transient), not unknown",
+			);
+			assert.equal(rows[0].failure_is_transient, true);
 		});
 	});
 });
