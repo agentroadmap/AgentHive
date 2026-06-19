@@ -61,7 +61,11 @@ describe("P3929: non-terminal gate bypass removal", { skip: !DB_TEST }, () => {
 			port: parseInt(process.env.PGPORT || "5432", 10),
 			user: process.env.PGUSER || "admin",
 			password: process.env.PGPASSWORD,
-			database: process.env.PGDATABASE || "agenthive",
+			// Default to the throwaway gate-test DB, NOT the live `agenthive`
+			// queue — defense in depth so a future rollback bug can never pollute
+			// production proposals (the p3929-test-* storm). Mirrors the P3563
+			// gate test. Override PGDATABASE only with intent.
+			database: process.env.PGDATABASE || "agenthive_p3563_test",
 		});
 		await client.connect();
 		try {
