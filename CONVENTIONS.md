@@ -119,6 +119,18 @@ failure-mode table: `docs/architecture/mcp-liaison-topology.md`.
 - Do not claim a deployment, migration, or verification step that you did not actually perform.
 - Gate cubic agents MUST call `prop_transition` (records gate_decision_log + flips status) and `set_maturity` after a verdict. The P611 reconciler is the safety net — omitting these is a protocol violation, not an acceptable shortcut.
 
+### Gate-verdict vocabulary (P1391)
+
+When the `AGENTHIVE_GATE_AUTHORITY_ENABLED` flag is ON, `record_gate_decision` accepts exactly these three canonical verdicts (NEW writes; historical rows are grandfathered). With the flag OFF, the legacy vocabulary (`advance`/`hold`/`reject`/`waive`/`escalate`) is unchanged and the elevated/destructive effects below are unreachable.
+
+| verdict | status | maturity | lease release_reason | authority |
+| :--- | :--- | :--- | :--- | :--- |
+| `advance` | → next stage | next-stage | `gate_transitioned` | routine (gate-agent) |
+| `request_for_change` | unchanged | → `new` (send back for enhancement) | `gate_hold` | routine (gate-agent) |
+| `reject` | unchanged | → `obsolete` (terminal close) | `proposal_rejected` | **ELEVATED** |
+
+`reject` (and the symmetric `set_maturity('obsolete')`) is authorized iff EITHER a valid `operator_token` (human operator — exempt from the model/reference bars) OR an active `authority_grant` (`scope_category` IN `gate_reject`/`proposal_obsolete`). The agent path additionally requires a frontier-model route AND a typed `proposal_dependency` edge (`superseded_by`/`conflicts_with`) plus `obsoleted_reason` text. Fail-closed: no token + no grant ⇒ DENY (`trust_tier` alone is NOT sufficient). See `src/core/gate/gate-authority.ts`.
+
 ### Pool lifecycle invariant (P1123)
 
 Every long-running service (orchestrator, board, MCP server, notification-router, per-agency liaison) MUST call `setPoolLifecycleMode("long-running")` from `src/infra/postgres/pool.ts` at startup, **before any database access**. The default mode is `"one-shot"` for CLI subcommands and tests, which preserves the existing fast-exit behavior — `closePool()` and `pool.end()` on signature change both fire normally.
