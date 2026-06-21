@@ -21,6 +21,7 @@ import {
 	buildGeminiArgs,
 	buildOpenAICompatArgs,
 	buildAntigravityArgs,
+	buildMimoArgs,
 } from "./cli-argv-builders.ts";
 import { spawn } from "node:child_process";
 
@@ -119,6 +120,8 @@ export class CliInvocationRegistry {
 				return process.env.HERMES_BIN || null;
 			case "gemini":
 				return process.env.GEMINI_BIN || null;
+			case "xiaomi":
+				return process.env.MIMO_BIN || null;
 			default:
 				return null;
 		}
@@ -150,6 +153,8 @@ export class CliInvocationRegistry {
 					const addDir = process.cwd();
 					return buildAntigravityArgs(prompt, model, addDir);
 				};
+			case "xiaomi":
+				return buildMimoArgs;
 			default:
 				return buildOpenAICompatArgs;
 		}

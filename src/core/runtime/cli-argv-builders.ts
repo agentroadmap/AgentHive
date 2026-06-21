@@ -28,6 +28,8 @@ export function defaultBrandFor(provider: string): string {
 			return "Gemini";
 		case "antigravity":
 			return "Antigravity";
+		case "xiaomi":
+			return "Mimo";
 		default:
 			return provider;
 	}
@@ -76,6 +78,14 @@ export function buildHermesArgs(prompt: string): string[] {
  */
 export function buildGeminiArgs(prompt: string): string[] {
 	return ["--prompt", prompt];
+}
+
+/**
+ * Build argv for Mimo (xiaomi) liaison invocation.
+ * `mimo run <prompt>` is the one-shot headless pattern.
+ */
+export function buildMimoArgs(prompt: string): string[] {
+	return ["run", prompt];
 }
 
 /**

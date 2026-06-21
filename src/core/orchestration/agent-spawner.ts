@@ -639,6 +639,21 @@ function buildAntigravityArgs(
 	return { argv, env: {} };
 }
 
+/**
+ * Build argv + env for Mimo (xiaomi) CLI worker spawn.
+ * `mimo run --model <model> <task>` is the one-shot headless pattern.
+ */
+function buildMimoArgs(req: SpawnRequest, route: ModelRoute): CommandSpec {
+	const argv = [
+		route.cliPath ?? "mimo",
+		"run",
+		"--model",
+		route.modelName,
+		req.task,
+	];
+	return { argv, env: {} };
+}
+
 /** Dispatch to the correct builder based on route.agentCli (DB is source of truth). */
 export function buildArgsBySpec(
 	req: SpawnRequest,
@@ -658,6 +673,8 @@ export function buildArgsBySpec(
 			return buildHermesArgs(req, route);
 		case "agy":
 			return buildAntigravityArgs(req, route);
+		case "mimo":
+			return buildMimoArgs(req, route);
 		case "openclaw":
 			// P1029: OpenClaw is a WS daemon, not a subprocess — it has no argv.
 			// spawnAgent intercepts this agent_cli before runProcess and drives the
@@ -696,6 +713,7 @@ export function assertResolvedRouteMetadata(
 		"gemini",
 		"copilot",
 		"agy",
+		"mimo",
 		"openclaw", // P1029: WS-daemon provider, executed via WebSocketAdapter
 	];
 	if (!knownClis.includes(route.agentCli)) {
