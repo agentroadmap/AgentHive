@@ -331,23 +331,27 @@ describe("P3847 silent-spawn watchdog", () => {
 		});
 
 		it("counts partial success when one row reap fails mid-loop", async () => {
-			// First call = scan; second call = UPDATE for run-1 (fails); third = scan for run-2 succeeds
-			// We model this by: scan returns 2 rows, first UPDATE throws, second succeeds.
+			// Scan returns 2 rows; the agent_run UPDATE for run-1 throws (lock timeout),
+			// triggering the outer catch; run-2's UPDATE succeeds → silentSpawnsTimedOut=1.
 			const warnMessages: string[] = [];
 			const logger = {
 				log: () => {},
 				warn: (msg: string) => warnMessages.push(msg),
 			};
-			let updateCount = 0;
+			let agentRunUpdateCount = 0;
 			const ROW_B = { ...SILENT_ROW, id: "run-bbb-222" };
 			const pool = {
 				query: mock(async (sql: string, _params?: unknown[]) => {
-					if (sql.includes("agent_runs") && sql.includes("status = 'running'")) {
+					// Scan: SELECT from agent_runs (no SET clause)
+					if (sql.includes("agent_runs") && !sql.includes("SET status")) {
 						return { rows: [SILENT_ROW, ROW_B], rowCount: 2 };
 					}
-					updateCount++;
-					// Fail the first update, succeed the rest
-					if (updateCount === 1) throw new Error("lock timeout");
+					// agent_run UPDATE: fail on the first run, succeed on the second
+					if (sql.includes("agent_runs") && sql.includes("SET status")) {
+						agentRunUpdateCount++;
+						if (agentRunUpdateCount === 1) throw new Error("lock timeout");
+						return { rows: [], rowCount: 1 };
+					}
 					return { rows: [], rowCount: 1 };
 				}),
 			} as unknown as import("pg").Pool;
@@ -359,9 +363,39 @@ describe("P3847 silent-spawn watchdog", () => {
 				{ incrementFailureFn: makeIncrementSpy() },
 			);
 
-			// run-1 failed → 0 reaped from it; run-2 succeeded → 1 reaped
+			// run-1 failed in outer try → 0 reaped from it; run-2 succeeded → 1 reaped
 			expect(result.silentSpawnsTimedOut).toBe(1);
 			expect(warnMessages.some((m) => m.includes("failed to reap"))).toBe(true);
+		});
+
+		it("skips side-effects when agent_run UPDATE returns rowCount=0 (already reaped by no-progress-watchdog)", async () => {
+			// N-ORCH-1: if no-progress-watchdog already flipped the row to timeout,
+			// the UPDATE returns rowCount=0 and we must skip throttle + alert to prevent
+			// double-increment and double-alert.
+			const incrementSpy = makeIncrementSpy();
+			const pool = {
+				query: mock(async (sql: string) => {
+					if (sql.includes("agent_runs") && !sql.includes("SET status")) {
+						return { rows: [SILENT_ROW], rowCount: 1 };
+					}
+					// agent_run UPDATE: simulate already-reaped (rowCount=0)
+					if (sql.includes("agent_runs") && sql.includes("SET status")) {
+						return { rows: [], rowCount: 0 };
+					}
+					return { rows: [], rowCount: 1 };
+				}),
+			} as unknown as import("pg").Pool;
+
+			const result = await detectAndReapSilentSpawns(
+				{ query: pool.query } as unknown as import("pg").Pool,
+				noopLogger,
+				"Test",
+				{ incrementFailureFn: incrementSpy },
+			);
+
+			// Row was already reaped — should not count it or call throttle/alert
+			expect(result.silentSpawnsTimedOut).toBe(0);
+			expect(incrementSpy).not.toHaveBeenCalled();
 		});
 	});
 });
