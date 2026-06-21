@@ -90,6 +90,36 @@ describe("createBridgeAdapter (P515 AC-6)", () => {
 	});
 });
 
+describe("P4508 AC-3: createBridgeAdapter returns postgres:// refs as-is", () => {
+	it("returns a postgres:// ref without any vault or env lookup", async () => {
+		let vaultTouched = false;
+		const stub: VaultInterface = {
+			async read() {
+				vaultTouched = true;
+				return "never";
+			},
+		};
+		const bridge = createBridgeAdapter(stub);
+		const result = await bridge.read("postgres://user:pw@host:5432/mydb");
+		assert.equal(result, "postgres://user:pw@host:5432/mydb");
+		assert.equal(vaultTouched, false, "vault must not be consulted for postgres:// refs");
+	});
+
+	it("returns a postgresql:// ref without any vault or env lookup", async () => {
+		let vaultTouched = false;
+		const stub: VaultInterface = {
+			async read() {
+				vaultTouched = true;
+				return "never";
+			},
+		};
+		const bridge = createBridgeAdapter(stub);
+		const result = await bridge.read("postgresql://admin:secret@127.0.0.1:6432/georgia_singer");
+		assert.equal(result, "postgresql://admin:secret@127.0.0.1:6432/georgia_singer");
+		assert.equal(vaultTouched, false, "vault must not be consulted for postgresql:// refs");
+	});
+});
+
 describe("getVault / setVault wiring (P515 AC-6)", () => {
 	it("setVault() override is returned by getVault()", async () => {
 		const custom: VaultInterface = {

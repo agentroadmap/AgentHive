@@ -193,6 +193,10 @@ export function createBridgeAdapter(
 ): VaultInterface {
 	return {
 		async read(ref: string): Promise<string> {
+			// P4508 AC-3: a ref that IS already a postgres DSN — return as-is, no env lookup.
+			if (ref.startsWith("postgres://") || ref.startsWith("postgresql://")) {
+				return ref;
+			}
 			// Route vault:// scheme refs to the shared vault chooser.
 			// P1072: the shared chooser's getVault() is now async, so the bridge
 			// resolves it lazily per-read. A plain VaultInterface (sync object)
@@ -252,7 +256,8 @@ function getOrMakeCounters(name: string): PoolCounters {
 interface RegistryRow {
 	slug: string;
 	project_id: number;
-	dsn_secret_ref: string;
+	dsn_secret_ref: string | null;
+	tenant_db_url: string | null;
 	pool_max?: number | null;
 	idle_ms?: number | null;
 	stmt_timeout_ms?: number | null;
@@ -537,6 +542,7 @@ async function createTenantPoolOnce(canonical: string): Promise<Pool> {
 			`SELECT slug,
               project_id,
               dsn_secret_ref,
+              tenant_db_url,
               pool_max,
               idle_ms,
               stmt_timeout_ms
@@ -553,13 +559,35 @@ async function createTenantPoolOnce(canonical: string): Promise<Pool> {
 		throw new RegistryUnavailable(err as Error);
 	}
 
-	// Resolve DSN from vault
+	// Resolve DSN: P4508 AC-2 — when dsn_secret_ref is NULL but tenant_db_url is a
+	// valid postgres URL, use it directly and skip the vault bridge entirely.
 	let dsn: string;
-	try {
-		dsn = await getVault().read(row.dsn_secret_ref);
-	} catch (err) {
-		if (err instanceof TenantSecretUnavailable) throw err;
-		throw new TenantSecretUnavailable(row.dsn_secret_ref, err as Error);
+	if (!row.dsn_secret_ref && row.tenant_db_url) {
+		try {
+			const parsed = new URL(row.tenant_db_url);
+			if (parsed.protocol !== "postgres:" && parsed.protocol !== "postgresql:") {
+				throw new Error("not a postgres URL");
+			}
+			dsn = row.tenant_db_url;
+		} catch {
+			throw new TenantSecretUnavailable(
+				"tenant_db_url",
+				new Error(`tenant_db_url for "${canonical}" is not a valid postgres URL: ${row.tenant_db_url}`),
+			);
+		}
+	} else if (!row.dsn_secret_ref) {
+		throw new TenantSecretUnavailable(
+			"(none)",
+			new Error(`No dsn_secret_ref or tenant_db_url configured for project "${canonical}"`),
+		);
+	} else {
+		// Resolve DSN from vault (handles vault:// refs and postgres:// direct DSNs via AC-3)
+		try {
+			dsn = await getVault().read(row.dsn_secret_ref);
+		} catch (err) {
+			if (err instanceof TenantSecretUnavailable) throw err;
+			throw new TenantSecretUnavailable(row.dsn_secret_ref, err as Error);
+		}
 	}
 
 	// Validate DSN format (fatal — do not retry)
@@ -920,7 +948,9 @@ export async function resetForTesting(opts?: {
 	await shutdown().catch(() => {});
 	_globalCounters.clear();
 	_inflightCreates.clear();
-	_vault = opts?.vault ?? envVault;
+	// Set to null so getVault() lazily recreates the bridge on the next call.
+	// Explicit vault overrides are still respected for test injection.
+	_vault = opts?.vault ?? null;
 }
 
 /**

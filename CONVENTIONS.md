@@ -682,6 +682,23 @@ AgentHive runs on a **two-tier Postgres topology**:
 - A handler that needs project tenant data resolves the DSN via `config.getProjectDb(slug_or_id)`, which queries `hiveCentral.roadmap.project` and returns the tenant DSN.
 - Connection pools are keyed per-DB; never reuse a `hiveCentral` pool for tenant queries.
 
+**Two-path DSN resolution for tenant DBs (P4508):**
+
+`getProjectDb()` resolves a tenant DSN through `roadmap.project` in priority order:
+
+1. **Vault-ref path** (`dsn_secret_ref` is non-NULL): the value is passed to `createBridgeAdapter`.
+   - If it starts with `postgres://` or `postgresql://`: returned **as-is** — the DSN is stored directly, no vault or env lookup needed (AC-3).
+   - If it starts with `vault://`: the shared vault adapter resolves the secret at runtime.
+   - Otherwise: treated as an environment-variable name looked up from `process.env`.
+
+2. **Direct fallback path** (`dsn_secret_ref` IS NULL, `tenant_db_url` IS NOT NULL): `tenant_db_url` is used directly as the DSN, bypassing the vault bridge entirely (AC-2).
+
+3. **Error** if both `dsn_secret_ref` and `tenant_db_url` are NULL: `TenantSecretUnavailable` is thrown.
+
+**Phase migration history:**
+- Migration 303 (P4508 Phase 1): seeds `tenant_db_url` and overwrites `dsn_secret_ref` with a direct `postgresql://` DSN for all `bootstrap_status='live'` projects. After this migration, path (1) above applies and no vault backend is required.
+- Phase 3 (separate proposal): reconcile `control_project.project_db` column and canonicalize the long-term DSN reference model.
+
 **Today's reality (transition state):**
 - The live database is still single-DB `agenthive` — control-plane and the agenthive-tenant data share one Postgres instance.
 - P429 is the keystone migration that extracts `hiveCentral` and recasts `agenthive` as the first project tenant DB.
