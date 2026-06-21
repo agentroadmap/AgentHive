@@ -152,54 +152,52 @@ after(teardownPool);
 
 describe("P3326 gate/transition drift regression", () => {
 	describe("AC-1: gate_decision D2 on Standard-RFC REVIEW → DEVELOP", () => {
-		// TRUE-POSITIVE FAILURE (todo): once the P3566 independence rule is
-		// satisfied, recordGateDecision aborts with "function
-		// roadmap.fn_has_unresolved_blocking(unknown, unknown) does not exist" —
-		// the function is defined in migration 254 but is absent from the live DB
-		// (unapplied or dropped by later migration churn). This is the P4387
-		// gate-function drift, not a test defect. Remove `todo` once the gate
-		// functions are reconciled and the function exists.
-		it(
-			"advances to DEVELOP, not COMPLETE",
-			{
-				todo: "blocked: roadmap.fn_has_unresolved_blocking missing in live DB (mig 254 unapplied/dropped) — P4387 gate-function drift",
-			},
-			async () => {
-				const id = await insertProposalWithWorkflow(
-					"P3326-AC1 gate D2 test",
-					"REVIEW",
-					"Standard RFC",
+		// LIVE CANARY for gate-auth consistency. This passes only when the full
+		// non-terminal gate-advance path is wired: independence check +
+		// roadmap.fn_has_unresolved_blocking. Those objects come from
+		// 254-p3566-gate-advance-authorization.sql, which collides on number with
+		// 254-p1859-usage-probe-columns.sql (the one the runner actually ledgered)
+		// — so the p3566 gate-auth objects are only partially/ad-hoc applied on
+		// live and are NOT in schema_migration. If a clean rebuild or further
+		// gate-function churn drops fn_has_unresolved_blocking again, this test
+		// goes red — which is the intended signal. Durable fix is the P4387
+		// gate-function reconciliation (retire the 254 collision + one canonical
+		// gate-function migration). See P4387.
+		it("advances to DEVELOP, not COMPLETE", async () => {
+			const id = await insertProposalWithWorkflow(
+				"P3326-AC1 gate D2 test",
+				"REVIEW",
+				"Standard RFC",
+			);
+			try {
+				// Satisfy the P3566 independence rule: an approve from a reviewer
+				// distinct from the decider must exist before a non-terminal advance.
+				await addIndependentApprove(id);
+				const result = await recordGateDecision({
+					proposal_id: String(id),
+					gate: "D2",
+					decision: "advance",
+					rationale: "AC-1 regression test",
+					decided_by: TEST_DECIDER,
+				});
+				const text =
+					result.content[0].type === "text" ? result.content[0].text : "";
+				// Must not be an error about gate target mismatch
+				assert.ok(
+					!text.includes("Gate target mismatch"),
+					`Unexpected gate error: ${text}`,
 				);
-				try {
-					// Satisfy the P3566 independence rule: an approve from a reviewer
-					// distinct from the decider must exist before a non-terminal advance.
-					await addIndependentApprove(id);
-					const result = await recordGateDecision({
-						proposal_id: String(id),
-						gate: "D2",
-						decision: "advance",
-						rationale: "AC-1 regression test",
-						decided_by: TEST_DECIDER,
-					});
-					const text =
-						result.content[0].type === "text" ? result.content[0].text : "";
-					// Must not be an error about gate target mismatch
-					assert.ok(
-						!text.includes("Gate target mismatch"),
-						`Unexpected gate error: ${text}`,
-					);
-					// Status must be DEVELOP
-					const status = await getStatus(id);
-					assert.equal(
-						status.toUpperCase(),
-						"DEVELOP",
-						`Expected DEVELOP but got ${status}`,
-					);
-				} finally {
-					await cleanup(id);
-				}
-			},
-		);
+				// Status must be DEVELOP
+				const status = await getStatus(id);
+				assert.equal(
+					status.toUpperCase(),
+					"DEVELOP",
+					`Expected DEVELOP but got ${status}`,
+				);
+			} finally {
+				await cleanup(id);
+			}
+		});
 	});
 
 	describe("AC-2: gate_decision advance with no forward edge → explicit error", () => {
