@@ -110,14 +110,14 @@ describe("P2997 evaluateStakeAdmission (AC-8 pre-claim gate)", () => {
 		expect(r.stakeStatus).toBe("active");
 	});
 
-	it("rejects an agent whose stake was slashed", async () => {
+	it("admits an agent whose stake was slashed (soft signal — ledger records, no hard lock)", async () => {
 		const { exec } = makeRegistryMock({
 			stake_microcents: 0,
 			stake_status: "slashed",
 		});
 		const r = await evaluateStakeAdmission("agency/bad", exec);
-		expect(r.allowed).toBe(false);
-		expect(r.reason).toBe("stake_slashed");
+		expect(r.allowed).toBe(true);
+		expect(r.reason).toBeNull();
 	});
 
 	it("admits an agent whose stake was returned (success is trust-positive, no re-bond path exists)", async () => {

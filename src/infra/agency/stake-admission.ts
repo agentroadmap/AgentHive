@@ -138,13 +138,12 @@ export async function evaluateStakeAdmission(
 		return { allowed: true, reason: null, stakeStatus, stakeMicrocents, isLegacy };
 	}
 	if (stakeStatus === "slashed") {
-		return {
-			allowed: false,
-			reason: "stake_slashed",
-			stakeStatus,
-			stakeMicrocents,
-			isLegacy,
-		};
+		// Soft signal: the ledger records every slash for observability, but
+		// the hard lock is removed. Bond starts at 0 so the first no-artifact
+		// run would slash-to-zero and permanently wedge the agency — too
+		// aggressive when P235 fast-fail + offer reissue caps already bound
+		// broken agencies. Admit; the slash ledger is the accountability layer.
+		return { allowed: true, reason: null, stakeStatus, stakeMicrocents, isLegacy };
 	}
 	if (stakeStatus === "returned") {
 		// A 'returned' bond means the agent COMPLETED work successfully (returnStake
