@@ -2,12 +2,13 @@
 
 import { stdout as output } from "node:process";
 import { Core } from "../../core/roadmap.ts";
-import { DEFAULT_STATUSES } from "../../shared/constants/index.ts";
 import {
 	buildAcceptanceCriteriaItems,
 	formatDateForDisplay,
 	formatProposalPlainText,
 } from "../../formatters/proposal-plain-text.ts";
+import { query as pgQuery } from "../../infra/postgres/pool.ts";
+import { DEFAULT_STATUSES } from "../../shared/constants/index.ts";
 import type {
 	Directive,
 	Proposal,
@@ -57,7 +58,6 @@ import {
 	getStatusColor,
 } from "./status-icon.ts";
 import { createScreen } from "./tui.ts";
-import { query as pgQuery } from "../../infra/postgres/pool.ts";
 
 type DecisionRow = {
 	decision: string;
@@ -150,7 +150,9 @@ async function fetchProposalExtrasFromPg(
 			decisions: DecisionRow[] | null;
 			reviews: ReviewRow[] | null;
 			discussions: DiscussionRow[] | null;
-			acceptance_criteria: ProposalExtrasBundle["acceptanceCriteriaItems"] | null;
+			acceptance_criteria:
+				| ProposalExtrasBundle["acceptanceCriteriaItems"]
+				| null;
 			activity_log: ProposalExtrasBundle["activityLog"] | null;
 		}>(
 			`
@@ -278,9 +280,10 @@ async function fetchProposalDetailExtras(proposalId: string): Promise<{
 			discussions: (noteBody.notes ?? []).map((n) => ({
 				author_identity: n.author_identity,
 				context_prefix: n.context_prefix,
-				body: (n as { body?: string; body_markdown?: string }).body
-					?? n.body_markdown
-					?? "",
+				body:
+					(n as { body?: string; body_markdown?: string }).body ??
+					n.body_markdown ??
+					"",
 				created_at: n.created_at,
 			})),
 		};
@@ -296,7 +299,6 @@ async function fetchProposalDetailExtras(proposalId: string): Promise<{
 		clearTimeout(timeout);
 	}
 }
-
 
 function getPriorityDisplay(priority?: "high" | "medium" | "low"): string {
 	switch (priority) {
@@ -327,9 +329,7 @@ function formatCurrentStateLine(proposal: Proposal): string {
 	].join(" ");
 }
 
-function formatActivityThread(
-	activityLog: Proposal["activityLog"],
-): string[] {
+function formatActivityThread(activityLog: Proposal["activityLog"]): string[] {
 	if (!activityLog || activityLog.length === 0) {
 		return ["{gray-fg}No proposal activity yet{/}"];
 	}
@@ -1688,9 +1688,27 @@ export function generateDetailContent(
 	proposal: Proposal,
 	resolveDirectiveLabel?: (directive: string) => string,
 	extraData?: {
-		decisions?: Array<{ decision: string; authority: string; rationale: string | null; binding: boolean; decided_at: string }>;
-		reviews?: Array<{ reviewer_identity: string; verdict: string; notes: string | null; findings: string | null; is_blocking: boolean; reviewed_at: string }>;
-		discussions?: Array<{ author_identity: string; context_prefix: string | null; body: string; created_at: string }>;
+		decisions?: Array<{
+			decision: string;
+			authority: string;
+			rationale: string | null;
+			binding: boolean;
+			decided_at: string;
+		}>;
+		reviews?: Array<{
+			reviewer_identity: string;
+			verdict: string;
+			notes: string | null;
+			findings: string | null;
+			is_blocking: boolean;
+			reviewed_at: string;
+		}>;
+		discussions?: Array<{
+			author_identity: string;
+			context_prefix: string | null;
+			body: string;
+			created_at: string;
+		}>;
 	},
 ): { headerContent: string[]; bodyContent: string[] } {
 	const dvId = proposal.id.replace(/^STATE-/, "STEP-");
@@ -1865,13 +1883,24 @@ export function generateDetailContent(
 
 	// Decisions section
 	if (extraData?.decisions && extraData.decisions.length > 0) {
-		bodyContent.push(formatSectionHeading(`Decisions (${extraData.decisions.length})`, "magenta"));
+		bodyContent.push(
+			formatSectionHeading(
+				`Decisions (${extraData.decisions.length})`,
+				"magenta",
+			),
+		);
 		for (const d of extraData.decisions) {
 			const bindingTag = d.binding ? " {yellow-fg}[binding]{/}" : "";
-			bodyContent.push(`  {bold}{magenta-fg}${d.decision}{/magenta-fg}{/bold}${bindingTag}`);
-			bodyContent.push(`    {gray-fg}by ${d.authority} · ${formatDateForDisplay(d.decided_at)}{/}`);
+			bodyContent.push(
+				`  {bold}{magenta-fg}${d.decision}{/magenta-fg}{/bold}${bindingTag}`,
+			);
+			bodyContent.push(
+				`    {gray-fg}by ${d.authority} · ${formatDateForDisplay(d.decided_at)}{/}`,
+			);
 			if (d.rationale) {
-				bodyContent.push(`    ${d.rationale.slice(0, 200)}${d.rationale.length > 200 ? "..." : ""}`);
+				bodyContent.push(
+					`    ${d.rationale.slice(0, 200)}${d.rationale.length > 200 ? "..." : ""}`,
+				);
 			}
 			bodyContent.push("");
 		}
@@ -1879,7 +1908,9 @@ export function generateDetailContent(
 
 	// Reviews section
 	if (extraData?.reviews && extraData.reviews.length > 0) {
-		bodyContent.push(formatSectionHeading(`Reviews (${extraData.reviews.length})`, "cyan"));
+		bodyContent.push(
+			formatSectionHeading(`Reviews (${extraData.reviews.length})`, "cyan"),
+		);
 		const verdictColor: Record<string, string> = {
 			approve: "green",
 			request_changes: "yellow",
@@ -1888,9 +1919,13 @@ export function generateDetailContent(
 		for (const r of extraData.reviews) {
 			const color = verdictColor[r.verdict] || "white";
 			const blockTag = r.is_blocking ? " {red-fg}[blocking]{/}" : "";
-			bodyContent.push(`  {${color}-fg}${r.verdict}{/}${blockTag} {gray-fg}by ${r.reviewer_identity} · ${formatDateForDisplay(r.reviewed_at)}{/}`);
+			bodyContent.push(
+				`  {${color}-fg}${r.verdict}{/}${blockTag} {gray-fg}by ${r.reviewer_identity} · ${formatDateForDisplay(r.reviewed_at)}{/}`,
+			);
 			if (r.notes) {
-				bodyContent.push(`    ${r.notes.slice(0, 200)}${r.notes.length > 200 ? "..." : ""}`);
+				bodyContent.push(
+					`    ${r.notes.slice(0, 200)}${r.notes.length > 200 ? "..." : ""}`,
+				);
 			}
 			bodyContent.push("");
 		}
@@ -1898,16 +1933,28 @@ export function generateDetailContent(
 
 	// Discussions section
 	if (extraData?.discussions && extraData.discussions.length > 0) {
-		bodyContent.push(formatSectionHeading(`Discussions (${extraData.discussions.length})`, "blue"));
+		bodyContent.push(
+			formatSectionHeading(
+				`Discussions (${extraData.discussions.length})`,
+				"blue",
+			),
+		);
 		for (const disc of extraData.discussions.slice(0, 10)) {
-			const prefix = disc.context_prefix ? `{yellow-fg}[${disc.context_prefix}]{/} ` : "";
-			bodyContent.push(`  ${prefix}{cyan-fg}${disc.author_identity}{/} {gray-fg}· ${formatDateForDisplay(disc.created_at)}{/}`);
-			const body = disc.body.length > 150 ? `${disc.body.slice(0, 150)}...` : disc.body;
+			const prefix = disc.context_prefix
+				? `{yellow-fg}[${disc.context_prefix}]{/} `
+				: "";
+			bodyContent.push(
+				`  ${prefix}{cyan-fg}${disc.author_identity}{/} {gray-fg}· ${formatDateForDisplay(disc.created_at)}{/}`,
+			);
+			const body =
+				disc.body.length > 150 ? `${disc.body.slice(0, 150)}...` : disc.body;
 			bodyContent.push(`    ${body}`);
 			bodyContent.push("");
 		}
 		if (extraData.discussions.length > 10) {
-			bodyContent.push(`  {gray-fg}... and ${extraData.discussions.length - 10} more{/}`);
+			bodyContent.push(
+				`  {gray-fg}... and ${extraData.discussions.length - 10} more{/}`,
+			);
 		}
 	}
 
@@ -1918,22 +1965,25 @@ export function generateDetailContent(
 	return { headerContent, bodyContent };
 }
 
-export async function createProposalPopup(
-	screen: ScreenInterface,
-	proposal: Proposal,
-	resolveDirectiveLabel?: (directive: string) => string,
-): Promise<{
-	background: BoxInterface;
-	popup: BoxInterface;
-	contentArea: ScrollableTextInterface;
-	close: () => void;
-} | null> {
-	if (output.isTTY === false) return null;
+type HydratedProposalExtras = {
+	proposal: Proposal;
+	decisions: DecisionRow[];
+	reviews: ReviewRow[];
+	discussions: DiscussionRow[];
+};
 
-	// Hydrate AC + activity + decisions/reviews/discussions for the popup.
-	// Strategy: try the web service first (1 round-trip, no local pool
-	// pressure), but if it isn't running (TUI must work standalone), fall
-	// back to ONE aggregate pg query that uses a single pool slot.
+// Hydrate AC + activity + decisions/reviews/discussions for the popup.
+// Strategy: try the web service first (1 round-trip, no local pool
+// pressure), but if it isn't running (TUI must work standalone), fall
+// back to ONE aggregate pg query that uses a single pool slot.
+//
+// This is intentionally pulled out of createProposalPopup so the popup can
+// render immediately from the already-in-memory proposal and hydrate these
+// extras asynchronously — a slow/unreachable web service or a contended pg
+// pool must never block the detail view from appearing.
+async function hydrateProposalExtras(
+	proposal: Proposal,
+): Promise<HydratedProposalExtras> {
 	const webProposal = await fetchProposalFromWeb(proposal.id);
 	let extras: ProposalExtrasBundle;
 	if (
@@ -1958,12 +2008,14 @@ export async function createProposalPopup(
 		};
 		const merged = { ...proposal } as Proposal & Record<string, unknown>;
 		if (typeof webProposal.implementationPlan === "string") {
-			(merged as Proposal & { implementationPlan?: string }).implementationPlan =
-				webProposal.implementationPlan as string;
+			(
+				merged as Proposal & { implementationPlan?: string }
+			).implementationPlan = webProposal.implementationPlan as string;
 		}
 		if (typeof webProposal.implementationNotes === "string") {
-			(merged as Proposal & { implementationNotes?: string }).implementationNotes =
-				webProposal.implementationNotes as string;
+			(
+				merged as Proposal & { implementationNotes?: string }
+			).implementationNotes = webProposal.implementationNotes as string;
 		}
 		if (typeof webProposal.finalSummary === "string") {
 			(merged as Proposal & { finalSummary?: string }).finalSummary =
@@ -1977,16 +2029,39 @@ export async function createProposalPopup(
 	merged2.acceptanceCriteriaItems = extras.acceptanceCriteriaItems;
 	(merged2 as Proposal & { activityLog?: unknown }).activityLog =
 		extras.activityLog;
-	proposal = merged2 as Proposal;
-	const decisions = extras.decisions;
-	const reviews = extras.reviews;
-	const discussions = extras.discussions;
+	return {
+		proposal: merged2 as Proposal,
+		decisions: extras.decisions,
+		reviews: extras.reviews,
+		discussions: extras.discussions,
+	};
+}
 
+const DETAIL_LOADING_LINE =
+	"{gray-fg}  ⋯ loading acceptance criteria, reviews, decisions & activity…{/}";
+
+export async function createProposalPopup(
+	screen: ScreenInterface,
+	proposal: Proposal,
+	resolveDirectiveLabel?: (directive: string) => string,
+): Promise<{
+	background: BoxInterface;
+	popup: BoxInterface;
+	contentArea: ScrollableTextInterface;
+	close: () => void;
+} | null> {
+	if (output.isTTY === false) return null;
+
+	// Render immediately from the in-memory proposal (header + everything we
+	// already have), then hydrate AC/reviews/decisions/discussions/activity in
+	// the background. The header is derived purely from in-memory fields, so its
+	// height is stable across hydration and only the scrollable body is swapped.
 	const { headerContent, bodyContent } = generateDetailContent(
 		proposal,
 		resolveDirectiveLabel,
-		{ decisions, reviews, discussions },
+		{ decisions: [], reviews: [], discussions: [] },
 	);
+	bodyContent.push(DETAIL_LOADING_LINE);
 
 	const popup = box({
 		parent: screen,
@@ -2090,7 +2165,9 @@ export async function createProposalPopup(
 		return height > 0 ? Math.max(1, height - 3) : 20;
 	};
 
+	let closed = false;
 	const closePopup = () => {
+		closed = true;
 		popup.destroy();
 		background.destroy();
 		screen.render();
@@ -2149,6 +2226,34 @@ export async function createProposalPopup(
 	});
 
 	screen.render();
+
+	// Hydrate the heavy sections in the background and swap the body in once
+	// they resolve. The popup is already interactive (scroll/close) before this
+	// completes, so a slow web service or pg pool no longer blocks the detail
+	// view from opening.
+	void hydrateProposalExtras(proposal)
+		.then((hydrated) => {
+			if (closed) return;
+			const { bodyContent: updatedBody } = generateDetailContent(
+				hydrated.proposal,
+				resolveDirectiveLabel,
+				{
+					decisions: hydrated.decisions,
+					reviews: hydrated.reviews,
+					discussions: hydrated.discussions,
+				},
+			);
+			contentArea.setContent(updatedBody.join("\n"));
+			screen.render();
+		})
+		.catch(() => {
+			if (closed) return;
+			// Hydration failed — drop the loading hint so it doesn't linger.
+			contentArea.setContent(
+				bodyContent.filter((l) => l !== DETAIL_LOADING_LINE).join("\n"),
+			);
+			screen.render();
+		});
 
 	return {
 		background,
