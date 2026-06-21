@@ -147,13 +147,15 @@ export async function evaluateStakeAdmission(
 		};
 	}
 	if (stakeStatus === "returned") {
-		return {
-			allowed: false,
-			reason: "stake_returned",
-			stakeStatus,
-			stakeMicrocents,
-			isLegacy,
-		};
+		// A 'returned' bond means the agent COMPLETED work successfully (returnStake
+		// flips active->returned on clean delivery). The original design refused this
+		// to force an explicit re-bond, but no auto-re-bond path exists, so a single
+		// successful delivery permanently locked the agent out — combined with the
+		// slash->slashed lockout, the sole self-claim agency wedged on BOTH success
+		// and failure, producing repeated multi-hour stalls (2026-06-21). A returned
+		// bond is a TRUST-POSITIVE signal; admit it (re-bond-on-reuse) so a productive
+		// agent keeps claiming. Only 'slashed'/unknown remain refusable.
+		return { allowed: true, reason: null, stakeStatus, stakeMicrocents, isLegacy };
 	}
 	return {
 		allowed: false,
