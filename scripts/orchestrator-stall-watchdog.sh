@@ -66,8 +66,17 @@ fi
 #   agent_run has started for DISPATCH_STALE_SECONDS. The RUNNING=0 guard ensures
 #   we never kill a fleet of legitimately long-running workers (a busy system has
 #   running rows even if no NEW run started recently).
+#
+#   The "dispatchable work" count MUST come from v_unified_dispatch_pool — the
+#   SAME view the orchestrator actually dispatches from (unified-pool-builder.ts).
+#   The broader v_dispatchable_proposal includes proposals the orchestrator will
+#   legitimately NOT dispatch (operator-gated issues, mature-awaiting-gate,
+#   sentinels). Counting those produced a FALSE perma-restart loop every 15min on
+#   a HEALTHY idle orchestrator — observed 2026-06-20 after the postgres outage,
+#   with only operator-gated P4386 in v_dispatchable_proposal and an empty unified
+#   pool. If the unified pool is non-empty and nothing runs, that IS a real stall.
 DISPATCH_STALE_SECONDS="${ORCH_WATCHDOG_DISPATCH_STALE_SECONDS:-600}"
-DISP=$($PG -F'|' -c "SELECT (SELECT count(*) FROM roadmap_proposal.v_dispatchable_proposal), (SELECT count(*) FROM roadmap_workforce.agent_runs WHERE status='running'), COALESCE((SELECT EXTRACT(EPOCH FROM (now()-max(started_at)))::int FROM roadmap_workforce.agent_runs), 999999);" 2>>"$LOG_FILE")
+DISP=$($PG -F'|' -c "SELECT (SELECT count(*) FROM roadmap_proposal.v_unified_dispatch_pool), (SELECT count(*) FROM roadmap_workforce.agent_runs WHERE status='running'), COALESCE((SELECT EXTRACT(EPOCH FROM (now()-max(started_at)))::int FROM roadmap_workforce.agent_runs), 999999);" 2>>"$LOG_FILE")
 DISPATCHABLE=$(echo "$DISP" | cut -d'|' -f1)
 RUNNING=$(echo "$DISP" | cut -d'|' -f2)
 RUN_AGE=$(echo "$DISP" | cut -d'|' -f3)
