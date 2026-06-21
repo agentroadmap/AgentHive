@@ -16,28 +16,14 @@ import {
 } from "../constants/index.ts";
 import { FileSystem } from "../file-system/operations.ts";
 import { GitOperations } from "../git/operations.ts";
-import {
-	parseLegacyInlineArray,
-	parseLegacyYamlValue,
-	stripYamlComment,
-} from "./config/legacy-migration.ts";
-import {
-	buildPgTags,
-	getPgTagMetadata,
-	getPgTagString,
-	getPgTagStringArray,
-	mapPgAcceptanceCriteria,
-	mapPgLabels,
-	mapPgMaturity,
-	mapPgPriority,
-} from "./postgres/pg-tag-utils.ts";
-import * as pgPool from "../postgres/pool.ts";
 import type { ProposalActivity } from "../infra/postgres/proposal-storage-v2.ts";
 import * as pg from "../infra/postgres/proposal-storage-v2.ts";
+import * as pgPool from "../postgres/pool.ts";
+import { loadRuntimeEnvFile } from "../shared/runtime/config.ts";
 import {
 	type AcceptanceCriterion,
-	type Agent,
 	type ActivityLogEntry,
+	type Agent,
 	type Decision,
 	type Directive,
 	type Document,
@@ -83,24 +69,23 @@ import {
 	proposalIdsEqual,
 } from "../utils/proposal-path.ts";
 import { compareProposalIds } from "../utils/proposal-sorting.ts";
-import { attachSubproposalSummaries } from "../utils/proposal-subproposals.ts";
+import {
+	attachSubproposalSummaries,
+	attachSubproposalSummariesBatch,
+} from "../utils/proposal-subproposals.ts";
 import { upsertProposalUpdatedDate } from "../utils/proposal-updated-date.ts";
 import {
 	getCanonicalStatus as resolveCanonicalStatus,
 	getValidStatuses as resolveValidStatuses,
 } from "../utils/status.ts";
 import { executeStatusCallback } from "../utils/status-callback.ts";
-import { loadRuntimeEnvFile } from "../shared/runtime/config.ts";
 import {
 	extractLegacyConfigDirectives,
 	migrateLegacyConfigDirectivesToFiles,
+	parseLegacyInlineArray,
+	parseLegacyYamlValue,
+	stripYamlComment,
 } from "./config/legacy-migration.ts";
-import { PgProposalHydrator } from "./postgres/proposal-mapper.ts";
-import {
-	buildLatestProposalMap,
-	filterProposalsByProposalSnapshots,
-	getActiveAndCompletedIdsFromProposalMap,
-} from "./proposal/id-generation.ts";
 import {
 	migrateConfig,
 	needsMigration,
@@ -116,17 +101,34 @@ import {
 import { RateLimiter } from "./infrastructure/rate-limiter.ts";
 import { SearchService } from "./infrastructure/search-service.ts";
 import { getBlockingIssues, loadIssues } from "./pipeline/issue-tracker.ts";
+import {
+	buildPgTags,
+	getPgTagMetadata,
+	getPgTagString,
+	getPgTagStringArray,
+	mapPgAcceptanceCriteria,
+	mapPgLabels,
+	mapPgMaturity,
+	mapPgPriority,
+} from "./postgres/pg-tag-utils.ts";
+import { PgProposalHydrator } from "./postgres/proposal-mapper.ts";
 import { ClaimsService } from "./proposal/claims.ts";
+import {
+	addAcceptanceCriteria as acAdd,
+	checkAcceptanceCriteria as acCheck,
+	listAcceptanceCriteria as acList,
+	removeAcceptanceCriteria as acRemove,
+} from "./proposal/criteria.ts";
 import {
 	isCompleteStatus,
 	isReachedStatus,
 	isReady,
 } from "./proposal/directives.ts";
 import {
-	addActivityLog as addActivityLogFn,
-	applyProposalUpdateInput as applyUpdateEngine,
-	normalizePriority as normalizePriorityFn,
-} from "./proposal/update-engine.ts";
+	buildLatestProposalMap,
+	filterProposalsByProposalSnapshots,
+	getActiveAndCompletedIdsFromProposalMap,
+} from "./proposal/id-generation.ts";
 import {
 	calculateNewOrdinal,
 	DEFAULT_ORDINAL_STEP,
@@ -137,6 +139,11 @@ import {
 	planMoveToSequence,
 	planMoveToUnsequenced,
 } from "./proposal/sequences.ts";
+import {
+	addActivityLog as addActivityLogFn,
+	applyProposalUpdateInput as applyUpdateEngine,
+	normalizePriority as normalizePriorityFn,
+} from "./proposal/update-engine.ts";
 import { ContentStore } from "./storage/content-store.ts";
 import {
 	type BranchProposalProposalEntry,
@@ -147,12 +154,6 @@ import {
 	loadRemoteProposals,
 	resolveProposalConflict,
 } from "./storage/proposal-loader.ts";
-import {
-	addAcceptanceCriteria as acAdd,
-	checkAcceptanceCriteria as acCheck,
-	listAcceptanceCriteria as acList,
-	removeAcceptanceCriteria as acRemove,
-} from "./proposal/criteria.ts";
 
 interface BlessedScreen {
 	program: {
@@ -330,12 +331,13 @@ export class Core {
 		resolveDirectiveFilterValue?: (directiveValue: string) => string,
 		allProposals?: Proposal[],
 	): Proposal[] {
-		// Ensure depth and subproposal summaries are attached before filtering (required for depth filtering)
+		// Ensure depth and subproposal summaries are attached before filtering
+		// (required for depth filtering). Uses the O(n) batch helper — the prior
+		// per-item map was O(n²) and dominated board refresh latency (~1.3s on
+		// ~700 rows, on every 5s auto-refresh).
 		const referenceProposals =
 			allProposals && allProposals.length > 0 ? allProposals : proposals;
-		let result = proposals.map((proposal) =>
-			attachSubproposalSummaries(proposal, referenceProposals),
-		);
+		let result = attachSubproposalSummariesBatch(proposals, referenceProposals);
 
 		if (filters) {
 			if (filters.status) {
@@ -741,9 +743,7 @@ export class Core {
 	}
 
 	/** @internal Load a full Proposal by display-id from Postgres. */
-	async loadPgProposalById(
-		proposalId: string,
-	): Promise<Proposal | null> {
+	async loadPgProposalById(proposalId: string): Promise<Proposal | null> {
 		await this.ensurePgPool();
 		const row = await pg.getProposal(proposalId);
 		if (!row) {
