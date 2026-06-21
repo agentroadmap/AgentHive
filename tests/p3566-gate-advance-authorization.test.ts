@@ -14,8 +14,8 @@
  * AC-5: fn_actor_is_independent — shared helper returns correct boolean.
  */
 
-import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { after, before, describe, it } from "node:test";
 import { query } from "../src/postgres/pool.ts";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -30,13 +30,25 @@ async function registerAgent(identity: string) {
 	);
 }
 
-async function createProposal(title: string, status = "DRAFT"): Promise<number> {
+// Tag prefix for every proposal this suite seeds into the live queue. An
+// explicit display_id (a) keeps leaked rows from masquerading as real
+// proposals (the bare trigger would assign `P<id>`), and (b) makes them
+// sweepable by purgeTestLeftovers() if a hard interruption bypasses after().
+const TEST_DISPLAY_PREFIX = "P3566-TEST-";
+
+async function createProposal(
+	title: string,
+	status = "DRAFT",
+): Promise<number> {
+	const displayId = `${TEST_DISPLAY_PREFIX}${Date.now()}-${Math.random()
+		.toString(36)
+		.slice(2, 7)}`;
 	const { rows } = await query<{ id: number }>(
 		`INSERT INTO roadmap_proposal.proposal
-		   (title, type, status, maturity, workflow_name, audit)
-		 VALUES ($1, 'feature', $2, 'new', 'Standard RFC', '{}')
+		   (display_id, title, type, status, maturity, workflow_name, audit)
+		 VALUES ($1, $2, 'feature', $3, 'new', 'Standard RFC', '{}')
 		 RETURNING id`,
-		[title, status],
+		[displayId, title, status],
 	);
 	return rows[0].id;
 }
@@ -96,11 +108,30 @@ const TEST_PROP_IDS: number[] = [];
 
 // ─── Test setup ──────────────────────────────────────────────────────────────
 
+// Self-healing sweep of leftover `P3566-TEST-*` proposals. after() deletes by
+// tracked id on a clean run, but a hard interruption (SIGTERM/timeout) or crash
+// bypasses it, leaving committed proposals in the live queue where the
+// orchestrator picks them up and spawns real agent runs. Purging by tag at
+// suite start/end bounds the leak to a single interrupted run.
+async function purgeTestLeftovers() {
+	const ids = `SELECT id FROM roadmap_proposal.proposal WHERE display_id LIKE '${TEST_DISPLAY_PREFIX}%'`;
+	await query(
+		`DELETE FROM roadmap_proposal.proposal_reviews WHERE proposal_id IN (${ids})`,
+	);
+	await query(
+		`DELETE FROM roadmap_proposal.gate_decision_log WHERE proposal_id IN (${ids})`,
+	);
+	await query(
+		`DELETE FROM roadmap_proposal.proposal WHERE display_id LIKE '${TEST_DISPLAY_PREFIX}%'`,
+	);
+}
+
 before(async () => {
 	await registerAgent(ACTOR_A);
 	await registerAgent(ACTOR_B);
 	await registerAgent(ACTOR_C);
 	await registerAgent("system/reconciler");
+	await purgeTestLeftovers();
 });
 
 after(async () => {
@@ -111,6 +142,8 @@ after(async () => {
 			[TEST_PROP_IDS],
 		);
 	}
+	// Belt-and-braces: sweep anything tagged but missed (e.g. ids not tracked).
+	await purgeTestLeftovers();
 });
 
 // ─── AC-5: Shared independence helper ────────────────────────────────────────
@@ -124,7 +157,11 @@ describe("AC-5: fn_actor_is_independent", () => {
 			`SELECT roadmap.fn_actor_is_independent($1, $2) AS result`,
 			[pid, ACTOR_A],
 		);
-		assert.equal(rows[0].result, false, "should return false when no approve exists");
+		assert.equal(
+			rows[0].result,
+			false,
+			"should return false when no approve exists",
+		);
 	});
 
 	it("returns FALSE when only approve is from the advancing actor (self-approve)", async () => {
@@ -136,7 +173,11 @@ describe("AC-5: fn_actor_is_independent", () => {
 			`SELECT roadmap.fn_actor_is_independent($1, $2) AS result`,
 			[pid, ACTOR_A],
 		);
-		assert.equal(rows[0].result, false, "self-approve should not count as independent");
+		assert.equal(
+			rows[0].result,
+			false,
+			"self-approve should not count as independent",
+		);
 	});
 
 	it("returns TRUE when approve from a different actor exists", async () => {
@@ -148,7 +189,11 @@ describe("AC-5: fn_actor_is_independent", () => {
 			`SELECT roadmap.fn_actor_is_independent($1, $2) AS result`,
 			[pid, ACTOR_A],
 		);
-		assert.equal(rows[0].result, true, "approve from different actor should count as independent");
+		assert.equal(
+			rows[0].result,
+			true,
+			"approve from different actor should count as independent",
+		);
 	});
 
 	it("returns TRUE when advancing actor is null/empty (single-actor degraded mode)", async () => {
@@ -160,7 +205,11 @@ describe("AC-5: fn_actor_is_independent", () => {
 			`SELECT roadmap.fn_actor_is_independent($1, NULL) AS result`,
 			[pid],
 		);
-		assert.equal(rows[0].result, true, "null actor = any approve qualifies (degraded mode)");
+		assert.equal(
+			rows[0].result,
+			true,
+			"null actor = any approve qualifies (degraded mode)",
+		);
 	});
 });
 
@@ -181,8 +230,8 @@ describe("AC-1: Independent approver required for non-terminal gate decision", (
 			(err: Error) => {
 				assert.ok(
 					err.message.includes("independent approve") ||
-					err.message.includes("check_violation") ||
-					(err as any).code === "23514",
+						err.message.includes("check_violation") ||
+						(err as any).code === "23514",
 					`Expected check_violation, got: ${err.message}`,
 				);
 				return true;
@@ -199,7 +248,10 @@ describe("AC-1: Independent approver required for non-terminal gate decision", (
 		await addReview(pid, ACTOR_B, "approve");
 		const decisionId = await addGateDecision(pid, "DRAFT", "REVIEW", ACTOR_A);
 
-		assert.ok(decisionId > 0, "gate_decision_log INSERT should succeed with independent approve");
+		assert.ok(
+			decisionId > 0,
+			"gate_decision_log INSERT should succeed with independent approve",
+		);
 	});
 
 	it("accepts gate_decision_log INSERT when there is no advancing actor (degraded mode)", async () => {
@@ -236,8 +288,7 @@ describe("AC-2: Unresolved blocking review blocks non-terminal gate advance", ()
 			},
 			(err: Error) => {
 				assert.ok(
-					err.message.includes("blocking") ||
-					(err as any).code === "23514",
+					err.message.includes("blocking") || (err as any).code === "23514",
 					`Expected blocking check_violation, got: ${err.message}`,
 				);
 				return true;
@@ -255,7 +306,10 @@ describe("AC-2: Unresolved blocking review blocks non-terminal gate advance", ()
 		await addReview(pid, ACTOR_B, "approve", false, 100);
 
 		const decisionId = await addGateDecision(pid, "DRAFT", "REVIEW", ACTOR_A);
-		assert.ok(decisionId > 0, "Blocking review superseded by later approve should allow advance");
+		assert.ok(
+			decisionId > 0,
+			"Blocking review superseded by later approve should allow advance",
+		);
 	});
 
 	it("accepts advance when only approve exists (no blocking reviews)", async () => {
@@ -294,7 +348,11 @@ describe("AC-2: Unresolved blocking review blocks non-terminal gate advance", ()
 			`SELECT roadmap.fn_has_unresolved_blocking($1, $2) AS result`,
 			[pid, ACTOR_A],
 		);
-		assert.equal(r2[0].result, false, "after superseding approve → has_blocking=false");
+		assert.equal(
+			r2[0].result,
+			false,
+			"after superseding approve → has_blocking=false",
+		);
 	});
 });
 
@@ -315,8 +373,8 @@ describe("AC-3: prop_transition on non-terminal gate requires gate_decision_log 
 			(err: Error) => {
 				assert.ok(
 					err.message.includes("gate decision") ||
-					err.message.includes("INDEPENDENT") ||
-					(err as any).code === "23514",
+						err.message.includes("INDEPENDENT") ||
+						(err as any).code === "23514",
 					`Expected gate guard rejection, got: ${err.message}`,
 				);
 				return true;
@@ -331,9 +389,7 @@ describe("AC-3: prop_transition on non-terminal gate requires gate_decision_log 
 
 		// The normal gate_decision path uses bypass=true (fn_apply_gate_advance).
 		// Simulate the bypass path:
-		await query(
-			`SET LOCAL app.gate_bypass = 'true'`,
-		);
+		await query(`SET LOCAL app.gate_bypass = 'true'`);
 		// Use a transaction to keep SET LOCAL in scope
 		await query(`BEGIN`);
 		try {
@@ -401,7 +457,10 @@ describe("AC-4: Late-blocking reconcile — flag when blocking review filed afte
 			[pid],
 		);
 
-		assert.ok(rows.length > 0, "A late-block flag discussion entry should exist");
+		assert.ok(
+			rows.length > 0,
+			"A late-block flag discussion entry should exist",
+		);
 		assert.ok(
 			rows[0].body.includes("LATE BLOCKING REVIEW"),
 			`Expected 'LATE BLOCKING REVIEW' in body, got: ${rows[0].body}`,
@@ -422,7 +481,11 @@ describe("AC-4: Late-blocking reconcile — flag when blocking review filed afte
 			  WHERE proposal_id = $1 AND context_prefix = 'gate-late-block:'`,
 			[pid],
 		);
-		assert.equal(rows.length, 0, "No late-block flag for proposal still in REVIEW");
+		assert.equal(
+			rows.length,
+			0,
+			"No late-block flag for proposal still in REVIEW",
+		);
 	});
 
 	it("does NOT flag for non-blocking reviews on advanced proposals", async () => {
