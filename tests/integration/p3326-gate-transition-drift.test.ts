@@ -22,9 +22,26 @@ async function setupPool() {
 	pool = new Pool({ connectionString: DB_URL });
 }
 
+const TEST_IDENTITIES = ["p3326-test-runner", "p3326-test-reviewer"];
+
+async function teardownIdentities() {
+	// P4387: gate tests run against the live DB; the proposal-level cleanup()
+	// removes proposals/workflows/gate rows, but the synthetic agent identities
+	// registered in before() were leaking into roadmap_workforce.agent_registry
+	// (and showing up as active workers / on the state feed). Remove them here.
+	await pool.query(
+		`DELETE FROM roadmap_workforce.agent_registry WHERE agent_identity = ANY($1)`,
+		[TEST_IDENTITIES],
+	);
+}
+
 async function teardownPool() {
-	await purgeTestLeftovers();
-	await pool.end();
+	try {
+		await purgeTestLeftovers();
+		await teardownIdentities();
+	} finally {
+		await pool.end();
+	}
 }
 
 /** Insert a minimal proposal and wire it to the named workflow template. */
@@ -55,8 +72,8 @@ async function insertProposalWithWorkflow(
 	);
 	const proposalId = rows[0]!.id;
 
-	// Wire to workflow template. (roadmap.workflows has no workflow_name column —
-	// the template binds the workflow; workflowTemplateName resolved templateId above.)
+	// Wire to workflow template. NOTE: roadmap.workflows.workflow_name was dropped
+	// from the schema; the workflow name is resolved via template_id → workflow_templates.
 	await pool.query(
 		`INSERT INTO roadmap.workflows (proposal_id, template_id, current_stage)
 		 VALUES ($1, $2, $3)
@@ -123,12 +140,28 @@ async function cleanup(proposalId: number) {
 		`DELETE FROM roadmap_proposal.gate_decision_log WHERE proposal_id = $1`,
 		[proposalId],
 	);
-	await pool.query(`DELETE FROM roadmap.workflows WHERE proposal_id = $1`, [
-		proposalId,
-	]);
-	await pool.query(`DELETE FROM roadmap_proposal.proposal WHERE id = $1`, [
-		proposalId,
-	]);
+	await pool.query(
+		`DELETE FROM roadmap.workflows WHERE proposal_id = $1`,
+		[proposalId],
+	);
+	await pool.query(
+		`DELETE FROM roadmap_proposal.proposal WHERE id = $1`,
+		[proposalId],
+	);
+}
+
+/**
+ * Seed an independent approve so a non-terminal gate advance is permitted.
+ * Post-P3566, REVIEW→DEVELOP requires an approve from a reviewer distinct from
+ * decided_by within the last 10 minutes (fn_actor_is_independent).
+ */
+async function seedIndependentApprove(proposalId: number) {
+	await pool.query(
+		`INSERT INTO roadmap_proposal.proposal_reviews
+		   (proposal_id, reviewer_identity, verdict, is_blocking, reviewed_at, project_id)
+		 VALUES ($1, 'p3326-test-reviewer', 'approve', false, now(), 1)`,
+		[proposalId],
+	);
 }
 
 before(async () => {
@@ -136,7 +169,7 @@ before(async () => {
 	try {
 		await initConfig({});
 	} catch {
-		// already initialized
+		// already initialized / config optional for this DB-only test
 	}
 	// Ensure test agent identities exist for FK (decider + independent reviewer)
 	await pool.query(
@@ -170,9 +203,7 @@ describe("P3326 gate/transition drift regression", () => {
 				"Standard RFC",
 			);
 			try {
-				// Satisfy the P3566 independence rule: an approve from a reviewer
-				// distinct from the decider must exist before a non-terminal advance.
-				await addIndependentApprove(id);
+				await seedIndependentApprove(id);
 				const result = await recordGateDecision({
 					proposal_id: String(id),
 					gate: "D2",

@@ -142,7 +142,14 @@ after(async () => {
 			[TEST_PROP_IDS],
 		);
 	}
-	// Belt-and-braces: sweep anything tagged but missed (e.g. ids not tracked).
+	// P4387: also remove the synthetic test actor identities so they do not
+	// leak into roadmap_workforce.agent_registry as active workers / feed noise.
+	// (system/reconciler is a real identity and is intentionally left in place.)
+	await query(
+		`DELETE FROM roadmap_workforce.agent_registry WHERE agent_identity = ANY($1)`,
+		[[ACTOR_A, ACTOR_B, ACTOR_C]],
+	);
+	// Belt-and-braces: sweep anything tagged but missed.
 	await purgeTestLeftovers();
 });
 
