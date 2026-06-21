@@ -115,8 +115,11 @@ export async function detectAndReapSilentSpawns(
 	let reaped = 0;
 	for (const row of silentRows) {
 		try {
-			// Mark the agent_run as timeout
-			await pool.query(
+			// Mark the agent_run as timeout. Guard on rowCount: no-progress-watchdog
+			// runs first in reap-stale-rows.ts and may have already reaped this row.
+			// If the UPDATE is a no-op (rowCount=0) skip all side-effects to prevent
+			// double-throttle and double-alert (N-ORCH-1 / P4387 gap).
+			const updateResult = await pool.query(
 				`UPDATE roadmap_workforce.agent_runs
 				 SET status = 'timeout',
 				     completed_at = now(),
@@ -124,6 +127,27 @@ export async function detectAndReapSilentSpawns(
 				 WHERE id = $1 AND status = 'running'`,
 				[row.id],
 			);
+			if ((updateResult.rowCount ?? 0) === 0) continue;
+
+			// N-ORCH-2 / P4387 gap: stamp squad_dispatch as transient failure so
+			// fn_complete_work_offer does not default to failure_class='unknown'
+			// (slashable, trips circuit breaker). Mirrors no-progress-watchdog.ts.
+			if (row.agency_identity && row.proposal_id) {
+				try {
+					await pool.query(
+						`UPDATE roadmap_workforce.squad_dispatch
+						 SET failure_class = 'lease_expired', failure_is_transient = true
+						 WHERE proposal_id = $1::bigint AND agency_identity = $2
+						   AND completed_at IS NULL
+						   AND failure_class IS NULL`,
+						[row.proposal_id, row.agency_identity],
+					);
+				} catch (err) {
+					logger.warn(
+						`[${tag}] offer failure-class stamp failed for run ${row.id}: ${err instanceof Error ? err.message : String(err)}`,
+					);
+				}
+			}
 
 			// Release the associated proposal_lease immediately so the proposal
 			// can be redispatched without waiting for the 10-min lease-expiry reaper.
