@@ -20,6 +20,17 @@ import {
 
 const TEST_ID = `p1439-test-${Date.now()}`;
 
+// NOTE: these tests insert real rows into roadmap_proposal.proposal. When this
+// suite is run against the LIVE database with the orchestrator active, the
+// orchestrator dispatches any work-dispatchable proposal mid-test, creating
+// squad_dispatch/agent_runs FK references; the per-test `DELETE FROM proposal`
+// then fails on the FK and the row survives as pollution (observed 2026-06-21:
+// p1439-test rows churned to MERGE/active). Proposals are therefore created with
+// maturity='obsolete' — invisible to v_dispatchable_proposal / the unified pool —
+// so the orchestrator never grabs them. verifyDeliverables() queries by
+// proposal_id directly and does not care about maturity, so test semantics are
+// unchanged. (Proper fix is test-DB isolation; this is the minimal guard.)
+
 // ──────────────────────────────────────────────────────────────────────────────
 // AC-1: Role->Artifact-Check Map Documentation
 // ──────────────────────────────────────────────────────────────────────────────
@@ -49,7 +60,7 @@ test("AC-2.1: gate-review role fails when no proposal_reviews row exists", async
 		  (status, maturity, title, type, project_id, audit)
 		  VALUES ($1, $2, $3, $4, $5, $6)
 		  RETURNING id`,
-		["Review", "new", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
+		["Review", "obsolete", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
 	);
 	const proposalId = proposalRes.rows[0].id;
 
@@ -79,7 +90,7 @@ test("AC-2.2: gate-review role succeeds when proposal_reviews row exists", async
 		  (status, maturity, title, type, project_id, audit)
 		  VALUES ($1, $2, $3, $4, $5, $6)
 		  RETURNING id`,
-		["Review", "new", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
+		["Review", "obsolete", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
 	);
 	const proposalId = proposalRes.rows[0].id;
 
@@ -124,7 +135,7 @@ test("AC-2.3: developer role fails when no agent_runs row exists", async () => {
 		  (status, maturity, title, type, project_id, audit)
 		  VALUES ($1, $2, $3, $4, $5, $6)
 		  RETURNING id`,
-		["Develop", "new", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
+		["Develop", "obsolete", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
 	);
 	const proposalId = proposalRes.rows[0].id;
 
@@ -154,7 +165,7 @@ test("AC-2.4: developer role succeeds when agent_runs completed exists", async (
 		  (status, maturity, title, type, project_id, audit)
 		  VALUES ($1, $2, $3, $4, $5, $6)
 		  RETURNING id`,
-		["Develop", "new", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
+		["Develop", "obsolete", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
 	);
 	const proposalId = proposalRes.rows[0].id;
 
@@ -190,7 +201,7 @@ test("AC-2.5: enhance role fails when no AC or discussion artifacts", async () =
 		  (status, maturity, title, type, project_id, audit)
 		  VALUES ($1, $2, $3, $4, $5, $6)
 		  RETURNING id`,
-		["Draft", "new", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
+		["Draft", "obsolete", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
 	);
 	const proposalId = proposalRes.rows[0].id;
 
@@ -220,7 +231,7 @@ test("AC-2.6: architect role fails when no AC with criterion_text", async () => 
 		  (status, maturity, title, type, project_id, audit)
 		  VALUES ($1, $2, $3, $4, $5, $6)
 		  RETURNING id`,
-		["Draft", "new", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
+		["Draft", "obsolete", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
 	);
 	const proposalId = proposalRes.rows[0].id;
 
@@ -250,7 +261,7 @@ test("AC-2.7: architect role succeeds when AC with criterion_text exists", async
 		  (status, maturity, title, type, project_id, audit)
 		  VALUES ($1, $2, $3, $4, $5, $6)
 		  RETURNING id`,
-		["Draft", "new", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
+		["Draft", "obsolete", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
 	);
 	const proposalId = proposalRes.rows[0].id;
 
@@ -290,7 +301,7 @@ test("AC-2.8: markDeliverableVerificationFailed sets correct status + failure_cl
 		  (status, maturity, title, type, project_id, audit)
 		  VALUES ($1, $2, $3, $4, $5, $6)
 		  RETURNING id`,
-		["Develop", "new", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
+		["Develop", "obsolete", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
 	);
 	const proposalId = proposalRes.rows[0].id;
 
@@ -366,7 +377,7 @@ test("AC-3.1: Verifier logic is invoked before maturity change (sanity check)", 
 		  (status, maturity, title, type, project_id, audit)
 		  VALUES ($1, $2, $3, $4, $5, $6)
 		  RETURNING id`,
-		["Review", "new", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
+		["Review", "obsolete", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
 	);
 	const proposalId = proposalRes.rows[0].id;
 
@@ -400,7 +411,7 @@ test("Unknown role defaults to verified=true with warning", async () => {
 		  (status, maturity, title, type, project_id, audit)
 		  VALUES ($1, $2, $3, $4, $5, $6)
 		  RETURNING id`,
-		["Review", "new", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
+		["Review", "obsolete", `Test Proposal ${TEST_ID}`, "feature", 1, '{}']
 	);
 	const proposalId = proposalRes.rows[0].id;
 
@@ -468,7 +479,7 @@ test("P1438 AC-13: LIVE role 'gate-reviewer' (not the internal key) fails the ga
 		  (status, maturity, title, type, project_id, audit)
 		  VALUES ($1, $2, $3, $4, $5, $6)
 		  RETURNING id`,
-		["Review", "new", `Test Proposal ${TEST_ID}-livegate`, "feature", 1, '{}'],
+		["Review", "obsolete", `Test Proposal ${TEST_ID}-livegate`, "feature", 1, '{}'],
 	);
 	const proposalId = proposalRes.rows[0].id;
 	try {
