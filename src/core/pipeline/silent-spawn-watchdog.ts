@@ -95,7 +95,7 @@ export async function detectAndReapSilentSpawns(
 			            SELECT 1
 			              FROM roadmap.tool_call_log tcl
 			             WHERE tcl.briefing_id = ar.briefing_id
-			               AND tcl.created_at > ar.started_at
+			               AND tcl.called_at > ar.started_at
 			          )
 			        )`,
 			[thresholdInterval],
