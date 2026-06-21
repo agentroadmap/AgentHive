@@ -953,6 +953,19 @@ export class Orchestrator {
 		for (const row of rows) {
 			try {
 				if (row.offer_kind === "gate-review") {
+					// GATE-INTEGRITY (P4510/P4387 regression): respect the operator's
+					// auto-gate-advance pause. implicitGatePollMs<=0 means auto
+					// gate-advancement is PAUSED (rubber-stamp protection, set 2026-06-16
+					// because builder agencies self-certify advances with no independence/
+					// AC-integrity). The legacy implicit-poll timer already honors this
+					// (see startMaintenance), but the P3840 unified-pool path bypassed it —
+					// letting P4510 auto-climb MERGE->COMPLETE on builder self-certification
+					// (2026-06-21). Skip gate-advance offers while paused; deliberate /
+					// independent gate decisions happen out-of-band until the P4624/P4627
+					// gate guard (AC-integrity + verifier independence) lands.
+					if (this.implicitGatePollMs <= 0) {
+						continue;
+					}
 					// Route mature proposals directly to dispatchImplicitGate — it
 					// handles claimImplicitGateReady re-check, gateRole selection,
 					// cooldown, and postWorkOffer internally.
