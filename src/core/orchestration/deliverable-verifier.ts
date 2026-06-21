@@ -50,12 +50,21 @@ const ROLE_ARTIFACT_CHECKS: Record<
 > = {
 	"gate-review": async (proposalId, workerIdentity, _dispatchId) => {
 		// Gate reviewers must write a proposal_reviews row for this proposal.
-		// Check: proposal_reviews row exists where proposal_id = $1 AND reviewer_identity = $2
+		// We do NOT match on reviewer_identity = workerIdentity: workers submit
+		// reviews under their PERSONA/role name (e.g. 'governance-researcher',
+		// 'skeptic-alpha') or a normalized id ('claude-bot-gary', 'claude-bot-gary-a'),
+		// never the raw agency identity ('claude-bot-gary.a'). Requiring an exact match
+		// produced a permanent false-negative — every gate-review run was recorded as
+		// no_artifact and slashed the agency to lockout despite real reviews existing
+		// (observed 2026-06-21: P4387 had 5 reviews, 5 slashes, agency re-locked). Credit
+		// any review row for the proposal; advancement is still governed separately by
+		// gate_decision, and submit_review's own non-empty constraints keep rows real.
 		const result = await queryDb(
 			`SELECT id FROM roadmap_proposal.proposal_reviews
-			  WHERE proposal_id = $1 AND reviewer_identity = $2
+			  WHERE proposal_id = $1
+			  ORDER BY reviewed_at DESC NULLS LAST
 			  LIMIT 1`,
-			[proposalId, workerIdentity]
+			[proposalId]
 		);
 		if (result.rows.length > 0) {
 			return {
@@ -66,7 +75,7 @@ const ROLE_ARTIFACT_CHECKS: Record<
 		}
 		return {
 			verified: false,
-			failureReason: `No proposal_reviews row found for proposal_id=${proposalId}, reviewer_identity=${workerIdentity}`,
+			failureReason: `No proposal_reviews row found for proposal_id=${proposalId} (reviewer was ${workerIdentity})`,
 		};
 	},
 
