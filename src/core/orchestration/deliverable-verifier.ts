@@ -124,9 +124,17 @@ const ROLE_ARTIFACT_CHECKS: Record<
 			};
 		}
 
+		// Credit the analytical note prefixes a prep/research/enhance worker actually
+		// produces via mcp_proposal action=add_discussion. note_type='review' maps to
+		// 'feedback:', but a compliant worker that omits note_type lands the default
+		// 'general:', and 'concern:'/'arch:' are equally-valid prep deliverables. Matching
+		// only 'feedback:' is too brittle — it rejected real worker analysis (e.g. P4387
+		// note 11953 written as 'general:') and re-slashed the agency. P1371 already
+		// guarantees the row is non-empty, so any of these is a genuine persisted artifact.
 		const discussionResult = await queryDb(
 			`SELECT id FROM roadmap_proposal.proposal_discussions
-			  WHERE proposal_id = $1 AND context_prefix = 'feedback:'
+			  WHERE proposal_id = $1
+			    AND context_prefix IN ('feedback:', 'general:', 'concern:', 'arch:')
 			  ORDER BY created_at DESC LIMIT 1`,
 			[proposalId]
 		);
