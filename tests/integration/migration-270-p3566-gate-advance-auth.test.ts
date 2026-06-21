@@ -123,7 +123,17 @@ before(async () => {
 });
 
 after(async () => {
-	await pool.end();
+	// P4387: remove the synthetic test actor identities so they do not leak into
+	// roadmap_workforce.agent_registry as active workers / state-feed noise.
+	// (system/* identities are real and intentionally left in place.)
+	try {
+		await pool.query(
+			`DELETE FROM roadmap_workforce.agent_registry WHERE agent_identity = ANY($1)`,
+			[[ADVANCER, REVIEWER, BLOCKER]],
+		);
+	} finally {
+		await pool.end();
+	}
 });
 
 describe("P3566 AC-5: fn_actor_is_independent", () => {

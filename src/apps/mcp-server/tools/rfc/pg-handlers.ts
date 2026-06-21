@@ -1651,7 +1651,7 @@ export async function recordGateDecision(args: {
 				    AND ws_next.stage_order = ws_curr.stage_order + 1
 				  WHERE wt.name = $1
 				  LIMIT 1`,
-				[proposalId, fromState],
+				[proposalWorkflow, fromState],
 			);
 
 			if (fwd.length) {

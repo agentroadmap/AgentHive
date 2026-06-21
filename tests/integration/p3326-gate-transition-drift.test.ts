@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { Pool } from "pg";
 import { recordGateDecision } from "../../src/apps/mcp-server/tools/rfc/pg-handlers.ts";
-import { initConfig } from "../../src/config/config.ts";
+import { initConfig } from "../../src/shared/runtime/config.ts";
 
 const DB_URL =
 	process.env.DATABASE_URL ?? "postgresql://admin@127.0.0.1:5432/agenthive";
@@ -22,8 +22,25 @@ async function setupPool() {
 	pool = new Pool({ connectionString: DB_URL });
 }
 
+const TEST_IDENTITIES = ["p3326-test-runner", "p3326-test-reviewer"];
+
+async function teardownIdentities() {
+	// P4387: gate tests run against the live DB; the proposal-level cleanup()
+	// removes proposals/workflows/gate rows, but the synthetic agent identities
+	// registered in before() were leaking into roadmap_workforce.agent_registry
+	// (and showing up as active workers / on the state feed). Remove them here.
+	await pool.query(
+		`DELETE FROM roadmap_workforce.agent_registry WHERE agent_identity = ANY($1)`,
+		[TEST_IDENTITIES],
+	);
+}
+
 async function teardownPool() {
-	await pool.end();
+	try {
+		await teardownIdentities();
+	} finally {
+		await pool.end();
+	}
 }
 
 /** Insert a minimal proposal and wire it to the named workflow template. */
@@ -53,15 +70,15 @@ async function insertProposalWithWorkflow(
 	);
 	const proposalId = rows[0]!.id;
 
-	// Wire to workflow template
+	// Wire to workflow template. NOTE: roadmap.workflows.workflow_name was dropped
+	// from the schema; the workflow name is resolved via template_id → workflow_templates.
 	await pool.query(
-		`INSERT INTO roadmap.workflows (proposal_id, template_id, workflow_name, current_stage)
-		 VALUES ($1, $2, $3, $4)
+		`INSERT INTO roadmap.workflows (proposal_id, template_id, current_stage)
+		 VALUES ($1, $2, $3)
 		 ON CONFLICT (proposal_id) DO UPDATE
 		   SET template_id = EXCLUDED.template_id,
-		       workflow_name = EXCLUDED.workflow_name,
 		       current_stage = EXCLUDED.current_stage`,
-		[proposalId, templateId, workflowTemplateName, status],
+		[proposalId, templateId, status],
 	);
 
 	return proposalId;
@@ -81,6 +98,10 @@ async function cleanup(proposalId: number) {
 		[proposalId],
 	);
 	await pool.query(
+		`DELETE FROM roadmap_proposal.proposal_reviews WHERE proposal_id = $1`,
+		[proposalId],
+	);
+	await pool.query(
 		`DELETE FROM roadmap.workflows WHERE proposal_id = $1`,
 		[proposalId],
 	);
@@ -90,17 +111,31 @@ async function cleanup(proposalId: number) {
 	);
 }
 
+/**
+ * Seed an independent approve so a non-terminal gate advance is permitted.
+ * Post-P3566, REVIEW→DEVELOP requires an approve from a reviewer distinct from
+ * decided_by within the last 10 minutes (fn_actor_is_independent).
+ */
+async function seedIndependentApprove(proposalId: number) {
+	await pool.query(
+		`INSERT INTO roadmap_proposal.proposal_reviews
+		   (proposal_id, reviewer_identity, verdict, is_blocking, reviewed_at, project_id)
+		 VALUES ($1, 'p3326-test-reviewer', 'approve', false, now(), 1)`,
+		[proposalId],
+	);
+}
+
 before(async () => {
 	await setupPool();
 	try {
-		await initConfig();
+		await initConfig({});
 	} catch {
-		// already initialized
+		// already initialized / config optional for this DB-only test
 	}
 	// Ensure test agent identity exists for FK
 	await pool.query(
 		`INSERT INTO roadmap_workforce.agent_registry (agent_identity, agent_type, status)
-		 VALUES ('p3326-test-runner', 'llm', 'active')
+		 VALUES ('p3326-test-runner', 'llm', 'active'), ('p3326-test-reviewer', 'llm', 'active')
 		 ON CONFLICT (agent_identity) DO NOTHING`,
 	);
 });
@@ -116,6 +151,7 @@ describe("P3326 gate/transition drift regression", () => {
 				"Standard RFC",
 			);
 			try {
+				await seedIndependentApprove(id);
 				const result = await recordGateDecision({
 					proposal_id: String(id),
 					gate: "D2",

@@ -111,6 +111,13 @@ after(async () => {
 			[TEST_PROP_IDS],
 		);
 	}
+	// P4387: also remove the synthetic test actor identities so they do not
+	// leak into roadmap_workforce.agent_registry as active workers / feed noise.
+	// (system/reconciler is a real identity and is intentionally left in place.)
+	await query(
+		`DELETE FROM roadmap_workforce.agent_registry WHERE agent_identity = ANY($1)`,
+		[[ACTOR_A, ACTOR_B, ACTOR_C]],
+	);
 });
 
 // ─── AC-5: Shared independence helper ────────────────────────────────────────
