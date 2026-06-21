@@ -226,6 +226,13 @@ export function buildTaskPrompt(
 				readinessSummary,
 				"",
 				"Decide whether the proposal is ready to advance to the next stage. If not, return concrete missing work.",
+				"",
+				// DELIVERABLE CONTRACT: the deliverable-verifier credits a run ONLY if a real
+				// artifact lands in the DB. A verdict described only in the final message is
+				// recorded as no_artifact and slashed. Gate/review roles write a proposal_reviews row.
+				"DELIVERABLE CONTRACT (REQUIRED): record your verdict by calling the `submit_review` MCP tool " +
+					`for proposal_id="${detail.displayId}" (include any blocking flags). A run that exits ` +
+					"WITHOUT a review row is recorded as FAILED (no artifact) regardless of your final message.",
 			].join("\n");
 		}
 
@@ -237,6 +244,17 @@ export function buildTaskPrompt(
 				: "Enhance the proposal until it is ready for the next gate.",
 			"",
 			"Focus on research, clarity, acceptance criteria, and any missing evidence.",
+			"",
+			// DELIVERABLE CONTRACT: research/enhance findings stated only in the final message are
+			// NOT credited. The deliverable-verifier requires a feedback discussion
+			// (context_prefix='feedback:', via note_type="review") or a non-pending acceptance
+			// criterion; without one the run is slashed as no_artifact and retried.
+			"DELIVERABLE CONTRACT (REQUIRED): findings stated only in your final message DO NOT COUNT. " +
+				"Before you finish you MUST persist your work to the proposal via MCP:",
+			`  - Research / feedback: call \`add_discussion\` with proposal_id="${detail.displayId}", ` +
+				'note_type="review" (this records context "feedback:"), content=<your findings/recommendation>.',
+			`  - New or refined acceptance criteria: call \`add_acceptance_criteria\` for proposal_id="${detail.displayId}".`,
+			"At least one such artifact MUST exist when you exit, or the run is recorded as FAILED (no artifact).",
 		].join("\n");
 	})();
 
