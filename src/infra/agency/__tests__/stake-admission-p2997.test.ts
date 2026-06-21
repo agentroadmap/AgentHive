@@ -120,14 +120,17 @@ describe("P2997 evaluateStakeAdmission (AC-8 pre-claim gate)", () => {
 		expect(r.reason).toBe("stake_slashed");
 	});
 
-	it("rejects an agent whose stake was returned (must re-bond)", async () => {
+	it("admits an agent whose stake was returned (success is trust-positive, no re-bond path exists)", async () => {
 		const { exec } = makeRegistryMock({
 			stake_microcents: 3 * MICROCENTS_PER_CENT,
 			stake_status: "returned",
 		});
 		const r = await evaluateStakeAdmission("agency/done", exec);
-		expect(r.allowed).toBe(false);
-		expect(r.reason).toBe("stake_returned");
+		// A 'returned' bond means the agent completed work successfully. The original
+		// design refused it to force a re-bond, but no auto-re-bond exists, so refusing
+		// permanently locked productive agents out. Admit (re-bond-on-reuse).
+		expect(r.allowed).toBe(true);
+		expect(r.reason).toBe(null);
 	});
 
 	it("admits a legacy/unsigned agent with no registry row (backward compat)", async () => {
