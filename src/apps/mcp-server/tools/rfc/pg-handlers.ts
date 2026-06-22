@@ -1036,6 +1036,12 @@ const CANONICAL_VERDICTS = [
 	"approve",
 	"approve_with_changes",
 	"request_changes",
+	// P1391 (AC-10) DEPRECATED: `send_back` — the lease-lifecycle verdict vocab
+	// converges on `hold` (request-for-change: bounce the proposal back to its
+	// author for revision) and `reject` (discard the approach). `send_back` is
+	// retained only for backward compatibility with stored reviews / synonym
+	// mapping below; NEW review surfaces should emit `request_changes`/`hold`
+	// (revise) or `reject` (discard) rather than `send_back`.
 	"send_back",
 	"reject",
 	"defer",

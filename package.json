@@ -47,6 +47,7 @@
     "react-router-dom": "7.12.0",
     "react-tooltip": "5.30.0",
     "tailwindcss": "4.1.18",
+    "tsx": "^4.22.4",
     "typescript": "^6.0.2",
     "vitest": "^4.1.5"
   },

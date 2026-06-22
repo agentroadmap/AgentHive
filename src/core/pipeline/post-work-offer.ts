@@ -14,7 +14,8 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
-import { query as defaultQuery } from "../../infra/postgres/pool.ts";
+import { getPool, query as defaultQuery } from "../../infra/postgres/pool.ts";
+import { canonicalTransition } from "../../infra/postgres/canonical-transition.ts";
 import * as runtimeConfig from "../../shared/runtime/config.ts";
 import { FlagKeys } from "../../shared/runtime/config-keys.ts";
 import { ObservabilityWriter } from "../observability/observability-writer.ts";
@@ -695,6 +696,26 @@ async function postWorkOfferImpl(
 					}),
 				],
 			);
+			// AC-35: Emit a canonical ledger event capturing the gate_pause fields
+			// cleared by the demotion UPDATE above (additionalStateChanges records
+			// ancillary column changes that aren't part of the state machine itself).
+			canonicalTransition(getPool(), {
+				proposalId: input.proposalId,
+				eventKind: "gate_pause_demotion",
+				fromMaturity: "mature",
+				toMaturity: "new",
+				actorPrincipalId: "system:post-work-offer",
+				actorLayer: "system-trigger",
+				reasonCode: "system",
+				rationale: `Premature gate: 0/${totalAcs} ACs passing for role "${input.role}". gate_scanner_paused cleared.`,
+				additionalStateChanges: {
+					gate_scanner_paused: false,
+					gate_paused_by: null,
+					gate_paused_at: null,
+				},
+				sourceSurface: "postWorkOffer",
+				serviceIdentity: "post-work-offer",
+			}).catch(() => { /* non-critical: shadow trigger covers the maturity change */ });
 			throw new PrematureGateError(input.proposalId, input.role, totalAcs);
 		}
 	}

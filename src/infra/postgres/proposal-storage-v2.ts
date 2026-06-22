@@ -10,6 +10,28 @@ import {
 	type StageName,
 } from "../../gate_pipeline/workflow_stages.ts";
 import { getProposalAuditPause } from "../../gate_pipeline/frontier_audit.ts";
+import {
+	canonicalTransition,
+	type ActorLayer,
+	type ReasonCode,
+} from "./canonical-transition.ts";
+
+// ── P4668 AC-23/AC-37: Optional extras carried into the canonical ledger ──────
+// Callers that know governance IDs (gate decision, reviews, lease, run) can
+// pass them here so the ledger event has full provenance correlation.
+export interface TransitionCanonicalExtras {
+	actorLayer?: ActorLayer;
+	gateDecisionId?: bigint | number;
+	reviewIds?: (bigint | number)[];
+	acEvidenceSnapshot?: Record<string, unknown>;
+	acEvidenceHash?: string;
+	dependencySnapshot?: Record<string, unknown>;
+	dependencySnapshotHash?: string;
+	leaseId?: bigint | number;
+	runId?: bigint | number;
+	correlationId?: string;
+	agentProfile?: string;
+}
 
 const PROPOSAL_COLUMNS = `
   id, display_id, parent_id, type, status, maturity, title,
@@ -491,6 +513,7 @@ export async function transitionProposal(
 	transitionedBy: string,
 	reason?: string,
 	notes?: string,
+	extras?: TransitionCanonicalExtras,
 ): Promise<ProposalRow | null> {
 	// Get current status
 	const current = await query<{ status: string }>(
@@ -616,21 +639,38 @@ export async function transitionProposal(
 		[toState, proposalId],
 	);
 
-	// Backfill the trigger's minimal entry with full metadata
-	await query(
-		`UPDATE roadmap_proposal.proposal_state_transitions
-     SET transition_reason = $1,
-         transitioned_by   = $2,
-         notes             = COALESCE($3, notes)
-     WHERE id = (
-       SELECT id
-       FROM roadmap_proposal.proposal_state_transitions
-       WHERE proposal_id = $4 AND LOWER(to_state) = LOWER($5)
-       ORDER BY id DESC
-       LIMIT 1
-     )`,
-		[reason ?? "submit", transitionedBy, notes ?? null, proposalId, toState],
-	);
+	// AC-23: Emit a canonical ledger event with source_confidence='high'.
+	// The dual-write shadow trigger (mig 310) also fires on the pst INSERT
+	// above with source_confidence='medium'. Both entries coexist during the
+	// dual-write window; they're distinguishable by source_confidence.
+	const reasonCode: ReasonCode =
+		reason === "decision" ? "decision"
+		: reason === "submit" ? "submit"
+		: reason === "break_glass" ? "break_glass"
+		: "canonical";
+
+	await canonicalTransition(getPool(), {
+		proposalId,
+		eventKind: "status_transition",
+		fromStatus: fromState,
+		toStatus: toState,
+		actorPrincipalId: transitionedBy,
+		actorLayer: extras?.actorLayer ?? "agency",
+		reasonCode,
+		rationale: notes,
+		gateDecisionId: extras?.gateDecisionId,
+		reviewIds: extras?.reviewIds,
+		acEvidenceSnapshot: extras?.acEvidenceSnapshot,
+		acEvidenceHash: extras?.acEvidenceHash,
+		dependencySnapshot: extras?.dependencySnapshot,
+		dependencySnapshotHash: extras?.dependencySnapshotHash,
+		leaseId: extras?.leaseId,
+		runId: extras?.runId,
+		correlationId: extras?.correlationId,
+		agentProfile: extras?.agentProfile,
+		sourceSurface: "transitionProposal",
+		serviceIdentity: "proposal-storage-v2",
+	});
 
 	return rows[0];
 }
@@ -734,6 +774,21 @@ export async function setMaturity(
 			proposalId,
 		],
 	);
+
+	// AC-37: Emit a canonical ledger event for every maturity change.
+	// source_confidence='high' because this is the authoritative write path.
+	await canonicalTransition(getPool(), {
+		proposalId,
+		eventKind: "maturity_set",
+		fromMaturity: prior.maturity ?? "new",
+		toMaturity: maturity,
+		actorPrincipalId: agentIdentity,
+		actorLayer: "agency",
+		reasonCode: "canonical",
+		rationale: reason,
+		sourceSurface: "setMaturity",
+		serviceIdentity: "proposal-storage-v2",
+	});
 
 	// Record an audit note when self-declaring mature so later agents can see
 	// whether the maturity change was meant to request a gate review.

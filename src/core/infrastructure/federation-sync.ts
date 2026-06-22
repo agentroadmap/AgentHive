@@ -699,6 +699,26 @@ export class FederationSync extends EventEmitter {
 					}
 				}
 
+				// AC-36 (P4668): federation-sync is EXPLICITLY EXCLUDED from the
+				// canonical transition path (fn_canonical_transition_insert / mig 306-315).
+				//
+				// Protocol decision rationale:
+				//   1. Cross-tenant writes: this UPDATE targets proposals by display_id
+				//      across tenant boundaries where the canonical ledger's FK constraints
+				//      (proposal_id bigint FK → proposal.id) may not resolve. The ledger is
+				//      per-tenant; federation operates cross-tenant.
+				//   2. Zero gate enforcement: federation explicitly bypasses fn_guard_gate_advance.
+				//      State received from a peer is accepted as already gate-validated on the
+				//      originating tenant. Adding canonical writes here would double-log a
+				//      decision made elsewhere, not document a local decision.
+				//   3. Source confidence: this path is already documented as 'federation_sync'
+				//      reason_code in the EventKind type. If cross-tenant audit trails are
+				//      needed, a separate federation event type (not a transition event) is
+				//      the correct mechanism.
+				//
+				// RISK: this means federation-applied status changes have NO local canonical
+				// ledger entry. Operators can detect this via v_dual_write_divergence for
+				// proposals with display_id containing the peer's namespace prefix.
 				// Apply remote version
 				await this.db(
 					`UPDATE roadmap_proposal.proposal

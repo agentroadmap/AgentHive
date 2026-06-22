@@ -39,7 +39,10 @@ async function pollProposals(): Promise<ProposalRow[]> {
 		`SELECT p.id, p.display_id, p.title
 		 FROM roadmap_proposal.proposal p
 		 LEFT JOIN roadmap_proposal.proposal_lease pl
-		   ON pl.proposal_id = p.id AND pl.released_at IS NULL
+		   -- P1391 AC-8: a lease is live only when released_at IS NULL AND it has
+		   -- not passed its TTL. A released_at-null-but-expired row is NOT a live
+		   -- lease, so it must not mask a COMPLETE/new proposal from the verifier.
+		   ON pl.proposal_id = p.id AND pl.released_at IS NULL AND pl.expires_at > now()
 		 WHERE p.status = 'COMPLETE'
 		   AND p.maturity = 'new'
 		   AND pl.id IS NULL

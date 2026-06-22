@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "1",
+  "description": "AC-33: Files permitted to INSERT directly into proposal_transition_ledger after mig 311 enforcement. These are test fixtures only. Production code paths are NOT permitted here. Each exemption must be reviewed before mig 311 is applied — test files should be migrated to call fn_canonical_transition_insert() via the canonicalTransition() TypeScript wrapper wherever possible.",
+  "exemptions": [
+    {
+      "file": "scripts/migrations/__tests__/p4668-transition-ledger.test.ts",
+      "reason": "DB-4/DB-5 live tests call fn_canonical_transition_insert() via SQL SELECT — not a direct INSERT. No exemption required for post-311 test runs. Fixture teardown uses DELETE (admin superuser, not revoked for admin).",
+      "requires_direct_insert": false
+    },
+    {
+      "file": "scripts/migrations/__tests__/p4668-mig310-312.test.ts",
+      "reason": "DB-1 (trigger shadow-write test) inserts into proposal_state_transitions (PST), not directly into proposal_transition_ledger. The shadow trigger fn_shadow_write_to_ledger() (SECURITY DEFINER) performs the ledger write. No direct ledger INSERT from test code.",
+      "requires_direct_insert": false
+    },
+    {
+      "file": "scripts/migrations/__tests__/p4668-mig311-313.test.ts",
+      "reason": "Tests for enforcement itself; all writes go through fn_canonical_transition_insert() or via PST+shadow-trigger. Direct INSERT is tested only as a negative case (expect permission denied).",
+      "requires_direct_insert": false
+    }
+  ],
+  "notes": [
+    "If a file is added here with requires_direct_insert=true, it MUST use a superuser/admin connection (not application roles) and MUST rollback the transaction.",
+    "This list is CI-checked by scripts/migrations/__tests__/p4668-mig311-313.test.ts (TS-5).",
+    "All test files that needed direct INSERT were migrated to use fn_canonical_transition_insert() before mig 311 enforcement was applied."
+  ]
+}
