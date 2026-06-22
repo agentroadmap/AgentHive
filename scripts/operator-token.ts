@@ -14,15 +14,37 @@
  *   npm run operator:issue -- --name=ops-bot --allowed=agent.message,audit.read
  *   npm run operator:list
  *   npm run operator:revoke -- --id=3 --reason="rotation"
+ *
+ * P4509 — granular destructive-control scopes (least privilege):
+ *   suspend-agency    POST /api/operator/control/suspend-agency
+ *   drain-host        POST /api/operator/control/drain-host
+ *   cancel-dispatch   POST /api/operator/control/cancel-dispatch
+ *   terminate-worker  POST /api/operator/control/terminate-worker
+ *   control.stop      POST /api/operator/control/stop (generic stop ONLY)
+ * `control.stop` is NOT a parent scope: an exact-match control.stop grant no
+ * longer reaches the four granular endpoints. Grant exactly what is needed, or
+ * use '*' for full powers (audited as a concentrated credential). Pre-P4509
+ * control.stop tokens are expanded to also carry the four granular actions by
+ * migration 316-p4509-operator-granular-control-backfill.sql. To move a token
+ * to least privilege, re-issue it with only the granular scope(s) it needs.
+ *   e.g.  npm run operator:issue -- --name=drain-bot --allowed=drain-host
  */
 import { createHash, randomUUID } from "node:crypto";
+import {
+	GRANULAR_CONTROL_ACTIONS,
+	validateAllowedActions,
+} from "../src/apps/server/operator-actions.ts";
 import { query } from "../src/infra/postgres/pool.ts";
 
 function arg(name: string): string | undefined {
 	const eq = process.argv.find((a) => a.startsWith(`--${name}=`));
 	if (eq) return eq.slice(name.length + 3);
 	const idx = process.argv.indexOf(`--${name}`);
-	if (idx >= 0 && process.argv[idx + 1] && !process.argv[idx + 1].startsWith("--")) {
+	if (
+		idx >= 0 &&
+		process.argv[idx + 1] &&
+		!process.argv[idx + 1].startsWith("--")
+	) {
 		return process.argv[idx + 1];
 	}
 	return undefined;
@@ -35,7 +57,20 @@ async function issue() {
 		process.exit(2);
 	}
 	const allowedRaw = arg("allowed") ?? "*";
-	const allowed = allowedRaw.split(",").map((s) => s.trim()).filter(Boolean);
+	const allowedList = allowedRaw
+		.split(",")
+		.map((s) => s.trim())
+		.filter(Boolean);
+	// P4509 AC-2: same shared validator the API uses — reject typos at issue time.
+	const validation = validateAllowedActions(allowedList);
+	if (!validation.ok) {
+		console.error(validation.message);
+		console.error(
+			`granular control actions: ${GRANULAR_CONTROL_ACTIONS.join(", ")}`,
+		);
+		process.exit(2);
+	}
+	const allowed = validation.actions;
 	const expires = arg("expires") ?? null;
 	const notes = arg("notes") ?? null;
 
@@ -119,7 +154,9 @@ async function main() {
 			await revoke();
 			break;
 		default:
-			console.error("usage: operator-token.ts <issue|list|revoke> [--name=...]");
+			console.error(
+				"usage: operator-token.ts <issue|list|revoke> [--name=...]",
+			);
 			process.exit(2);
 	}
 	process.exit(0);
