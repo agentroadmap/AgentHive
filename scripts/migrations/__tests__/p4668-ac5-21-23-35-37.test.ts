@@ -89,7 +89,7 @@ describe("P4668 AC-35: gate-pause demotion canonical event text-scan", () => {
 
 describe("P4668 AC-23: transitionProposal canonical cutover text-scan", () => {
 	it("TS-5: proposal-storage-v2.ts imports and calls canonicalTransition", () => {
-		expect(proposalStorageV2).toMatch(/import.*canonicalTransition.*canonical-transition/);
+		expect(proposalStorageV2).toMatch(/import.*canonicalTransition.*canonical-transition/s);
 		expect(proposalStorageV2).toMatch(/await canonicalTransition\(getPool\(\)/);
 	});
 
@@ -219,13 +219,16 @@ describe.skipIf(!LIVE)("P4668 AC-5/AC-21/AC-23/AC-37: live-DB integration", () =
 		const proposalId = (rows[0] as { id: number }).id;
 		insertedProposalIds.push(proposalId);
 
+		// Use actor_layer='agency' — ptl_spawn_agent_provider_required requires
+		// resolved_provider when layer='liaison' or 'spawn-agent'. Agency-level
+		// callers don't have a routed run context so they use 'agency'.
 		const payload = JSON.stringify({
 			proposal_id: String(proposalId),
 			event_kind: "status_transition",
 			from_status: "DEVELOP",
 			to_status: "MERGE",
 			actor_principal_id: "claude-bot-gary",
-			actor_layer: "liaison",
+			actor_layer: "agency",
 			reason_code: "decision",
 			rationale: "All ACs verified. Gate decision recorded.",
 			source_surface: "p4668-ac5-test",
@@ -281,33 +284,40 @@ describe.skipIf(!LIVE)("P4668 AC-5/AC-21/AC-23/AC-37: live-DB integration", () =
 		);
 		insertedAgentIdentities.push(actorId);
 
-		// Create a test proposal in DRAFT so we can transition it to REVIEW
+		// Use DEVELOP→DRAFT (a non-gated backward edge, template 37 / Hotfix) so
+		// fn_guard_gate_advance does not block the direct status UPDATE. All forward
+		// edges (DRAFT→REVIEW, REVIEW→DEVELOP, DEVELOP→MERGE, MERGE→COMPLETE) require
+		// record_gate_decision and cannot be driven through transitionProposal() in a
+		// live DB without seeding a gate_decision_log row in the same transaction.
 		const { rows: pRows } = await queryFn(
 			`INSERT INTO roadmap_proposal.proposal
 			   (display_id, title, status, type, maturity, project_id, audit, gate_scanner_paused)
-			 VALUES ($1, 'P4668 AC-23 transitionProposal test', 'DRAFT', 'feature',
-			         'mature', 1, '[]'::jsonb, false)
+			 VALUES ($1, 'P4668 AC-23 transitionProposal test', 'DEVELOP', 'feature',
+			         'active', 1, '[]'::jsonb, false)
 			 RETURNING id`,
 			[`P4668A23${Date.now() % 100000}`],
 		);
 		const proposalId = (pRows[0] as { id: number }).id;
 		insertedProposalIds.push(proposalId);
 
-		// Ensure workflow exists (required by transitionProposal's stageEnforcer and transition validator)
-		// First check if there's a default template
+		// Hotfix template (id=37) has DEVELOP→DRAFT edge; use it.
+		// fn_spawn_workflow() trigger auto-creates a workflow on INSERT with the
+		// default template — the upsert must also update template_id to switch to
+		// the Hotfix template so the DEVELOP→DRAFT transition is allowed.
 		const { rows: tplRows } = await queryFn(
-			`SELECT id FROM roadmap.workflow_templates LIMIT 1`,
+			`SELECT id FROM roadmap.workflow_templates WHERE id = 37 LIMIT 1`,
 		);
 		if (tplRows.length === 0) {
-			console.warn("DB-5: no workflow_templates found; skipping transitionProposal test");
+			console.warn("DB-5: Hotfix template (id=37) not found; skipping transitionProposal test");
 			return;
 		}
 		const templateId = (tplRows[0] as { id: number }).id;
 
 		await queryFn(
 			`INSERT INTO roadmap.workflows (proposal_id, template_id, current_stage)
-			 VALUES ($1, $2, 'DRAFT')
-			 ON CONFLICT (proposal_id) DO UPDATE SET current_stage = 'DRAFT'`,
+			 VALUES ($1, $2, 'DEVELOP')
+			 ON CONFLICT (proposal_id) DO UPDATE
+			   SET current_stage = 'DEVELOP', template_id = EXCLUDED.template_id`,
 			[proposalId, templateId],
 		);
 
@@ -320,16 +330,16 @@ describe.skipIf(!LIVE)("P4668 AC-5/AC-21/AC-23/AC-37: live-DB integration", () =
 		);
 		const beforeCount = (beforeRows[0] as { n: number }).n;
 
-		// Perform the transition — DRAFT→REVIEW requires reason='decision'
+		// Perform the non-gated transition — DEVELOP→DRAFT bypasses fn_guard_gate_advance
 		const result = await transitionProposal(
 			proposalId,
-			"REVIEW",
+			"DRAFT",
 			actorId,
-			"decision",
-			"AC-23 transitionProposal live test — gate decision recorded.",
+			"canonical",
+			"AC-23 transitionProposal live test — non-gated backward edge.",
 		);
 		expect(result).not.toBeNull();
-		expect(result?.status?.toUpperCase()).toBe("REVIEW");
+		expect(result?.status?.toUpperCase()).toBe("DRAFT");
 
 		// Verify a 'high' confidence canonical event was written
 		const { rows: afterRows } = await queryFn(
@@ -349,7 +359,7 @@ describe.skipIf(!LIVE)("P4668 AC-5/AC-21/AC-23/AC-37: live-DB integration", () =
 		};
 		expect(event.source_confidence).toBe("high");
 		expect(event.event_kind).toBe("status_transition");
-		expect(event.to_status?.toUpperCase()).toBe("REVIEW");
+		expect(event.to_status?.toUpperCase()).toBe("DRAFT");
 		expect(event.actor_principal_id).toBe(actorId);
 	});
 
