@@ -12,6 +12,8 @@
  *     TS-7   AC-37: proposal-storage-v2.ts calls canonicalTransition with maturity_set in setMaturity
  *     TS-8   AC-32: reeval-handlers.ts calls canonicalTransition post-COMMIT for revise/obsolete
  *     TS-9   AC-38: mig 311 documents gate-pause-only writes as excluded from canonical ledger
+ *     TS-10  AC-21: p4668-scratch-db-setup.sh exists with CREATE DATABASE + migs 306-315
+ *     TS-11  AC-21: p4668-scratch-db-teardown.sh exists with DROP DATABASE
  *
  *   Live-DB (AGENTHIVE_ALLOW_LIVE_DB=1, migs 306-315 must be applied):
  *     DB-1   AC-5:  fn_canonical_transition_insert rejects reason_code='decision' + empty rationale
@@ -27,12 +29,13 @@
  *   scripts/migrations/__tests__/p4668-ac5-21-23-35-37.test.ts
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const TEST_DIR = __dirname;
 const MIG_DIR = join(__dirname, "..");
 const SRC_DIR = join(__dirname, "..", "..", "..", "src");
 
@@ -143,6 +146,27 @@ describe("P4668 AC-38: gate-pause scope design decision text-scan", () => {
 		expect(mig311).toMatch(/state-machine\.halt/);
 		expect(mig311).toMatch(/state-machine\.resume/);
 		expect(mig311).toMatch(/hive-cli.*domains.*stop|stop.*handlers.*proposal/s);
+	});
+});
+
+describe("P4668 AC-21: CI fixture scripts (text-scan)", () => {
+	it("TS-10: p4668-scratch-db-setup.sh exists with CREATE DATABASE and mig 306-315 references", () => {
+		const setupScript = readFileSync(
+			join(TEST_DIR, "p4668-scratch-db-setup.sh"),
+			"utf8",
+		);
+		expect(setupScript).toMatch(/CREATE DATABASE/);
+		expect(setupScript).toMatch(/306-p4668-transition-ledger-ddl/);
+		expect(setupScript).toMatch(/315-p4668-state-reconstruction/);
+		expect(setupScript).toMatch(/schema-only/);
+	});
+
+	it("TS-11: p4668-scratch-db-teardown.sh exists with DROP DATABASE", () => {
+		const teardownScript = readFileSync(
+			join(TEST_DIR, "p4668-scratch-db-teardown.sh"),
+			"utf8",
+		);
+		expect(teardownScript).toMatch(/DROP DATABASE/);
 	});
 });
 
