@@ -340,9 +340,16 @@ AgentHive has a 96.3% proposal completion rate (547/568) but significant gaps re
 
 ## Gap Category 7: Security Gaps
 
-### GAP-7.1: Operator auth without blast-radius gating `HIGH`
+### GAP-7.1: Operator auth without blast-radius gating `HIGH` — partially resolved by P4509
 - Bearer token auth implemented (CONVENTIONS.md §8b): SHA-256 hashed storage, per-token `allowed_actions`
-- **Gap:** P3565 (risk-tiering) not implemented — high-blast-radius ops authorized by token alone, no secondary gate
+- **Partially resolved by P4509 (action separation):** the four destructive control endpoints
+  (suspend-agency, drain-host, cancel-dispatch, terminate-worker) now authorize on their own
+  granular actions instead of the coarse `control.stop`, enabling least-privilege grants and
+  concentrated-credential auditing of wildcard use. See `src/apps/server/operator-actions.ts`
+  and migration `316-p4509-operator-granular-control-backfill.sql`.
+- **Still open (NOT resolved):** P3565 blast-radius / risk-tier gating, step-up auth, and
+  human-approval for high-blast-radius ops — high-blast ops are still authorized by a single
+  token with no secondary gate. Tracked under the P3565 risk-tiering follow-up (live).
 
 ### GAP-7.2: Secrets scanner CI integration unconfirmed `MEDIUM`
 - `agenthive-scan-rules-secrets` package exists; `.gitleaksignore` and `.scanignore.yaml` present
@@ -352,11 +359,17 @@ AgentHive has a 96.3% proposal completion rate (547/568) but significant gaps re
 - Single-DB means no hard isolation between projects at the DB layer
 - `X-Project-Id` header scoping exists at app layer only
 - hiveCentral + tenant DBs (GAP-1.1) would provide DB-level isolation; blocked on deployment
-### GAP-7.1: Operator auth without blast-radius gating 🟠 High
+### GAP-7.1: Operator auth without blast-radius gating 🟠 High — partially resolved by P4509
 
 - Bearer token auth implemented (CONVENTIONS.md §8b)
 - SHA-256 hashed storage, per-token `allowed_actions`
-- P3565 (risk-tiering) not implemented — no blast-radius gating on authorized actions
+- **Partially resolved by P4509:** destructive control endpoints split off `control.stop` into
+  granular actions (`suspend-agency`, `drain-host`, `cancel-dispatch`, `terminate-worker`) with a
+  shared canonical-action validator, backward-compatible token backfill (migration 316), and
+  wildcard concentrated-credential auditing. This delivers action separation / least privilege.
+- **Remaining (linked to P3565 risk-tiering follow-up, live):** blast-radius gating, risk-tier
+  classification, step-up auth, and human-approval are still NOT implemented — a single token
+  still authorizes high-blast ops with no secondary gate.
 
 ### GAP-7.2: Secrets scanner CI integration unconfirmed 🟡 Medium
 
