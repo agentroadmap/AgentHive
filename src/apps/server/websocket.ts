@@ -183,7 +183,7 @@ export class WebSocketManager {
 		this.changePollTimer = setInterval(async () => {
 			try {
 				const result = await query(
-					`SELECT MAX(updated_at) as latest FROM roadmap_proposal.proposal`,
+					`SELECT MAX(modified_at) as latest FROM roadmap_proposal.proposal`,
 				);
 				const latest = result.rows[0]?.latest;
 				if (latest && new Date(latest) > this.lastProposalCheck) {

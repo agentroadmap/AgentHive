@@ -1137,16 +1137,16 @@ export class Orchestrator {
 			    p.display_id,
 			    p.title,
 			    p.status,
-			    ROUND(EXTRACT(EPOCH FROM (NOW() - p.updated_at)) / 3600.0, 1)::float AS stall_hours
+			    ROUND(EXTRACT(EPOCH FROM (NOW() - p.modified_at)) / 3600.0, 1)::float AS stall_hours
 			 FROM roadmap_proposal.v_dispatchable_proposal p
 			 WHERE p.maturity = 'mature'
-			   AND p.updated_at < NOW() - ($1 * INTERVAL '1 hour')
+			   AND p.modified_at < NOW() - ($1 * INTERVAL '1 hour')
 			   AND NOT EXISTS (
 			       SELECT 1 FROM roadmap.route_decision_log rdl
 			       WHERE rdl.proposal_id = p.id
 			         AND rdl.created_at > NOW() - ($1 * INTERVAL '1 hour')
 			   )
-			 ORDER BY p.updated_at ASC
+			 ORDER BY p.modified_at ASC
 			 LIMIT $2`,
 			[hours, this.stallBatchLimit],
 		);
