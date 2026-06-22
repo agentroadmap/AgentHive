@@ -6,7 +6,8 @@
  * (COMPLETE+mature optimization) surfaces.
  */
 
-import { query } from "../../../../postgres/pool.ts";
+import { getPool, query } from "../../../../postgres/pool.ts";
+import { canonicalTransition } from "../../../../infra/postgres/canonical-transition.ts";
 import type { CallToolResult } from "../../types.ts";
 
 function ok(text: string): CallToolResult {
@@ -343,6 +344,43 @@ export async function reevalDecide(args: {
 		} catch (e) {
 			await query("ROLLBACK");
 			throw e;
+		}
+
+		// AC-32: Emit canonical ledger events post-commit. Using getPool() (outside
+		// the transaction) is intentional — the shadow trigger (mig 310) already wrote
+		// source_confidence='medium' entries during the DB writes above; these 'high'
+		// entries add full actor provenance. If this call fails the ledger falls back
+		// to the shadow entry with no data loss.
+		if (args.outcome === "revise") {
+			await canonicalTransition(getPool(), {
+				proposalId: Number(proposal_id),
+				eventKind: "status_transition",
+				fromStatus: pStatus,
+				toStatus: "REVIEW",
+				fromMaturity: pMaturity,
+				toMaturity: "new",
+				actorPrincipalId: args.decided_by,
+				actorLayer: "operator",
+				reasonCode: "decision",
+				rationale: `reeval-revise: ${args.decision_notes}`,
+				sourceSurface: "reevalDecide",
+				serviceIdentity: "reeval-handlers",
+			}).catch(() => { /* shadow entry already written by mig-310 trigger */ });
+		} else if (args.outcome === "obsolete") {
+			await canonicalTransition(getPool(), {
+				proposalId: Number(proposal_id),
+				eventKind: "status_transition",
+				fromStatus: pStatus,
+				toStatus: "COMPLETE",
+				fromMaturity: pMaturity,
+				toMaturity: "obsolete",
+				actorPrincipalId: args.decided_by,
+				actorLayer: "operator",
+				reasonCode: "decision",
+				rationale: `reeval-obsolete: ${args.decision_notes}`,
+				sourceSurface: "reevalDecide",
+				serviceIdentity: "reeval-handlers",
+			}).catch(() => { /* shadow entry already written by mig-310 trigger */ });
 		}
 
 		return ok(

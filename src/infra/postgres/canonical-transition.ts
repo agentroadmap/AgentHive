@@ -121,7 +121,11 @@ export interface CanonicalTransitionParams {
 	correlationId?: string;
 	idempotencyKey?: string;
 
-	// Ancillary state changes (AC-35)
+	// Ancillary state changes (AC-35/AC-38): non-state-machine column mutations
+	// that co-occur with a transition and should be captured in the audit trail.
+	// Canonical use: gate_scanner_paused, gate_paused_by, gate_paused_at when
+	// a premature-gate demotion clears pause state. Any proposal column whose
+	// value changes as a side-effect of the transition belongs here.
 	additionalStateChanges?: Record<string, unknown>;
 
 	// Source tracing
