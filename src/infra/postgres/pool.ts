@@ -23,11 +23,12 @@
 import {
 	Client,
 	Pool,
+	type PoolClient,
 	type PoolConfig,
 	type QueryResult,
 	type QueryResultRow,
 } from "pg";
-export type { Pool, PoolConfig, QueryResult, QueryResultRow };
+export type { Pool, PoolClient, PoolConfig, QueryResult, QueryResultRow };
 import { agentContextStorage } from "../../shared/identity/agent-context.ts";
 import { ConfigResolver } from "../../shared/runtime/config.ts";
 import { StructuralKeys } from "../../shared/runtime/config-keys.ts";

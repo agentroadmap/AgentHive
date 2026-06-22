@@ -173,7 +173,7 @@ export async function resolveRouteFromRun(
 	opts: RunResolutionOptions,
 ): Promise<ResolvedRouteIdentity | null> {
 	const { runId, db } = opts;
-	const res = await (db as any).query<AgentRunRow>(
+	const res = await db.query<AgentRunRow>(
 		`SELECT
 			resolved_provider,
 			claimed_provider,
@@ -315,7 +315,7 @@ export async function canonicalTransition(
 ): Promise<string> {
 	const payload = buildPayload(params);
 
-	const res = await (db as any).query<{ fn_canonical_transition_insert: string }>(
+	const res = await db.query<{ fn_canonical_transition_insert: string }>(
 		`SELECT roadmap.fn_canonical_transition_insert($1::jsonb) AS fn_canonical_transition_insert`,
 		[JSON.stringify(payload)],
 	);
@@ -346,7 +346,7 @@ export async function canonicalTransitionWithEvent(
 ): Promise<{ eventId: string; proposalEventId: bigint }> {
 	const eventId = await canonicalTransition(db, params);
 
-	const evtRes = await (db as any).query<{ id: string }>(
+	const evtRes = await db.query<{ id: string }>(
 		`INSERT INTO roadmap_proposal.proposal_event
 			(proposal_id, event_type, payload, ledger_event_id)
 		VALUES ($1, $2, $3::jsonb, $4::uuid)
