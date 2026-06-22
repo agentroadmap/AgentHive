@@ -105,7 +105,7 @@
     "gate:full:smoke": "bash scripts/ci/gate.sh --full --mcp-smoke",
     "check:hardcoded": "bash scripts/check-hardcoded.sh",
     "check:credential-env": "bash scripts/check-credential-env.sh",
-    "check:migrations": "tsx scripts/check-migration-prefixes.ts",
+    "check:migrations": "node --import jiti/register scripts/check-migration-prefixes.ts",
     "migrate": "node --import jiti/register scripts/migrate.ts",
     "migrate:status": "node --import jiti/register scripts/migrate.ts --status",
     "migrate:dry-run": "node --import jiti/register scripts/migrate.ts --dry-run",

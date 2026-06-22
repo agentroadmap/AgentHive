@@ -175,6 +175,20 @@ migration-continuity-check:
     paths:
       - node_modules/
 
+# P4664 AC-3/AC-5: BLOCKING migration gate. Detects duplicate numeric prefixes
+# with differing checksums (the 254-collision bug class). NO allow_failure —
+# this gate must fail the pipeline. Runs DB-free (collision detection needs no DB).
+migrate-check:
+  stage: check
+  script:
+    - npm ci
+    - npm run migrate:check
+    - npm run check:migrations
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
+
 message-type-drift:
   stage: check
   script:

@@ -3,14 +3,25 @@
 // database/migrations/ is legacy (pre-P753) — duplicate prefixes there are pre-existing.
 // Rollback files (.rollback.sql) are excluded — they share prefix with their parent by design.
 // Pre-existing collisions from before this check existed are listed in migration-prefix-exceptions.json.
-import { readdirSync, existsSync, readFileSync } from "fs";
+import { existsSync, readdirSync, readFileSync } from "fs";
 import { join } from "path";
 
-const migrationsDir = join(import.meta.dirname ?? process.cwd(), "../scripts/migrations");
-const exceptionsPath = join(import.meta.dirname ?? process.cwd(), "../scripts/migration-prefix-exceptions.json");
+const migrationsDir = join(
+	import.meta.dirname ?? process.cwd(),
+	"../scripts/migrations",
+);
+const exceptionsPath = join(
+	import.meta.dirname ?? process.cwd(),
+	"../scripts/migration-prefix-exceptions.json",
+);
 
 const files = readdirSync(migrationsDir)
-	.filter((f) => f.endsWith(".sql") && !f.includes(".rollback."))
+	.filter(
+		(f) =>
+			f.endsWith(".sql") &&
+			!f.includes(".rollback.") &&
+			!f.includes(".SUPERSEDED."),
+	)
 	.sort();
 
 const exemptPrefixes: Set<string> = new Set(

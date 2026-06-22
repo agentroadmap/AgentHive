@@ -89,7 +89,8 @@ failure-mode table: `docs/architecture/mcp-liaison-topology.md`.
 | `src/shared/` | shared types, constants, utilities | code imported from both core and apps |
 | `database/ddl/` | schema DDL and numbered rollout SQL | schema-qualified, idempotent, numbered files |
 | `database/dml/` | initialization data and seed-like artifacts | reference data, seeds |
-| `database/migrations/` | newer numbered migrations | one logical migration per file |
+| `scripts/migrations/` | **canonical** numbered migrations (the active runner; see §6.0) | `NNN-pXXXX-slug.sql`, one logical migration per file |
+| `database/migrations/` | LEGACY — never applied by the active runner (see §6.0) | do not add new migrations here |
 | `docs/architecture/` | canonical architecture documents | durable design docs that survive multiple proposals (e.g., [`mcp-liaison-topology.md`](docs/architecture/mcp-liaison-topology.md) — P1095) |
 | `docs/governance/` | constitution, decisions log, agent onboarding | durable governance |
 | `docs/pillars/` | pillar/proposal architecture docs | per-pillar canonical docs |
@@ -516,6 +517,17 @@ Operators who need to override must add `{"phase_gate_override": true, "reason":
 proposal `audit` column and call `fn_check_phase_gate` again — it will pass on override.
 
 ## 6. Database Conventions
+
+### 6.0 Canonical migration ledger (P4664)
+
+**`roadmap.schema_migration` is the one canonical migration ledger; `scripts/migrations/` is the one canonical migration directory.**
+
+Everything else is retired or legacy:
+
+- `roadmap.migration_history` is **RETIRED** — read-only and locked (P4625 row-level trigger + P4664 statement-level guard + write-privilege revoke, migration `317-p4664-lock-noncanonical-ledger.sql`). Do not write to it.
+- `database/migrations/` is **LEGACY** — the active runner (`scripts/migrate.ts`) never applies it. Never add new migrations there (CI fails the PR — see the "Legacy migration directory guard").
+
+Write the ledger only through `scripts/migrate.ts` (`npm run migrate`). Migration files use `NNN-pXXXX-slug.sql`; rollbacks live in `scripts/migrations/rollback/`; `.SUPERSEDED.sql` files are retained history and are never applied. Duplicate numeric prefixes with differing checksums are a **blocking** release gate (`npm run migrate:check`, AC-3); the full file-by-file classification of both migration roots is in `scripts/migrations/LEDGER_RECONCILIATION.md`.
 
 ### 6.0a Provider/agency identity is DB-sourced (P743)
 

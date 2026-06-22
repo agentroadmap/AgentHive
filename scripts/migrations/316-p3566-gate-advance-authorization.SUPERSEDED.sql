@@ -1,4 +1,26 @@
--- Migration 254 — P3566: Gate-advance authorization integrity (non-terminal gates)
+-- ============================================================================
+-- SUPERSEDED — DO NOT APPLY (renumbered 254 -> 316 by P4664, 2026-06-22)
+--
+-- This file originally shipped as `254-p3566-gate-advance-authorization.sql`,
+-- colliding on prefix 254 with `254-p1859-usage-probe-columns.sql` (which WAS
+-- ledgered in roadmap.schema_migration). Because of the prefix collision this
+-- file was NEVER ledgered, so its objects (fn_actor_is_independent,
+-- fn_has_unresolved_blocking, fn_guard_nonterminal_gate_advance_on_decision)
+-- were only ad-hoc / partially applied — the canonical 254-collision incident.
+--
+-- Its functionality was subsequently re-delivered by the ledgered P3566 chain:
+--   270-p3566-gate-advance-authorization-integrity.sql  (ledgered)
+--   289-p3566-gate-advance-integrity.sql                (ledgered)
+--   298-p3566-gate-advance-integrity-audit.sql          (ledgered)
+-- All three of those objects are present in the live DB via that chain.
+--
+-- Retained for historical traceability only. Classified SUPERSEDED in
+-- scripts/migrations/LEDGER_RECONCILIATION.md. The `.SUPERSEDED.sql` suffix and
+-- new 316 prefix remove the prefix-254 collision so `npm run migrate:check`
+-- passes. Do not re-apply; do not re-ledger.
+-- ============================================================================
+--
+-- Migration 254 (historical) — P3566: Gate-advance authorization integrity (non-terminal gates)
 --
 -- Problem (P3535 incident, 2026-06-16):
 --   'claude-workspace-maintainer' self-approved (proposal_reviews verdict='approve')

@@ -94,6 +94,15 @@ jobs:
           fi
           echo "Legacy migration directory guard: no new SQL files in database/migrations/ — OK."
 
+      # P4664 AC-3/AC-5: BLOCKING migration ledger gate. Detects duplicate numeric
+      # prefixes with differing checksums (the 254-collision bug class that left
+      # 254-p3566 un-ledgered). DB-free collision detection — runs on every PR.
+      # Intentionally NOT marked continue-on-error: this gate must fail the build.
+      - name: Migration duplicate-prefix gate (P4664 AC-3)
+        run: |
+          npm run migrate:check
+          npm run check:migrations
+
       # P1107 AC-8: MCP binary bundle gate. esbuild catches dup-declaration corruption
       # that tsc misses (src/apps/mcp-server excluded from tsconfig.check.json).
       # Runs on every PR/push to main; fails fast with the conflicting identifier named.
