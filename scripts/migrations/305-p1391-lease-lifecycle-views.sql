@@ -37,11 +37,11 @@ CREATE OR REPLACE VIEW roadmap_proposal.v_proposal_review_rounds AS
 SELECT
   p.id                                                          AS proposal_id,
   p.display_id,
-  COUNT(*) FILTER (WHERE gdl.decision = 'hold')                 AS hold_count,
-  COUNT(*) FILTER (WHERE gdl.decision = 'reject')               AS reject_count,
+  COUNT(*) FILTER (WHERE gdl.decision IN ('hold', 'request_for_change')) AS hold_count,
+  COUNT(*) FILTER (WHERE gdl.decision = 'reject')                        AS reject_count,
   1
-    + COUNT(*) FILTER (WHERE gdl.decision = 'hold')
-    + COUNT(*) FILTER (WHERE gdl.decision = 'reject')           AS review_round
+    + COUNT(*) FILTER (WHERE gdl.decision IN ('hold', 'request_for_change'))
+    + COUNT(*) FILTER (WHERE gdl.decision = 'reject')                    AS review_round
 FROM roadmap_proposal.proposal p
 LEFT JOIN roadmap_proposal.gate_decision_log gdl
   ON gdl.proposal_id = p.id
@@ -49,8 +49,9 @@ GROUP BY p.id, p.display_id;
 
 COMMENT ON VIEW roadmap_proposal.v_proposal_review_rounds IS
   'P1391 AC-6: per-proposal hold/reject counts from gate_decision_log and a '
-  '1-based review_round (1 + holds + rejects). Keys off the live decision vocab '
-  '(decision=''hold''/''reject''). Read-only; no triggers, no writes.';
+  '1-based review_round (1 + holds + rejects). hold_count counts legacy ''hold'' '
+  'AND canonical ''request_for_change'' so it is correct before AND after the '
+  '(operator-gated) AC-17/18 vocab migration. Read-only; no triggers, no writes.';
 
 -- ── AC-7: stale active-but-idle proposals ───────────────────────────────────
 -- A proposal is stale iff: maturity='active' AND modified_at is older than the
