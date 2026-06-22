@@ -19,6 +19,7 @@
 
 import { createHash } from "node:crypto";
 import { query } from "../../infra/postgres/pool.ts";
+import { isDestructiveControlAction } from "./operator-actions.ts";
 
 export type OperatorAuthDecision =
 	| "allow"
@@ -96,7 +97,10 @@ async function logAudit(args: {
 		);
 	} catch (err) {
 		// Auditing must never block the request path.
-		console.error("[operator-auth] audit insert failed:", (err as Error).message);
+		console.error(
+			"[operator-auth] audit insert failed:",
+			(err as Error).message,
+		);
 	}
 }
 
@@ -249,7 +253,9 @@ export async function authorizeOperator(
 	}
 
 	const allowed = row.allowed_actions ?? [];
-	const actionAllowed = allowed.includes("*") || allowed.includes(ctx.action);
+	const matchedExact = allowed.includes(ctx.action);
+	const matchedWildcard = !matchedExact && allowed.includes("*");
+	const actionAllowed = matchedExact || matchedWildcard;
 	if (!actionAllowed) {
 		const out = denyOutcome(
 			`Action '${ctx.action}' not in allowed_actions for operator '${row.operator_name}'.`,
@@ -280,7 +286,7 @@ export async function authorizeOperator(
 	) {
 		const out = denyOutcome(
 			`project scope: token scoped to project ${row.scoped_project_id}, ` +
-			`caller targets project ${ctx.targetProjectId}.`,
+				`caller targets project ${ctx.targetProjectId}.`,
 		);
 		await logAudit({
 			action: ctx.action,
@@ -312,6 +318,24 @@ export async function authorizeOperator(
 		failureReason: null,
 		httpStatus: 200,
 	};
+
+	// P4509 AC-6: a wildcard ('*') token authorizing a destructive control
+	// action is a "concentrated credential". Emit an explicit, queryable audit
+	// marker in request_summary so wildcard use against destructive endpoints is
+	// distinguishable from least-privilege granular grants. The token SECRET is
+	// never logged — only its id/operator_name and this boolean marker.
+	const concentratedCredential =
+		matchedWildcard && isDestructiveControlAction(ctx.action);
+	const allowSummary: Record<string, unknown> = {
+		...(ctx.requestSummary ?? {}),
+	};
+	if (concentratedCredential) {
+		allowSummary.wildcard_concentrated_credential = true;
+		allowSummary.authorized_via = "wildcard";
+	} else if (matchedExact) {
+		allowSummary.authorized_via = "granular";
+	}
+
 	await logAudit({
 		action: ctx.action,
 		decision: out.decision,
@@ -319,7 +343,7 @@ export async function authorizeOperator(
 		tokenId: out.tokenId,
 		targetKind: ctx.targetKind,
 		targetIdentity: ctx.targetIdentity,
-		requestSummary: ctx.requestSummary,
+		requestSummary: allowSummary,
 		remoteAddr,
 		responseStatus: 200,
 		failureReason: null,
@@ -342,7 +366,7 @@ export async function requireOperator(
 	const message =
 		outcome.decision === "unconfigured"
 			? "Operator auth is not configured. Insert a row into roadmap.operator_token to enable privileged actions."
-			: outcome.failureReason ?? "Forbidden";
+			: (outcome.failureReason ?? "Forbidden");
 	const rejected = Response.json(
 		{
 			error: message,
