@@ -68,6 +68,11 @@ import { enqueueNotification } from "../../core/notifications/enqueue.ts";
 import { runObservabilityAlertTick } from "../../infra/agency/observability-alerting.ts";
 import type { Client as PgClient } from "pg";
 import { hashOperatorToken, requireOperator } from "./operator-auth.ts";
+import {
+	isGranularControlCutoverEnabled,
+	resolveControlAction,
+	validateAllowedActions,
+} from "./operator-actions.ts";
 import type {
 	ProjectScope,
 	ServerContext,
@@ -1882,11 +1887,19 @@ export class RoadmapServer {
 					{ status: 400 },
 				);
 			}
-			const allowedActions =
-				Array.isArray(body.allowed_actions) &&
-				body.allowed_actions.every((s: unknown) => typeof s === "string")
-					? (body.allowed_actions as string[])
-					: ["*"];
+			// P4509 AC-2: validate allowed_actions through the SHARED canonical
+			// validator (same code path as the CLI) so unknown / typo'd actions
+			// are rejected at issue time. Default to ['*'] only when omitted.
+			const rawAllowed =
+				body.allowed_actions === undefined ? ["*"] : body.allowed_actions;
+			const validation = validateAllowedActions(rawAllowed);
+			if (!validation.ok) {
+				return Response.json(
+					{ error: validation.message, invalid_actions: validation.invalid },
+					{ status: 400 },
+				);
+			}
+			const allowedActions = validation.actions;
 			const expiresAt =
 				typeof body.expires_at === "string" && body.expires_at.length > 0
 					? body.expires_at
@@ -4190,10 +4203,19 @@ export class RoadmapServer {
 	 * Body: { agency_id, reason }
 	 */
 	private async handleControlSuspendAgency(req: Request): Promise<Response> {
-		const auth = await requireOperator(req, { action: "control.stop" });
+		// P4509 AC-1/AC-7: authorize on the granular `suspend-agency` action once
+		// the token-backfill migration is ledgered; otherwise stay on legacy
+		// `control.stop` so pre-existing tokens are not locked out before cutover.
+		const cutover = await isGranularControlCutoverEnabled(query);
+		const action = resolveControlAction("suspend-agency", cutover);
+		const body = await req.clone().json().catch(() => ({})) as Record<string, unknown>;
+		const auth = await requireOperator(req, {
+			action,
+			targetKind: "agency",
+			targetIdentity: typeof body.agency_id === "string" ? body.agency_id : undefined,
+		});
 		if (auth.rejected) return auth.rejected;
 		try {
-			const body = await req.json() as Record<string, unknown>;
 			const agencyId = typeof body.agency_id === "string" ? body.agency_id : "";
 			const reason = typeof body.reason === "string" ? body.reason : undefined;
 			if (!agencyId) {
@@ -4213,10 +4235,16 @@ export class RoadmapServer {
 	 * Body: { host_id, grace_seconds?, reason }
 	 */
 	private async handleControlDrainHost(req: Request): Promise<Response> {
-		const auth = await requireOperator(req, { action: "control.stop" });
+		const cutover = await isGranularControlCutoverEnabled(query);
+		const action = resolveControlAction("drain-host", cutover);
+		const body = await req.clone().json().catch(() => ({})) as Record<string, unknown>;
+		const auth = await requireOperator(req, {
+			action,
+			targetKind: "host",
+			targetIdentity: typeof body.host_id === "string" ? body.host_id : undefined,
+		});
 		if (auth.rejected) return auth.rejected;
 		try {
-			const body = await req.json() as Record<string, unknown>;
 			const host = typeof body.host_id === "string" ? body.host_id : "";
 			const graceSeconds = typeof body.grace_seconds === "number" ? body.grace_seconds : 0;
 			const reason = typeof body.reason === "string" ? body.reason : undefined;
@@ -4242,10 +4270,16 @@ export class RoadmapServer {
 	 * Body: { dispatch_id, reason }
 	 */
 	private async handleControlCancelDispatch(req: Request): Promise<Response> {
-		const auth = await requireOperator(req, { action: "control.stop" });
+		const cutover = await isGranularControlCutoverEnabled(query);
+		const action = resolveControlAction("cancel-dispatch", cutover);
+		const body = await req.clone().json().catch(() => ({})) as Record<string, unknown>;
+		const auth = await requireOperator(req, {
+			action,
+			targetKind: "dispatch",
+			targetIdentity: body.dispatch_id != null ? String(body.dispatch_id) : undefined,
+		});
 		if (auth.rejected) return auth.rejected;
 		try {
-			const body = await req.json() as Record<string, unknown>;
 			const dispatchId = Number(body.dispatch_id);
 			const reason = typeof body.reason === "string" ? body.reason : undefined;
 			if (!dispatchId || Number.isNaN(dispatchId)) {
@@ -4265,10 +4299,16 @@ export class RoadmapServer {
 	 * Body: { worker_id, signal?, reason }
 	 */
 	private async handleControlTerminateWorker(req: Request): Promise<Response> {
-		const auth = await requireOperator(req, { action: "control.stop" });
+		const cutover = await isGranularControlCutoverEnabled(query);
+		const action = resolveControlAction("terminate-worker", cutover);
+		const body = await req.clone().json().catch(() => ({})) as Record<string, unknown>;
+		const auth = await requireOperator(req, {
+			action,
+			targetKind: "worker",
+			targetIdentity: typeof body.worker_id === "string" ? body.worker_id : undefined,
+		});
 		if (auth.rejected) return auth.rejected;
 		try {
-			const body = await req.json() as Record<string, unknown>;
 			const workerIdentity = typeof body.worker_id === "string" ? body.worker_id : "";
 			const signal = typeof body.signal === "string" ? body.signal : "SIGTERM";
 			const reason = typeof body.reason === "string" ? body.reason : undefined;
