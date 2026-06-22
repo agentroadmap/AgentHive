@@ -11,6 +11,7 @@
  *     TS-6   AC-23: removes backfill UPDATE on proposal_state_transitions
  *     TS-7   AC-37: proposal-storage-v2.ts calls canonicalTransition with maturity_set in setMaturity
  *     TS-8   AC-32: reeval-handlers.ts calls canonicalTransition post-COMMIT for revise/obsolete
+ *     TS-9   AC-38: mig 311 documents gate-pause-only writes as excluded from canonical ledger
  *
  *   Live-DB (AGENTHIVE_ALLOW_LIVE_DB=1, migs 306-315 must be applied):
  *     DB-1   AC-5:  fn_canonical_transition_insert rejects reason_code='decision' + empty rationale
@@ -36,6 +37,7 @@ const MIG_DIR = join(__dirname, "..");
 const SRC_DIR = join(__dirname, "..", "..", "..", "src");
 
 const mig314 = readFileSync(join(MIG_DIR, "314-p4668-fn-idempotency-fix.sql"), "utf8");
+const mig311 = readFileSync(join(MIG_DIR, "311-p4668-enforcement.sql"), "utf8");
 const mig310 = readFileSync(join(MIG_DIR, "310-p4668-dual-write-shim.sql"), "utf8");
 const postWorkOffer = readFileSync(
 	join(SRC_DIR, "core", "pipeline", "post-work-offer.ts"),
@@ -128,6 +130,19 @@ describe("P4668 AC-32: reeval-handlers canonical cutover text-scan", () => {
 
 	it("TS-8c: emits canonical event for obsolete outcome with reason_code=decision", () => {
 		expect(reevalHandlers).toMatch(/reeval-obsolete/);
+	});
+});
+
+describe("P4668 AC-38: gate-pause scope design decision text-scan", () => {
+	it("TS-9: mig 311 documents gate-pause-only writes as excluded from canonical ledger", () => {
+		// The sentinel line must be present — proves the scope decision is on record.
+		expect(mig311).toMatch(/AC-38-SCOPE-DECISION.*gate_scanner_paused.*EXCLUDED/);
+		// All 5 excluded code paths must be enumerated.
+		expect(mig311).toMatch(/convergence_guard/);
+		expect(mig311).toMatch(/circuit_breaker/);
+		expect(mig311).toMatch(/state-machine\.halt/);
+		expect(mig311).toMatch(/state-machine\.resume/);
+		expect(mig311).toMatch(/hive-cli.*domains.*stop|stop.*handlers.*proposal/s);
 	});
 });
 

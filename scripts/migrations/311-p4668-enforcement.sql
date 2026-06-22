@@ -1,5 +1,5 @@
 -- ============================================================================
--- Migration 311 — P4668 AC-22/AC-23/AC-24/AC-28: Direct-write enforcement
+-- Migration 311 — P4668 AC-22/AC-23/AC-24/AC-28/AC-38: Direct-write enforcement
 -- ----------------------------------------------------------------------------
 -- Step 6 of 8 in the P4668 rollout:
 --   306: ledger DDL + fn_canonical_transition_insert
@@ -37,6 +37,11 @@
 --      the sole DB-layer writer — it is explicitly authorised as the dual-write
 --      shim and will be retired in a later migration when the TS layer is fully
 --      migrated.
+--
+--   5. AC-38: Gate-pause-only writes EXCLUDED from canonical ledger scope.
+--      Five code paths write gate_scanner_paused / gate_paused_by / gate_paused_at
+--      WITHOUT changing proposal.status or proposal.maturity. These are
+--      EXPLICITLY EXCLUDED from canonical transition enforcement (see section 5).
 --
 -- ROLLBACK: scripts/migrations/rollback/311-p4668-enforcement.rollback.sql
 -- ============================================================================
@@ -116,6 +121,67 @@ GRANT SELECT ON roadmap_proposal.v_enforcement_preflight
 --     exploited by application code to write a canonical ledger row because
 --     INSERT on proposal_transition_ledger is now revoked. AC-22 is satisfied:
 --     no non-canonical caller can circumvent the guard.
+
+-- ── 5. AC-38: Gate-pause-only writes — EXCLUDED from canonical ledger scope ────
+-- Five TypeScript call sites write gate_scanner_paused / gate_paused_by /
+-- gate_paused_at WITHOUT changing proposal.status or proposal.maturity.
+-- These are EXCLUDED from the canonical transition ledger with the following
+-- design decision and rationale.
+--
+-- EXCLUDED PATHS (no status/maturity change, no canonical ledger event required):
+--   A. src/core/pipeline/post-work-offer.ts (convergence_guard pause)
+--      SQL: UPDATE proposal SET gate_scanner_paused=true, gate_paused_by='convergence_guard'
+--      Trigger: automated dispatch safety — fires when ≥N blocking reviews accumulate.
+--
+--   B. src/core/pipeline/post-work-offer.ts (circuit_breaker pause)
+--      SQL: UPDATE proposal SET gate_scanner_paused=true, gate_paused_by='circuit_breaker'
+--      Trigger: automated dispatch safety — fires when ≥N unknown-failure runs/hr.
+--
+--   C. src/apps/server/index.ts (gate-pause REST endpoint, state-machine.halt action)
+--      SQL: UPDATE proposal SET gate_scanner_paused=true, gate_paused_by=$2
+--      Trigger: explicit operator or board-UI action to halt gate scanning.
+--
+--   D. src/apps/server/index.ts (gate-resume REST endpoint, state-machine.resume action)
+--      SQL: UPDATE proposal SET gate_scanner_paused=false, gate_paused_by=NULL
+--      Trigger: explicit operator or board-UI action to resume gate scanning.
+--
+--   E. src/apps/hive-cli/domains/stop/handlers/proposal.ts (CLI stop handler)
+--      SQL: UPDATE proposal SET gate_scanner_paused=true, gate_paused_by=...
+--      Trigger: operator CLI 'stop' command.
+--
+-- DESIGN DECISION — EXCLUSION RATIONALE:
+--   1. SCOPE: The canonical transition ledger tracks proposal LIFECYCLE events
+--      (status and maturity changes). gate_scanner_paused is an OPERATIONAL
+--      DISPATCH field, not a lifecycle field — it controls whether the gate
+--      scanner will dispatch offers for this proposal, but it does NOT change
+--      the proposal's lifecycle position (status/maturity remain unchanged).
+--
+--   2. AC-35 BOUNDARY: Gate-pause state IS captured in canonical events WHERE
+--      it accompanies a status/maturity change. Specifically, the
+--      gate_pause_demotion event_kind (post-work-offer.ts premature-gate
+--      demotion, maturity='mature'→'new') records the cleared gate_scanner_paused,
+--      gate_paused_by, and gate_paused_at values in additional_state_changes.
+--      That is the ONLY gate-pause + lifecycle overlap; it is already covered.
+--
+--   3. DOUBLE-COUNT RISK: Routing these 5 paths through canonical would log
+--      a 'maturity_set' or ancillary event on every automated pause (convergence,
+--      circuit-breaker) — which fires multiple times per proposal per hour —
+--      flooding the ledger with operational noise that obscures the lifecycle
+--      audit trail the ledger is designed to provide.
+--
+--   4. FUTURE GATE-PAUSE AUDIT: If a dedicated gate-pause audit trail is needed
+--      it should be implemented as a separate gate_pause_audit table or as rows
+--      in proposal_event with a dedicated event_type='gate_scanner_paused' —
+--      NOT as canonical transition ledger events.
+--
+-- CI LINT COVERAGE (AC-38 requirement):
+--   The p4668-direct-write-exemptions.json exemption list covers these paths
+--   by category: they are gate_scanner_paused writes (NOT proposal_transition_ledger
+--   inserts or proposal.status/maturity updates) and are therefore OUTSIDE the
+--   scope of the canonical-ledger lint check, which only flags direct INSERT into
+--   proposal_transition_ledger and direct UPDATE proposal SET status/maturity.
+--   The exemption file documents this scope boundary explicitly.
+-- AC-38-SCOPE-DECISION: gate_scanner_paused writes are EXCLUDED from canonical ledger
 
 -- Stamp the exclusion decision as a table comment so it survives code churn.
 COMMENT ON FUNCTION roadmap.fn_shadow_write_to_ledger() IS
