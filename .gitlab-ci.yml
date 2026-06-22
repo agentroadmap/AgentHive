@@ -165,7 +165,14 @@ binary-bundle-check:
     paths:
       - node_modules/
 
-migration-continuity-check:
+# P4626 Gates 1+2 (continuity + checksum) — BLOCKING. Verifies every forward
+# migration on disk is recorded in the CANONICAL ledger (roadmap.schema_migration,
+# P4664 §6.0) with a matching checksum. Pre-existing drift is grandfathered in
+# scripts/migration-continuity-baseline.json (warn→block); NEW drift fails.
+# DB-free (no DB in CI) → checks SKIP; the prefix + semantic-writer gates still
+# block. This is the SINGLE continuity job — the prior duplicate allow_failure
+# `migration-continuity` job was removed (P4626 AC-7).
+migration-continuity:
   stage: check
   script:
     - npm ci
@@ -175,15 +182,30 @@ migration-continuity-check:
     paths:
       - node_modules/
 
-# P4664 AC-3/AC-5: BLOCKING migration gate. Detects duplicate numeric prefixes
-# with differing checksums (the 254-collision bug class). NO allow_failure —
-# this gate must fail the pipeline. Runs DB-free (collision detection needs no DB).
-migrate-check:
+# P4626 Gate 3 / P4664 AC-3/AC-5: BLOCKING. Detects duplicate numeric prefixes
+# with differing checksums (the 254-collision bug class). NO allow_failure.
+# Runs DB-free (collision detection needs no DB).
+migration-prefix:
   stage: check
   script:
     - npm ci
     - npm run migrate:check
     - npm run check:migrations
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
+
+# P4626 Gate 4: BLOCKING semantic-writer detection. Fails when a NEW migration
+# CREATE-OR-REPLACEs a DB object already defined by another migration (the
+# last-writer-wins governance-drop hazard, e.g. fn_guard_gate_advance × 6).
+# Known offenders are grandfathered in scripts/migration-semantic-writers-allowlist.json
+# (warn→block). NO allow_failure. Runs DB-free.
+migration-semantic-writers:
+  stage: check
+  script:
+    - npm ci
+    - npm run check:semantic-writers
   cache:
     key: ${CI_COMMIT_REF_SLUG}
     paths:
@@ -198,17 +220,6 @@ message-type-drift:
     key: ${CI_COMMIT_REF_SLUG}
     paths:
       - node_modules/
-
-migration-continuity:
-  stage: check
-  script:
-    - npm ci
-    - npm run audit:migration-continuity
-  cache:
-    key: ${CI_COMMIT_REF_SLUG}
-    paths:
-      - node_modules/
-  allow_failure: true
 
 # ─── Stage 2: Test ────────────────────────────────────────────
 test:

@@ -113,6 +113,7 @@
     "deploy": "bash scripts/deploy.sh",
     "check:message-type-drift": "node --import jiti/register scripts/check-message-type-drift.ts",
     "check:migration-continuity": "node --import jiti/register scripts/verify-migration-continuity.ts",
+    "check:semantic-writers": "node --import jiti/register scripts/detect-semantic-writers.ts",
     "check:capability-coverage": "node --import jiti/register scripts/orchestrator-capability-coverage-check.ts",
     "scan": "node --import jiti/register scripts/scan-hardcoding.ts",
     "scan:workflow-states": "node --import jiti/register scripts/scan-hardcoding.ts --rule-tag workflow --fail-on high --baseline .workflow-states-baseline.jsonl",
