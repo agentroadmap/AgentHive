@@ -67,10 +67,10 @@ import {
 import { registerTestingTools } from "./tools/testing/index.ts";
 import { registerWorkflowTools } from "./tools/workflow/index.ts";
 import { registerWorktreeMergeTools } from "./tools/worktree-merge/index.ts";
+import { isClearanceAllowed } from "./types.ts";
 import type {
 	CallToolResult,
 	GetPromptResult,
-	isClearanceAllowed,
 	ListPromptsResult,
 	ListResourcesResult,
 	ListResourceTemplatesResult,
