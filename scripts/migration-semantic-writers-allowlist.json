@@ -1,0 +1,301 @@
+{
+  "_comment": "P4626 Gate 4 allowlist. Objects here are KNOWN pre-existing multi-CREATE-OR-REPLACE offenders, grandfathered so the gate does not red-fail the whole repo on day one. They are reported as WARN. Any object NOT listed here with >1 forward-migration definer BLOCKS CI. Warn->block path: as each chain is consolidated to a single definer, delete its entry; new multi-writers block immediately. Generated from the live migration set at the P4626 baseline.",
+  "baseline": "P4626",
+  "objects": [
+    {
+      "object": "function:roadmap_workforce.fn_claim_work_offer",
+      "definers": 12,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (12 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:roadmap.fn_notify_gate_ready",
+      "definers": 10,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (10 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:roadmap_proposal.fn_lease_clear_maturity_on_release",
+      "definers": 9,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (9 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:roadmap_proposal.fn_apply_gate_advance",
+      "definers": 6,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (6 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:roadmap_proposal.fn_guard_gate_advance",
+      "definers": 6,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (6 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:roadmap.fn_enqueue_mature_proposals",
+      "definers": 6,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (6 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:roadmap.fn_sync_proposal_maturity",
+      "definers": 6,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (6 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "view:roadmap.v_agency_status",
+      "definers": 6,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (6 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:roadmap_workforce.fn_reap_expired_offers",
+      "definers": 5,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (5 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:roadmap.fn_liaison_notify_new_message",
+      "definers": 5,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (5 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:roadmap.fn_pulse",
+      "definers": 5,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (5 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:roadmap_proposal.fn_lease_set_maturity_active",
+      "definers": 4,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (4 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:roadmap_workforce.fn_complete_work_offer",
+      "definers": 4,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (4 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:roadmap_workforce.fn_return_work_offer",
+      "definers": 4,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (4 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:roadmap.fn_a2a_message_notify",
+      "definers": 4,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (4 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "view:roadmap_proposal.v_dispatchable_proposal",
+      "definers": 3,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (3 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "view:roadmap_proposal.v_implicit_gate_ready",
+      "definers": 3,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (3 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "view:roadmap_proposal.v_mature_queue",
+      "definers": 3,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (3 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:roadmap_workforce.fn_reap_stale_registry",
+      "definers": 3,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (3 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "view:roadmap_workforce.v_agency_in_flight",
+      "definers": 3,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (3 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "trigger:trg_gate_ready",
+      "definers": 3,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (3 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:core.fn_runtime_flag_notify",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:dependency.notify_dependency_resolved",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:dependency.set_updated_at",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "view:metrics.v_agent_performance",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "view:metrics.v_combined_metrics",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "view:metrics.v_daily_efficiency",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "view:metrics.v_weekly_efficiency",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "view:roadmap_proposal.v_stage_dwell_stats",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "view:roadmap_proposal.v_unified_dispatch_pool",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:roadmap_workforce.fn_activate_work_offer",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:roadmap_workforce.fn_auto_charter_team",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:roadmap_workforce.fn_renew_lease",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "view:roadmap_workforce.throttle_until_merged",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "view:roadmap_workforce.v_agent_display_label",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:roadmap.fn_acquire_cubic",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:roadmap.fn_canonical_transition_insert",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:roadmap.fn_guard_terminal_maturity",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:roadmap.fn_init_proposal_maturity",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:roadmap.fn_lease_clear_maturity_on_release",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:roadmap.fn_liaison_next_sequence",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:roadmap.fn_listener_reconcile_drift",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:roadmap.fn_log_proposal_state_change",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:roadmap.fn_message_ledger_set_thread_id",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:roadmap.fn_notify_maturity_change",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "function:roadmap.fn_proposal_lifecycle_event",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "view:roadmap.gate_decision_log",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "view:roadmap.v_mature_queue",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "view:roadmap.v_proposal_full",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "trigger:trg_auto_charter_on_dispatch",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "trigger:trg_cross_project_dependency_updated_at",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "trigger:trg_dependency_kind_catalog_updated_at",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "trigger:trg_dependency_resolved_notify",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "trigger:trg_message_ledger_set_thread_id",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "trigger:trg_notify_maturity_change",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "trigger:trg_proposal_dwell_track",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "trigger:trg_proposal_lifecycle_event",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "trigger:trig_a2a_message_notify",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    },
+    {
+      "object": "view:v_blocked_proposals",
+      "definers": 2,
+      "reason": "Pre-existing multi-writer grandfathered at P4626 baseline (2 definers across the migration history). Consolidate into a single definer to remove from allowlist."
+    }
+  ]
+}
