@@ -109,6 +109,11 @@ async function addIndependentApprove(proposalId: number): Promise<void> {
 const TEST_DISPLAY_PREFIX = "P3326-test-%";
 async function purgeTestLeftovers() {
 	const ids = `SELECT id FROM roadmap_proposal.proposal WHERE display_id ILIKE '${TEST_DISPLAY_PREFIX}'`;
+	// P4668 added proposal_transition_ledger with an FK to proposal — must be
+	// cleared before the proposal row (a gate advance writes a ledger row).
+	await pool.query(
+		`DELETE FROM roadmap_proposal.proposal_transition_ledger WHERE proposal_id IN (${ids})`,
+	);
 	await pool.query(
 		`DELETE FROM roadmap_proposal.proposal_reviews WHERE proposal_id IN (${ids})`,
 	);
@@ -132,6 +137,10 @@ async function getStatus(id: number): Promise<string> {
 }
 
 async function cleanup(proposalId: number) {
+	await pool.query(
+		`DELETE FROM roadmap_proposal.proposal_transition_ledger WHERE proposal_id = $1`,
+		[proposalId],
+	);
 	await pool.query(
 		`DELETE FROM roadmap_proposal.proposal_reviews WHERE proposal_id = $1`,
 		[proposalId],
