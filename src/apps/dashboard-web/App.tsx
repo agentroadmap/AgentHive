@@ -7,6 +7,7 @@ import type {
 } from "../../shared/types";
 import AchievementsView from "./components/AchievementsView";
 import ActivityFeed from "./components/ActivityFeed";
+import AgentCentralDocumentPage from "./components/AgentCentralDocumentPage";
 import AgenciesPage from "./components/AgenciesPage";
 import AgentsPage from "./components/AgentsPage";
 import AppNav from "./components/AppNav";
@@ -393,6 +394,9 @@ export default function App() {
 						</Route>
 						<Route path="/documents">
 							<DocumentsPage />
+						</Route>
+						<Route path="/agentcentral">
+							<AgentCentralDocumentPage />
 						</Route>
 						<Route path="/decisions">
 							<DecisionsPage />

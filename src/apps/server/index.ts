@@ -114,6 +114,7 @@ import {
 	handleProposalRoutes,
 } from "./routes/proposals.ts";
 import { handleContentRoutes } from "./routes/content.ts";
+import { handleAgentCentralDocument } from "./routes/agentcentral-document.ts";
 import {
 	handleBoardRoutes,
 	handleGetSequences,
@@ -805,6 +806,8 @@ export class RoadmapServer {
 					return await this.handleResumeProposalGate(id, req);
 				}
 			}
+			if (pathname === "/api/agentcentral/document" && method === "GET")
+				return await handleAgentCentralDocument();
 			if (pathname === "/api/projects" && method === "GET")
 				return await this.handleListProjects();
 			if (pathname === "/api/projects" && method === "POST")

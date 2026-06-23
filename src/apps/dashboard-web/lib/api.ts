@@ -19,6 +19,43 @@ import type {
 
 const API_BASE = "/api";
 
+// ── AgentCentral Document (agentHive3 proposal tree) ────────────────────────
+export interface AgcDocAcceptanceCriterion {
+	item_number: number;
+	criterion_text: string;
+	status: string;
+}
+export interface AgcDocEdge {
+	display_id: string;
+	title: string;
+	edge_type: string;
+}
+export interface AgcDocNode {
+	id: number;
+	display_id: string;
+	parent_id: number | null;
+	type: string;
+	status: string;
+	maturity: string;
+	priority: number;
+	title: string;
+	summary: string | null;
+	motivation: string | null;
+	design: string | null;
+	drawbacks: string | null;
+	alternatives: string | null;
+	tags: string[];
+	acceptance_criteria: AgcDocAcceptanceCriterion[];
+	deps_out: AgcDocEdge[];
+	deps_in: AgcDocEdge[];
+}
+export interface AgcDocPayload {
+	tenant: string;
+	generated_at: string;
+	total: number;
+	nodes: AgcDocNode[];
+}
+
 export interface ConfigKeyDescriptor {
 	name: string;
 	class: "secret" | "structural" | "registry" | "flag" | "tenant_dsn";
@@ -557,6 +594,23 @@ export class ApiClient {
 		const response = await fetch(`${API_BASE}/docs`);
 		if (!response.ok) {
 			throw new Error("Failed to fetch documentation");
+		}
+		return response.json();
+	}
+
+	async fetchAgentCentralDocument(): Promise<AgcDocPayload> {
+		const response = await fetch(`${API_BASE}/agentcentral/document`);
+		if (!response.ok) {
+			let detail = "";
+			try {
+				const body = await response.json();
+				detail = body?.detail || body?.error || "";
+			} catch {
+				/* ignore */
+			}
+			throw new Error(
+				detail || `Failed to fetch AgentCentral document (${response.status})`,
+			);
 		}
 		return response.json();
 	}

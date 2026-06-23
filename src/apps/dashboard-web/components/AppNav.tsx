@@ -32,6 +32,7 @@ const SECONDARY: NavItem[] = [
 	{ href: "/control", label: "Control" },
 	{ href: "/knowledge", label: "Knowledge" },
 	{ href: "/documents", label: "Documents" },
+	{ href: "/agentcentral", label: "AgentCentral Doc" },
 	{ href: "/decisions", label: "Decisions" },
 	{ href: "/map", label: "Map" },
 	{ href: "/routes", label: "Routes" },
