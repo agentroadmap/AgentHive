@@ -1,4 +1,4 @@
--- 318-p4996-decide-offer-claim-independence.sql
+-- 316-p4996-decide-offer-claim-independence.sql
 -- P4996 (V3.1-S1): Builder≠decider independence as a CLAIM-TIME invariant +
 --                  a `decide` offer-kind.
 --
@@ -556,7 +556,7 @@ END $verify$;
 -- Migration ledger entry.
 -- ---------------------------------------------------------------------------
 INSERT INTO roadmap.schema_migration (filename, checksum, applied_at)
-VALUES ('318-p4996-decide-offer-claim-independence.sql', 'p4996-decide-claim-independence-v1', now())
+VALUES ('316-p4996-decide-offer-claim-independence.sql', 'p4996-decide-claim-independence-v1', now())
 ON CONFLICT (filename) DO NOTHING;
 
 COMMIT;

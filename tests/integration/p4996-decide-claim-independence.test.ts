@@ -10,7 +10,7 @@
  *
  * Fixture pattern mirrors p1438-self-claim-e2e.test.ts: a dedicated scratch project
  * the live orchestrator is NOT subscribed to, scratch agencies + a scratch proposal,
- * full teardown even on failure. The migration-318 functions are applied
+ * full teardown even on failure. The migration-316 functions are applied
  * idempotently in before() (CREATE OR REPLACE, behavior-neutral with the flag OFF);
  * the flag is toggled per-test and forced OFF in teardown so global state is never
  * left ON.
@@ -34,7 +34,7 @@ const DB_URL =
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MIGRATION_PATH = join(
 	__dirname,
-	"../../scripts/migrations/318-p4996-decide-offer-claim-independence.sql",
+	"../../scripts/migrations/316-p4996-decide-offer-claim-independence.sql",
 );
 
 const SCRATCH_PROJECT_ID = 994996;
@@ -147,7 +147,7 @@ before(async () => {
 	if (!LIVE) return;
 	pool = new Pool({ connectionString: DB_URL, max: 10 });
 
-	// Apply migration-318 functions idempotently (CREATE OR REPLACE; behavior-
+	// Apply migration-316 functions idempotently (CREATE OR REPLACE; behavior-
 	// neutral with the flag OFF). The migration file is its own transaction.
 	const sql = readFileSync(MIGRATION_PATH, "utf8");
 	await pool.query(sql);
