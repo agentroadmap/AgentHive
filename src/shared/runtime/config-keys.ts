@@ -727,33 +727,6 @@ export const FlagKeys = {
 		envOverride: true,
 	} satisfies ConfigKey<boolean>,
 
-	// P4996 (V3.1-S1): builder≠decider independence as a CLAIM-TIME invariant for
-	// `decide` (gate-decision) offers. Default OFF. When OFF, fn_claim_work_offer
-	// reproduces P1433 (migration 183) behavior exactly and the push-path mirror in
-	// offer-dispatch-handler.ts is a no-op. When ON, an agency that built a proposal
-	// may not claim that proposal's decide offer (single-agency floor degrades to
-	// different-actor + operator sign-off, never a deadlock). Both the DB trigger
-	// (fn_gate_independence_claim_invariant_enabled) and the TS push-path read this
-	// key so the env>DB>default cascade is consistent across SQL and TS.
-	GATE_INDEPENDENCE_CLAIM_INVARIANT_ENABLED: {
-		name: "AGENTHIVE_GATE_INDEPENDENCE_CLAIM_INVARIANT_ENABLED",
-		class: "flag" as const,
-		parse: (v: string) => {
-			try {
-				return JSON.parse(v) === true;
-			} catch {
-				return v.toLowerCase() === "true" || v === "1";
-			}
-		},
-		required: false,
-		defaultValue: false,
-		description:
-			"P4996: enforce builder≠decider independence at claim-time for `decide` offers. Default OFF.",
-		dbTable: "core.runtime_flag",
-		dbColumn: "value_jsonb",
-		envOverride: true,
-	} satisfies ConfigKey<boolean>,
-
 	// P1391 (verdict-semantics + gate-authority slice): master switch for the
 	// three-verdict gate vocabulary (advance / request_for_change / reject) and
 	// the elevated authorization guard on reject → obsolete. Default OFF.

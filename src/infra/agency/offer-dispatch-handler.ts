@@ -421,51 +421,6 @@ export async function handleOfferDispatch(
 			: undefined) ??
 		resolveWorktree(agencyId);
 	const proposalId = payload.proposal_id ?? undefined;
-
-	// P4996 (V3.1-S1): builder≠decider independence on the PUSH path. Mirrors the
-	// claim-time invariant in fn_claim_work_offer (migration 316) so independence
-	// holds regardless of pull-claim vs push-assignment. Flag-gated (default OFF);
-	// when OFF or for non-decide offers this is a no-op. On a violation we RETURN
-	// the offer (no failure penalty) so an INDEPENDENT agency can pick it up.
-	try {
-		const { checkClaimIndependence } = await import(
-			"../../core/gate/claim-independence.ts"
-		);
-		const indep = await checkClaimIndependence(proposalId, payload.role, agencyId);
-		if (indep.blocked) {
-			logger.warn(
-				`[OfferDispatchHandler] ${agencyId}: P4996 independence refused decide offer=${payload.offer_id} for proposal ${proposalId}: ${indep.reason}`,
-			);
-			await exec(
-				`SELECT roadmap_workforce.fn_return_work_offer($1, $2, $3, $4)`,
-				[
-					payload.dispatch_id,
-					agencyId,
-					payload.claim_token,
-					`gate_independence_violation:${indep.code ?? "BUILDER_AGENCY_AS_DECIDER"}`,
-				],
-			).catch((err) => {
-				logger.error(
-					`[OfferDispatchHandler] ${agencyId}: fn_return_work_offer failed on independence-refuse:`,
-					err instanceof Error ? err.message : err,
-				);
-			});
-			return;
-		}
-		if (indep.code === "SINGLE_AGENCY_FLOOR_ADVISORY") {
-			logger.warn(
-				`[OfferDispatchHandler] ${agencyId}: P4996 single-agency floor for proposal ${proposalId}: ${indep.reason}`,
-			);
-		}
-	} catch (err) {
-		// Fail-open: the claim-time invariant is the authoritative enforcement;
-		// a push-path error must not wedge dispatch.
-		logger.warn(
-			`[OfferDispatchHandler] ${agencyId}: P4996 independence check errored (allowing; claim-time invariant remains authoritative):`,
-			err instanceof Error ? err.message : err,
-		);
-	}
-
 	const capabilities =
 		payload.required_capabilities && payload.required_capabilities.length > 0
 			? payload.required_capabilities
